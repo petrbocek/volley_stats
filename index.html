@@ -1,0 +1,1007 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Volejbal · Statistiky</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+/*
+  SUPABASE — spusť v SQL editoru:
+  ─────────────────────────────────────────────────────────────
+  CREATE TABLE vb_zapasy (
+    id bigserial PRIMARY KEY, created_at timestamptz DEFAULT now(),
+    datum date NOT NULL, soupet text NOT NULL, misto text DEFAULT 'doma',
+    sety_my int DEFAULT 0, sety_oni int DEFAULT 0,
+    set1_my int, set1_oni int, set2_my int, set2_oni int,
+    set3_my int, set3_oni int, set4_my int, set4_oni int,
+    set5_my int, set5_oni int, poznamka text
+  );
+  CREATE TABLE vb_hraci (
+    id bigserial PRIMARY KEY, created_at timestamptz DEFAULT now(),
+    jmeno text NOT NULL, cislo int, pozice text DEFAULT 'smečař',
+    aktivni boolean DEFAULT true
+  );
+  CREATE TABLE vb_statistiky (
+    id bigserial PRIMARY KEY, created_at timestamptz DEFAULT now(),
+    zapas_id bigint REFERENCES vb_zapasy(id) ON DELETE CASCADE,
+    hrac_id bigint REFERENCES vb_hraci(id) ON DELETE CASCADE,
+    smec_pokusy int DEFAULT 0, smec_body int DEFAULT 0, smec_chyby int DEFAULT 0,
+    servis_pokusy int DEFAULT 0, servis_esa int DEFAULT 0, servis_chyby int DEFAULT 0,
+    blok_body int DEFAULT 0, blok_chyby int DEFAULT 0,
+    prijem_perfektni int DEFAULT 0, prijem_dobry int DEFAULT 0, prijem_chyba int DEFAULT 0,
+    vykopy int DEFAULT 0, nahravky int DEFAULT 0,
+    UNIQUE(zapas_id, hrac_id)
+  );
+  ALTER TABLE vb_zapasy DISABLE ROW LEVEL SECURITY;
+  ALTER TABLE vb_hraci DISABLE ROW LEVEL SECURITY;
+  ALTER TABLE vb_statistiky DISABLE ROW LEVEL SECURITY;
+  ─────────────────────────────────────────────────────────────
+*/
+:root{
+  --bg:#080c16;--surface:#0f1523;--surface2:#1a2035;--border:#2a3450;
+  --text:#e8eaf0;--muted:#6b7a99;--accent:#f97316;--accent2:#4dabf7;
+  --accent3:#7950f2;--green:#51cf66;--red:#ff6b6b;--yellow:#ffd43b;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden}
+
+.loading-overlay{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:200;flex-direction:column;gap:14px}
+.loader{width:40px;height:40px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-text{font-size:12px;color:var(--muted);letter-spacing:.5px}
+
+header{padding:16px 24px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);position:sticky;top:0;background:rgba(8,12,22,.97);backdrop-filter:blur(16px);z-index:100}
+.logo{display:flex;align-items:center;gap:10px}
+.logo-icon{width:36px;height:36px;background:var(--accent);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px}
+.logo-name{font-family:'Oswald',sans-serif;font-size:20px;font-weight:700;letter-spacing:1.5px}
+.logo-sub{font-size:10px;color:var(--muted);letter-spacing:2px;text-transform:uppercase;font-weight:600;margin-top:1px}
+.sync-badge{font-size:11px;color:var(--muted);display:flex;align-items:center;gap:6px;padding:5px 12px;border:1px solid var(--border);border-radius:20px}
+.sync-dot{width:7px;height:7px;border-radius:50%;background:var(--green)}
+.sync-dot.syncing{background:var(--yellow);animation:pulse 1s infinite}
+.sync-dot.error{background:var(--red)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+
+nav{display:flex;padding:0 24px;border-bottom:1px solid var(--border);overflow-x:auto;background:rgba(8,12,22,.9)}
+.nav-item{padding:12px 16px;cursor:pointer;font-size:11px;font-weight:700;color:var(--muted);border-bottom:2px solid transparent;transition:all .15s;letter-spacing:.8px;text-transform:uppercase;white-space:nowrap;display:flex;align-items:center;gap:6px}
+.nav-item.active{color:var(--accent);border-bottom-color:var(--accent)}
+.nav-item:hover:not(.active){color:var(--text)}
+
+main{padding:24px;max-width:1200px;margin:0 auto}
+.view{display:none}.view.active{display:block}
+
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:12px;margin-bottom:22px}
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:18px;transition:transform .15s;position:relative;overflow:hidden}
+.stat-card:hover{transform:translateY(-2px)}
+.stat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;border-radius:14px 14px 0 0}
+.stat-card.orange::before{background:var(--accent)}
+.stat-card.blue::before{background:var(--accent2)}
+.stat-card.green::before{background:var(--green)}
+.stat-card.purple::before{background:var(--accent3)}
+.sc-label{font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted);margin-bottom:8px;font-weight:600}
+.sc-value{font-family:'Oswald',sans-serif;font-size:34px;font-weight:700;letter-spacing:-1px;line-height:1;margin-bottom:3px}
+.stat-card.orange .sc-value{color:var(--accent)}
+.stat-card.blue .sc-value{color:var(--accent2)}
+.stat-card.green .sc-value{color:var(--green)}
+.stat-card.purple .sc-value{color:var(--accent3)}
+.sc-sub{font-size:11px;color:var(--muted)}
+
+.split{display:grid;grid-template-columns:300px 1fr;gap:18px;align-items:start}
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px}
+.panel-title{font-family:'Oswald',sans-serif;font-size:16px;font-weight:600;letter-spacing:.5px;margin-bottom:16px;color:var(--text)}
+
+.field{margin-bottom:12px}
+label{display:block;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin-bottom:5px;font-weight:600}
+input,select,textarea{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:9px 12px;font-family:'Inter',sans-serif;font-size:13px;transition:border-color .15s;outline:none}
+input:focus,select:focus,textarea:focus{border-color:var(--accent)}
+select option{background:var(--surface2)}
+.row2{display:flex;gap:10px}.row2 .field{flex:1}
+.row3{display:flex;gap:8px}.row3 .field{flex:1}
+
+.btn{padding:10px 16px;border:none;border-radius:8px;font-family:'Inter',sans-serif;font-weight:700;font-size:12px;cursor:pointer;transition:all .15s;letter-spacing:.3px}
+.btn-primary{background:var(--accent);color:#fff;width:100%;margin-top:4px}
+.btn-primary:hover:not(:disabled){background:#ff8534;transform:translateY(-1px)}
+.btn-primary:disabled{opacity:.5;cursor:not-allowed}
+.btn-secondary{background:var(--surface2);color:var(--text);border:1px solid var(--border);width:100%;margin-top:6px}
+.btn-secondary:hover{background:var(--border)}
+.btn-danger{background:transparent;color:var(--red);border:1px solid rgba(255,107,107,.3);padding:5px 10px;font-size:11px;font-weight:600;border-radius:6px;cursor:pointer;transition:all .15s}
+.btn-danger:hover{background:rgba(255,107,107,.1)}
+.btn-icon{background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;padding:4px 7px;border-radius:6px;transition:all .15s}
+.btn-icon:hover{background:var(--surface2);color:var(--text)}
+
+.table-wrap{background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden}
+.table-header{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.table-title{font-family:'Oswald',sans-serif;font-size:14px;font-weight:600;letter-spacing:.5px}
+.table-sub{font-size:11px;color:var(--muted)}
+table{width:100%;border-collapse:collapse}
+th{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:600;text-align:left;padding:10px 16px;border-bottom:1px solid var(--border);white-space:nowrap}
+th.r,td.r{text-align:right}
+td{padding:11px 16px;border-bottom:1px solid var(--border);font-size:13px}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:rgba(255,255,255,.018)}
+.overflow-x{overflow-x:auto}
+
+.badge{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:.3px}
+.badge-win{background:rgba(81,207,102,.15);color:var(--green);border:1px solid rgba(81,207,102,.3)}
+.badge-loss{background:rgba(255,107,107,.13);color:var(--red);border:1px solid rgba(255,107,107,.25)}
+.badge-home{background:rgba(77,171,247,.13);color:var(--accent2);border:1px solid rgba(77,171,247,.25);font-size:10px;padding:2px 8px}
+.badge-away{background:rgba(249,115,22,.13);color:var(--accent);border:1px solid rgba(249,115,22,.25);font-size:10px;padding:2px 8px}
+.badge-neutral{background:rgba(107,122,153,.13);color:var(--muted);border:1px solid var(--border);font-size:10px;padding:2px 8px}
+
+.sets-display{display:flex;gap:4px;flex-wrap:wrap}
+.set-sc{background:var(--surface2);border:1px solid var(--border);border-radius:5px;padding:2px 7px;font-size:11px;font-family:'Oswald',sans-serif;font-weight:600}
+.set-sc.w{border-color:rgba(81,207,102,.4);color:var(--green)}
+.set-sc.l{border-color:rgba(255,107,107,.3);color:var(--red)}
+
+.players-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(195px,1fr));gap:12px}
+.player-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px;transition:all .15s}
+.player-card:hover{transform:translateY(-2px)}
+.player-card.inactive{opacity:.4}
+.pc-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px}
+.pc-avatar{width:42px;height:42px;border-radius:12px;background:var(--surface2);display:flex;align-items:center;justify-content:center;font-family:'Oswald',sans-serif;font-size:17px;font-weight:700;color:var(--accent);border:2px solid var(--border)}
+.pc-info{flex:1;margin-left:10px}
+.pc-name{font-size:14px;font-weight:700;margin-bottom:2px}
+.pc-pos{font-size:11px;color:var(--muted)}
+.pc-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px}
+.pc-stat{background:var(--surface2);border-radius:8px;padding:7px;text-align:center}
+.pc-stat-val{font-family:'Oswald',sans-serif;font-size:17px;font-weight:600}
+.pc-stat-lbl{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-top:1px}
+.pc-actions{display:flex;gap:6px}
+
+.pos-nahrávač{color:#4dabf7}
+.pos-smečař{color:#f97316}
+.pos-blokař{color:#7950f2}
+.pos-libero{color:#51cf66}
+.pos-univerzál{color:#ffd43b}
+
+.stat-group{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:10px}
+.sg-title{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);font-weight:700;margin-bottom:10px;display:flex;align-items:center;gap:6px}
+.sg-icon{font-size:15px}
+.sg-inputs{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.sg-2{grid-template-columns:repeat(2,1fr)}
+.sg-1{grid-template-columns:1fr 1fr}
+.si-wrap{text-align:center}
+.si-wrap label{font-size:9px;color:var(--muted);letter-spacing:.3px;margin-bottom:4px}
+.si-wrap input{text-align:center;padding:8px 4px;font-size:18px;font-weight:700;font-family:'Oswald',sans-serif;color:var(--text)}
+.si-wrap input:focus{border-color:var(--accent)}
+
+.match-sel-info{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px;font-size:12px;color:var(--muted)}
+.match-sel-info.has-stats{border-color:rgba(81,207,102,.3);color:var(--green)}
+.stats-existing-list{margin-top:14px}
+.se-row{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--surface2);border-radius:8px;margin-bottom:6px;font-size:12px}
+.se-name{font-weight:600}
+.se-vals{color:var(--muted);font-size:11px}
+
+.lb-cat-tabs{display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap}
+.lb-tab{padding:7px 16px;border-radius:20px;font-size:11px;font-weight:700;cursor:pointer;border:1px solid var(--border);color:var(--muted);transition:all .15s;letter-spacing:.3px}
+.lb-tab.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.lb-tab:hover:not(.active){border-color:var(--muted);color:var(--text)}
+.lb-list{background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden}
+.lb-row{display:flex;align-items:center;gap:16px;padding:14px 18px;border-bottom:1px solid var(--border)}
+.lb-row:last-child{border-bottom:none}
+.lb-rank{font-family:'Oswald',sans-serif;font-size:22px;font-weight:700;width:32px;color:var(--muted);text-align:center}
+.lb-rank.gold{color:var(--yellow)}
+.lb-rank.silver{color:#9ca3af}
+.lb-rank.bronze{color:#cd7c3a}
+.lb-info{flex:1}
+.lb-name{font-size:15px;font-weight:700}
+.lb-pos{font-size:11px;color:var(--muted);margin-top:1px}
+.lb-bar{height:3px;background:var(--border);border-radius:2px;margin-top:5px;overflow:hidden;width:100%;max-width:200px}
+.lb-bar-fill{height:100%;background:var(--accent);border-radius:2px;transition:width .6s}
+.lb-val{text-align:right}
+.lb-main{font-family:'Oswald',sans-serif;font-size:26px;font-weight:700;color:var(--accent)}
+.lb-avg{font-size:10px;color:var(--muted);margin-top:1px}
+
+.section-title{font-family:'Oswald',sans-serif;font-size:16px;font-weight:600;letter-spacing:.5px;margin-bottom:14px;color:var(--text)}
+.section-title-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+
+.recent-list{background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden;margin-bottom:18px}
+.recent-row{display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--border);font-size:13px}
+.recent-row:last-child{border-bottom:none}
+.rr-date{font-size:11px;color:var(--muted);width:90px;flex-shrink:0}
+.rr-opp{font-weight:600;flex:1}
+.rr-misto{margin-right:6px}
+.rr-sets{font-family:'Oswald',sans-serif;font-size:16px;font-weight:700;margin-right:4px}
+
+.top-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:22px}
+.top-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:14px;text-align:center}
+.top-cat{font-size:9px;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted);font-weight:600;margin-bottom:8px}
+.top-name{font-size:14px;font-weight:700;margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.top-val{font-family:'Oswald',sans-serif;font-size:30px;font-weight:700;color:var(--accent)}
+.top-metric{font-size:10px;color:var(--muted)}
+
+.toast{position:fixed;bottom:20px;right:20px;background:var(--surface);border:1px solid var(--accent);color:var(--accent);padding:12px 18px;border-radius:10px;font-size:12px;font-weight:600;transform:translateY(80px);opacity:0;transition:all .3s cubic-bezier(.4,0,.2,1);z-index:999;max-width:300px}
+.toast.show{transform:translateY(0);opacity:1}
+.toast.err{border-color:var(--red);color:var(--red)}
+.empty{text-align:center;padding:48px 20px;color:var(--muted)}
+.empty-icon{font-size:40px;margin-bottom:10px;display:block}
+.empty-text{font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px}
+
+.set-row{display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:12px;color:var(--muted);font-weight:600}
+.set-row span{width:42px}
+.set-row input{width:60px;text-align:center;padding:6px 4px;font-family:'Oswald',sans-serif;font-size:15px;font-weight:600}
+
+@media(max-width:768px){
+  header{padding:12px 16px}nav{padding:0 16px}main{padding:16px}
+  .split{grid-template-columns:1fr}.stats-grid{grid-template-columns:1fr 1fr}
+  .players-grid{grid-template-columns:1fr 1fr}.top-grid{grid-template-columns:1fr 1fr}
+}
+@media(max-width:480px){
+  .stats-grid{grid-template-columns:1fr 1fr}.players-grid{grid-template-columns:1fr}
+  .sg-inputs{grid-template-columns:repeat(3,1fr)}
+}
+</style>
+</head>
+<body>
+
+<div class="loading-overlay" id="loading">
+  <div class="loader"></div>
+  <div class="loading-text">Načítám statistiky…</div>
+</div>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">🏐</div>
+    <div>
+      <div class="logo-name">VOLEJBAL</div>
+      <div class="logo-sub">Statistiky</div>
+    </div>
+  </div>
+  <div class="sync-badge">
+    <div class="sync-dot" id="sync-dot"></div>
+    <span id="sync-label">online</span>
+  </div>
+</header>
+
+<nav>
+  <div class="nav-item active" onclick="showTab('prehled')">📊 Přehled</div>
+  <div class="nav-item" onclick="showTab('zapasy')">🏆 Zápasy</div>
+  <div class="nav-item" onclick="showTab('hraci')">👥 Hráči</div>
+  <div class="nav-item" onclick="showTab('statistiky')">📋 Statistiky</div>
+  <div class="nav-item" onclick="showTab('zebricek')">🥇 Žebříček</div>
+</nav>
+
+<main>
+
+<!-- ─── PŘEHLED ─── -->
+<div class="view active" id="view-prehled">
+  <div class="stats-grid">
+    <div class="stat-card orange">
+      <div class="sc-label">Zápasy celkem</div>
+      <div class="sc-value" id="ov-zapasy">0</div>
+      <div class="sc-sub" id="ov-zapasy-sub">tato sezona</div>
+    </div>
+    <div class="stat-card green">
+      <div class="sc-label">Výhry</div>
+      <div class="sc-value" id="ov-vyhry">0</div>
+      <div class="sc-sub" id="ov-uspesnost">úspěšnost —</div>
+    </div>
+    <div class="stat-card blue">
+      <div class="sc-label">Sety vyhráno</div>
+      <div class="sc-value" id="ov-sety-my">0</div>
+      <div class="sc-sub" id="ov-sety-sub">— prohráno</div>
+    </div>
+    <div class="stat-card purple">
+      <div class="sc-label">Hráči v týmu</div>
+      <div class="sc-value" id="ov-hraci">0</div>
+      <div class="sc-sub">aktivní hráči</div>
+    </div>
+  </div>
+
+  <div class="top-grid" id="top-performers"></div>
+
+  <div class="section-title">Posledních 5 zápasů</div>
+  <div class="recent-list" id="recent-matches">
+    <div class="empty"><span class="empty-icon">📅</span><div class="empty-text">Žádné zápasy</div></div>
+  </div>
+</div>
+
+<!-- ─── ZÁPASY ─── -->
+<div class="view" id="view-zapasy">
+  <div class="split">
+    <div class="panel" style="position:sticky;top:76px">
+      <div class="panel-title" id="zapas-form-title">Přidat zápas</div>
+      <div class="field"><label>Datum</label><input type="date" id="z-datum"></div>
+      <div class="field"><label>Soupeř</label><input type="text" id="z-soupet" placeholder="např. TJ Sokol Praha"></div>
+      <div class="field"><label>Místo</label>
+        <select id="z-misto">
+          <option value="doma">🏠 Doma</option>
+          <option value="venku">✈️ Venku</option>
+          <option value="neutral">⚖️ Neutral</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Skóre setů (my : oni)</label>
+        <div id="set-rows">
+          <div class="set-row"><span>Set 1</span><input type="number" id="s1m" min="0" max="50" placeholder="25"><span style="text-align:center">:</span><input type="number" id="s1o" min="0" max="50" placeholder="23"></div>
+          <div class="set-row"><span>Set 2</span><input type="number" id="s2m" min="0" max="50" placeholder="25"><span style="text-align:center">:</span><input type="number" id="s2o" min="0" max="50" placeholder="19"></div>
+          <div class="set-row"><span>Set 3</span><input type="number" id="s3m" min="0" max="50" placeholder=""><span style="text-align:center">:</span><input type="number" id="s3o" min="0" max="50" placeholder=""></div>
+          <div class="set-row"><span>Set 4</span><input type="number" id="s4m" min="0" max="50" placeholder=""><span style="text-align:center">:</span><input type="number" id="s4o" min="0" max="50" placeholder=""></div>
+          <div class="set-row"><span>Set 5</span><input type="number" id="s5m" min="0" max="50" placeholder=""><span style="text-align:center">:</span><input type="number" id="s5o" min="0" max="50" placeholder=""></div>
+        </div>
+        <div style="font-size:10px;color:var(--muted);margin-top:4px">Sety, které se nehrály, nechte prázdné</div>
+      </div>
+      <div class="field"><label>Poznámka</label><input type="text" id="z-poznamka" placeholder="volitelně"></div>
+      <button class="btn btn-primary" id="btn-zapas" onclick="saveZapas()">+ Přidat zápas</button>
+      <button class="btn btn-secondary" id="btn-zapas-cancel" style="display:none" onclick="cancelZapasEdit()">Zrušit úpravy</button>
+    </div>
+    <div>
+      <div class="section-title-row">
+        <div class="section-title">Všechny zápasy</div>
+        <div style="font-size:12px;color:var(--muted)" id="zapasy-count"></div>
+      </div>
+      <div class="table-wrap">
+        <div class="overflow-x">
+          <table>
+            <thead>
+              <tr>
+                <th>Datum</th><th>Soupeř</th><th>Místo</th>
+                <th>Výsledek</th><th>Sety</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="zapasy-table"></tbody>
+          </table>
+          <div id="zapasy-empty" class="empty" style="display:none">
+            <span class="empty-icon">🏐</span>
+            <div class="empty-text">Žádné zápasy</div>
+            <div>Přidej první zápas pomocí formuláře</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── HRÁČI ─── -->
+<div class="view" id="view-hraci">
+  <div class="split">
+    <div class="panel" style="position:sticky;top:76px">
+      <div class="panel-title">Přidat hráče</div>
+      <div class="field"><label>Jméno</label><input type="text" id="h-jmeno" placeholder="Jméno Příjmení"></div>
+      <div class="row2">
+        <div class="field"><label>Číslo dresu</label><input type="number" id="h-cislo" placeholder="7" min="1" max="99"></div>
+        <div class="field"><label>Pozice</label>
+          <select id="h-pozice">
+            <option value="smečař">Smečař</option>
+            <option value="nahrávač">Nahrávač</option>
+            <option value="blokař">Blokař</option>
+            <option value="libero">Libero</option>
+            <option value="univerzál">Univerzál</option>
+          </select>
+        </div>
+      </div>
+      <button class="btn btn-primary" onclick="addHrac()">+ Přidat hráče</button>
+    </div>
+    <div>
+      <div class="section-title-row">
+        <div class="section-title">Tým</div>
+        <div style="font-size:12px;color:var(--muted)" id="hraci-count"></div>
+      </div>
+      <div class="players-grid" id="players-grid"></div>
+      <div id="hraci-empty" class="empty" style="display:none">
+        <span class="empty-icon">👥</span>
+        <div class="empty-text">Žádní hráči</div>
+        <div>Přidej hráče pomocí formuláře</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── STATISTIKY ─── -->
+<div class="view" id="view-statistiky">
+  <div class="split">
+    <div class="panel" style="position:sticky;top:76px">
+      <div class="panel-title">Zadat statistiky</div>
+      <div class="field"><label>Zápas</label>
+        <select id="st-zapas" onchange="onStatZapasChange()">
+          <option value="">— vyber zápas —</option>
+        </select>
+      </div>
+      <div class="field"><label>Hráč</label>
+        <select id="st-hrac" onchange="onStatHracChange()">
+          <option value="">— vyber hráče —</option>
+        </select>
+      </div>
+      <div id="match-stat-info" class="match-sel-info" style="display:none"></div>
+
+      <div id="stat-form" style="display:none">
+        <div class="stat-group">
+          <div class="sg-title"><span class="sg-icon">💥</span> Útok</div>
+          <div class="sg-inputs">
+            <div class="si-wrap"><label>Pokusy</label><input type="number" id="st-smec-pok" min="0" value="0"></div>
+            <div class="si-wrap"><label>Body</label><input type="number" id="st-smec-bod" min="0" value="0"></div>
+            <div class="si-wrap"><label>Chyby</label><input type="number" id="st-smec-chy" min="0" value="0"></div>
+          </div>
+        </div>
+        <div class="stat-group">
+          <div class="sg-title"><span class="sg-icon">🎯</span> Servis</div>
+          <div class="sg-inputs">
+            <div class="si-wrap"><label>Pokusy</label><input type="number" id="st-serv-pok" min="0" value="0"></div>
+            <div class="si-wrap"><label>Esa</label><input type="number" id="st-serv-esa" min="0" value="0"></div>
+            <div class="si-wrap"><label>Chyby</label><input type="number" id="st-serv-chy" min="0" value="0"></div>
+          </div>
+        </div>
+        <div class="stat-group">
+          <div class="sg-title"><span class="sg-icon">🛡️</span> Blok</div>
+          <div class="sg-inputs sg-2">
+            <div class="si-wrap"><label>Body</label><input type="number" id="st-blok-bod" min="0" value="0"></div>
+            <div class="si-wrap"><label>Chyby</label><input type="number" id="st-blok-chy" min="0" value="0"></div>
+          </div>
+        </div>
+        <div class="stat-group">
+          <div class="sg-title"><span class="sg-icon">🤲</span> Příjem</div>
+          <div class="sg-inputs">
+            <div class="si-wrap"><label>Perfektní</label><input type="number" id="st-prij-per" min="0" value="0"></div>
+            <div class="si-wrap"><label>Dobrý</label><input type="number" id="st-prij-dob" min="0" value="0"></div>
+            <div class="si-wrap"><label>Chyby</label><input type="number" id="st-prij-chy" min="0" value="0"></div>
+          </div>
+        </div>
+        <div class="stat-group">
+          <div class="sg-title"><span class="sg-icon">🏃</span> Vykopy &amp; Nahrávky</div>
+          <div class="sg-inputs sg-2">
+            <div class="si-wrap"><label>Vykopy</label><input type="number" id="st-vykopy" min="0" value="0"></div>
+            <div class="si-wrap"><label>Nahrávky</label><input type="number" id="st-nahravky" min="0" value="0"></div>
+          </div>
+        </div>
+        <button class="btn btn-primary" id="btn-stat" onclick="saveStats()">💾 Uložit statistiky</button>
+      </div>
+    </div>
+    <div>
+      <div class="section-title">Statistiky zápasu</div>
+      <div id="stats-match-panel">
+        <div class="empty"><span class="empty-icon">📋</span><div class="empty-text">Vyber zápas</div><div>Pak uvidíš statistiky hráčů</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── ŽEBŘÍČEK ─── -->
+<div class="view" id="view-zebricek">
+  <div class="lb-cat-tabs">
+    <div class="lb-tab active" onclick="showLb('smec_body')">💥 Útok (kills)</div>
+    <div class="lb-tab" onclick="showLb('servis_esa')">🎯 Esa</div>
+    <div class="lb-tab" onclick="showLb('blok_body')">🛡️ Blok</div>
+    <div class="lb-tab" onclick="showLb('vykopy')">🏃 Vykopy</div>
+    <div class="lb-tab" onclick="showLb('nahravky')">🎪 Nahrávky</div>
+    <div class="lb-tab" onclick="showLb('prijem_pct')">🤲 Příjem %</div>
+  </div>
+  <div class="lb-list" id="lb-list">
+    <div class="empty"><span class="empty-icon">🥇</span><div class="empty-text">Žádná data</div></div>
+  </div>
+</div>
+
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const SB_URL='https://fcycbzbzhuslmkfbgryb.supabase.co';
+const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZjeWNiemJ6aHVzbG1rZmJncnliIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgyMjcyNjksImV4cCI6MjA5MzgwMzI2OX0.Ho8tJ0GnL5pcF8uqHlEnuf4Dy6gza03jwrDslVTMrts';
+const H={'apikey':SB_KEY,'Authorization':`Bearer ${SB_KEY}`,'Content-Type':'application/json'};
+
+let state={zapasy:[],hraci:[],stats:[]};
+let editingZapasId=null;
+let currentLbCat='smec_body';
+
+// ── API ──────────────────────────────────────────────────────
+async function api(table,method='GET',body=null,filter='',extra=''){
+  const url=`${SB_URL}/rest/v1/${table}${filter?'?'+filter:''}${extra?(!filter?'?':'')+extra:''}`;
+  const opts={method,headers:{...H}};
+  if(method==='POST')opts.headers['Prefer']='return=representation';
+  if(body)opts.body=JSON.stringify(body);
+  const res=await fetch(url,opts);
+  if(!res.ok){const e=await res.json().catch(()=>{});throw new Error((e&&e.message)||`HTTP ${res.status}`);}
+  const t=await res.text();return t?JSON.parse(t):null;
+}
+
+async function upsert(table,body,conflict){
+  const url=`${SB_URL}/rest/v1/${table}?on_conflict=${conflict}`;
+  const res=await fetch(url,{method:'POST',headers:{...H,'Prefer':'resolution=merge-duplicates,return=representation'},body:JSON.stringify(body)});
+  if(!res.ok){const e=await res.json().catch(()=>{});throw new Error((e&&e.message)||`HTTP ${res.status}`);}
+  const t=await res.text();return t?JSON.parse(t):null;
+}
+
+function syncSt(s){
+  document.getElementById('sync-dot').className='sync-dot'+(s==='syncing'?' syncing':s==='error'?' error':'');
+  document.getElementById('sync-label').textContent=s==='syncing'?'ukládám…':s==='error'?'chyba':'online';
+}
+function toast(msg,err=false){
+  const t=document.getElementById('toast');
+  t.textContent=msg;t.className='toast show'+(err?' err':'');
+  setTimeout(()=>t.classList.remove('show'),2800);
+}
+function setBtn(id,loading,label){const b=document.getElementById(id);if(!b)return;b.disabled=loading;b.textContent=loading?'Ukládám…':label;}
+function n(id){return parseInt(document.getElementById(id).value)||0;}
+function v(id){return document.getElementById(id).value.trim();}
+
+// ── HELPERS ──────────────────────────────────────────────────
+function sum(arr,key){return arr.reduce((s,x)=>s+(Number(x[key])||0),0);}
+
+function playerStats(hracId){
+  const ps=state.stats.filter(s=>s.hrac_id===hracId);
+  const pri_tot=sum(ps,'prijem_perfektni')+sum(ps,'prijem_dobry')+sum(ps,'prijem_chyba');
+  return{
+    zapasy:ps.length,
+    smec_body:sum(ps,'smec_body'),smec_pokusy:sum(ps,'smec_pokusy'),smec_chyby:sum(ps,'smec_chyby'),
+    servis_esa:sum(ps,'servis_esa'),servis_pokusy:sum(ps,'servis_pokusy'),servis_chyby:sum(ps,'servis_chyby'),
+    blok_body:sum(ps,'blok_body'),blok_chyby:sum(ps,'blok_chyby'),
+    prijem_perfektni:sum(ps,'prijem_perfektni'),prijem_dobry:sum(ps,'prijem_dobry'),prijem_chyba:sum(ps,'prijem_chyba'),
+    vykopy:sum(ps,'vykopy'),nahravky:sum(ps,'nahravky'),
+    prijem_pct:pri_tot>0?Math.round((sum(ps,'prijem_perfektni')*3+sum(ps,'prijem_dobry')*2)/(pri_tot*3)*100):0
+  };
+}
+
+function computeSets(z){
+  let m=0,o=0;
+  for(let i=1;i<=5;i++){
+    const sm=Number(z[`set${i}_my`]),so=Number(z[`set${i}_oni`]);
+    if(sm+so>0){if(sm>so)m++;else o++;}
+  }
+  return{sety_my:m,sety_oni:o,vyhra:m>o};
+}
+
+function setScoreHTML(z){
+  const sets=[];
+  for(let i=1;i<=5;i++){
+    const sm=z[`set${i}_my`],so=z[`set${i}_oni`];
+    if(sm!=null&&so!=null&&(sm+so)>0){
+      const w=sm>so;
+      sets.push(`<span class="set-sc ${w?'w':'l'}">${sm}:${so}</span>`);
+    }
+  }
+  return sets.length?`<div class="sets-display">${sets.join('')}</div>`:'—';
+}
+
+function fmtDate(d){if(!d)return'—';const[y,m,day]=d.split('-');return`${day}.${m}.${y}`;}
+function posClass(p){return'pos-'+(p||'').replace(/[^a-záčďéěíňóřšťúůýž]/gi,'');}
+
+// ── INIT ─────────────────────────────────────────────────────
+async function init(){
+  try{
+    const[z,h,s]=await Promise.all([
+      api('vb_zapasy','GET',null,'select=*&order=datum.desc'),
+      api('vb_hraci','GET',null,'select=*&order=jmeno.asc'),
+      api('vb_statistiky','GET',null,'select=*')
+    ]);
+    state.zapasy=z||[];state.hraci=h||[];state.stats=s||[];
+    document.getElementById('loading').style.display='none';
+    document.getElementById('z-datum').value=new Date().toISOString().split('T')[0];
+    buildSelects();
+    renderAll();
+  }catch(err){
+    document.getElementById('loading').innerHTML=`<div style="color:var(--red);text-align:center;padding:40px"><div style="font-size:36px;margin-bottom:12px">⚠️</div><div style="font-weight:700;margin-bottom:8px">Chyba připojení</div><div style="font-size:11px;color:var(--muted)">${err.message}</div><div style="font-size:11px;color:var(--muted);margin-top:8px">Ujisti se, že máš vytvořené tabulky v Supabase (viz komentář v kódu)</div></div>`;
+  }
+}
+
+function buildSelects(){
+  const zSel=document.getElementById('st-zapas');
+  const hSel=document.getElementById('st-hrac');
+  const prevZ=zSel.value,prevH=hSel.value;
+  zSel.innerHTML='<option value="">— vyber zápas —</option>'+
+    state.zapasy.map(z=>{
+      const{sety_my,sety_oni}=computeSets(z);
+      return`<option value="${z.id}">${fmtDate(z.datum)} — ${z.soupet} (${sety_my}:${sety_oni})</option>`;
+    }).join('');
+  hSel.innerHTML='<option value="">— vyber hráče —</option>'+
+    state.hraci.filter(h=>h.aktivni).map(h=>`<option value="${h.id}">#${h.cislo||'?'} ${h.jmeno}</option>`).join('');
+  if(prevZ)zSel.value=prevZ;
+  if(prevH)hSel.value=prevH;
+}
+
+function renderAll(){renderPrehled();renderZapasy();renderHraci();renderStatistiky();renderZebricek();}
+
+function showTab(id){
+  document.querySelectorAll('.nav-item').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+  const tabs=['prehled','zapasy','hraci','statistiky','zebricek'];
+  const idx=tabs.indexOf(id);
+  if(idx>=0){
+    document.querySelectorAll('.nav-item')[idx].classList.add('active');
+    document.getElementById('view-'+id).classList.add('active');
+  }
+}
+
+// ── PŘEHLED ──────────────────────────────────────────────────
+function renderPrehled(){
+  const total=state.zapasy.length;
+  const vyhry=state.zapasy.filter(z=>computeSets(z).vyhra).length;
+  const allSets=state.zapasy.reduce((a,z)=>{const{sety_my,sety_oni}=computeSets(z);return{my:a.my+sety_my,oni:a.oni+sety_oni};},{my:0,oni:0});
+  const aktivni=state.hraci.filter(h=>h.aktivni).length;
+
+  document.getElementById('ov-zapasy').textContent=total;
+  document.getElementById('ov-vyhry').textContent=vyhry;
+  document.getElementById('ov-uspesnost').textContent=total?`${Math.round(vyhry/total*100)} % úspěšnost`:'žádné zápasy';
+  document.getElementById('ov-sety-my').textContent=allSets.my;
+  document.getElementById('ov-sety-sub').textContent=`${allSets.oni} prohráno`;
+  document.getElementById('ov-hraci').textContent=aktivni;
+
+  // Top performers
+  const cats=[
+    {key:'smec_body',label:'Top útočník',icon:'💥',metric:'kills'},
+    {key:'servis_esa',label:'Top server',icon:'🎯',metric:'es'},
+    {key:'blok_body',label:'Top blokař',icon:'🛡️',metric:'bloků'},
+    {key:'vykopy',label:'Top obránce',icon:'🏃',metric:'výkopů'},
+    {key:'nahravky',label:'Top nahrávač',icon:'🎪',metric:'nahrávek'},
+  ];
+  const topHTML=cats.map(c=>{
+    const best=state.hraci.map(h=>({h,val:playerStats(h.id)[c.key]})).sort((a,b)=>b.val-a.val)[0];
+    if(!best||!best.val)return`<div class="top-card"><div class="top-cat">${c.icon} ${c.label}</div><div class="top-name" style="color:var(--muted)">—</div><div class="top-val" style="font-size:20px;color:var(--muted)">0</div><div class="top-metric">${c.metric}</div></div>`;
+    return`<div class="top-card"><div class="top-cat">${c.icon} ${c.label}</div><div class="top-name">${best.h.jmeno}</div><div class="top-val">${best.val}</div><div class="top-metric">${c.metric}</div></div>`;
+  }).join('');
+  document.getElementById('top-performers').innerHTML=topHTML;
+
+  // Recent 5
+  const recent=state.zapasy.slice(0,5);
+  if(!recent.length){
+    document.getElementById('recent-matches').innerHTML='<div class="empty"><span class="empty-icon">📅</span><div class="empty-text">Žádné zápasy</div></div>';
+    return;
+  }
+  document.getElementById('recent-matches').innerHTML=recent.map(z=>{
+    const{sety_my,sety_oni,vyhra}=computeSets(z);
+    const mis=z.misto==='doma'?'badge-home':z.misto==='venku'?'badge-away':'badge-neutral';
+    const ml=z.misto==='doma'?'Doma':z.misto==='venku'?'Venku':'Neutral';
+    return`<div class="recent-row">
+      <div class="rr-date">${fmtDate(z.datum)}</div>
+      <div class="rr-opp">${z.soupet}</div>
+      <div class="rr-misto"><span class="badge ${mis}">${ml}</span></div>
+      <div class="rr-sets" style="color:${vyhra?'var(--green)':'var(--red)'}">${sety_my}:${sety_oni}</div>
+      <div><span class="badge ${vyhra?'badge-win':'badge-loss'}">${vyhra?'✓ Výhra':'✗ Prohra'}</span></div>
+    </div>`;
+  }).join('');
+}
+
+// ── ZÁPASY ───────────────────────────────────────────────────
+function renderZapasy(){
+  const tbody=document.getElementById('zapasy-table');
+  const empty=document.getElementById('zapasy-empty');
+  document.getElementById('zapasy-count').textContent=`${state.zapasy.length} zápasů`;
+  if(!state.zapasy.length){tbody.innerHTML='';empty.style.display='block';return;}
+  empty.style.display='none';
+  tbody.innerHTML=state.zapasy.map(z=>{
+    const{sety_my,sety_oni,vyhra}=computeSets(z);
+    const mis=z.misto==='doma'?'badge-home':z.misto==='venku'?'badge-away':'badge-neutral';
+    const ml=z.misto==='doma'?'Doma':z.misto==='venku'?'Venku':'Neutr.';
+    return`<tr>
+      <td style="white-space:nowrap">${fmtDate(z.datum)}</td>
+      <td style="font-weight:600">${z.soupet}</td>
+      <td><span class="badge ${mis}">${ml}</span></td>
+      <td><span class="badge ${vyhra?'badge-win':'badge-loss'}" style="font-size:13px;padding:4px 12px">${sety_my}:${sety_oni}</span></td>
+      <td>${setScoreHTML(z)}</td>
+      <td style="white-space:nowrap">
+        <button class="btn-icon" onclick="editZapas(${z.id})" title="Upravit">✎</button>
+        <button class="btn-icon" onclick="delZapas(${z.id})" title="Smazat" style="color:var(--red)">✕</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function getSetData(){
+  const data={};
+  let sm=0,so=0;
+  for(let i=1;i<=5;i++){
+    const my=document.getElementById(`s${i}m`).value;
+    const oni=document.getElementById(`s${i}o`).value;
+    data[`set${i}_my`]=my!==''?parseInt(my):null;
+    data[`set${i}_oni`]=oni!==''?parseInt(oni):null;
+    if(my!==''&&oni!==''){
+      if(parseInt(my)>parseInt(oni))sm++;else so++;
+    }
+  }
+  data.sety_my=sm;data.sety_oni=so;
+  return data;
+}
+
+async function saveZapas(){
+  const soupet=v('z-soupet');const datum=v('z-datum');
+  if(!soupet||!datum){toast('Vyplň datum a soupeře',true);return;}
+  syncSt('syncing');setBtn('btn-zapas',true);
+  try{
+    const sets=getSetData();
+    const row={datum,soupet,misto:v('z-misto'),poznamka:v('z-poznamka')||null,...sets};
+    if(editingZapasId){
+      await api('vb_zapasy','PATCH',row,`id=eq.${editingZapasId}`);
+      const idx=state.zapasy.findIndex(z=>z.id===editingZapasId);
+      if(idx>=0)state.zapasy[idx]={...state.zapasy[idx],...row};
+      toast('Zápas upraven ✓');cancelZapasEdit();
+    }else{
+      const res=await api('vb_zapasy','POST',row);
+      state.zapasy.unshift(res[0]);
+      ['z-soupet','z-poznamka'].forEach(id=>document.getElementById(id).value='');
+      for(let i=1;i<=5;i++){document.getElementById(`s${i}m`).value='';document.getElementById(`s${i}o`).value='';}
+      toast('Zápas přidán ✓');
+    }
+    syncSt('ok');buildSelects();renderAll();
+  }catch(e){toast('Chyba: '+e.message,true);syncSt('error');}
+  setBtn('btn-zapas',false,editingZapasId?'Uložit změny':'+ Přidat zápas');
+}
+
+function editZapas(id){
+  const z=state.zapasy.find(x=>x.id===id);if(!z)return;
+  editingZapasId=id;
+  document.getElementById('z-datum').value=z.datum||'';
+  document.getElementById('z-soupet').value=z.soupet||'';
+  document.getElementById('z-misto').value=z.misto||'doma';
+  document.getElementById('z-poznamka').value=z.poznamka||'';
+  for(let i=1;i<=5;i++){
+    document.getElementById(`s${i}m`).value=z[`set${i}_my`]??'';
+    document.getElementById(`s${i}o`).value=z[`set${i}_oni`]??'';
+  }
+  document.getElementById('zapas-form-title').textContent='Upravit zápas';
+  document.getElementById('btn-zapas').textContent='Uložit změny';
+  document.getElementById('btn-zapas-cancel').style.display='block';
+  showTab('zapasy');
+  document.querySelector('#view-zapasy .panel').scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+function cancelZapasEdit(){
+  editingZapasId=null;
+  document.getElementById('zapas-form-title').textContent='Přidat zápas';
+  document.getElementById('btn-zapas').textContent='+ Přidat zápas';
+  document.getElementById('btn-zapas-cancel').style.display='none';
+}
+
+async function delZapas(id){
+  if(!confirm('Smazat zápas a všechny jeho statistiky?'))return;
+  syncSt('syncing');
+  try{
+    await api('vb_zapasy','DELETE',null,`id=eq.${id}`);
+    state.zapasy=state.zapasy.filter(z=>z.id!==id);
+    state.stats=state.stats.filter(s=>s.zapas_id!==id);
+    toast('Smazáno');syncSt('ok');buildSelects();renderAll();
+  }catch(e){toast('Chyba: '+e.message,true);syncSt('error');}
+}
+
+// ── HRÁČI ────────────────────────────────────────────────────
+function renderHraci(){
+  const grid=document.getElementById('players-grid');
+  const empty=document.getElementById('hraci-empty');
+  document.getElementById('hraci-count').textContent=`${state.hraci.filter(h=>h.aktivni).length} aktivních`;
+  if(!state.hraci.length){grid.innerHTML='';empty.style.display='block';return;}
+  empty.style.display='none';
+  grid.innerHTML=state.hraci.map(h=>{
+    const ps=playerStats(h.id);
+    return`<div class="player-card ${h.aktivni?'':'inactive'}">
+      <div class="pc-top">
+        <div class="pc-avatar">${h.cislo||'?'}</div>
+        <div class="pc-info">
+          <div class="pc-name">${h.jmeno}</div>
+          <div class="pc-pos ${posClass(h.pozice)}">${h.pozice||'—'}</div>
+        </div>
+      </div>
+      <div class="pc-stats">
+        <div class="pc-stat"><div class="pc-stat-val" style="color:var(--accent)">${ps.smec_body}</div><div class="pc-stat-lbl">Kills</div></div>
+        <div class="pc-stat"><div class="pc-stat-val" style="color:var(--yellow)">${ps.servis_esa}</div><div class="pc-stat-lbl">Esa</div></div>
+        <div class="pc-stat"><div class="pc-stat-val" style="color:var(--accent3)">${ps.blok_body}</div><div class="pc-stat-lbl">Bloky</div></div>
+        <div class="pc-stat"><div class="pc-stat-val" style="color:var(--green)">${ps.vykopy}</div><div class="pc-stat-lbl">Vykopy</div></div>
+        <div class="pc-stat"><div class="pc-stat-val" style="color:var(--accent2)">${ps.nahravky}</div><div class="pc-stat-lbl">Nahrávky</div></div>
+        <div class="pc-stat"><div class="pc-stat-val" style="color:var(--muted)">${ps.zapasy}</div><div class="pc-stat-lbl">Zápasy</div></div>
+      </div>
+      <div class="pc-actions">
+        <button class="btn-danger" onclick="toggleHrac(${h.id},${!h.aktivni})">${h.aktivni?'⏸ Deakt.':'▶ Aktivovat'}</button>
+        <button class="btn-icon" onclick="delHrac(${h.id})" style="color:var(--red);margin-left:auto">✕</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function addHrac(){
+  const jmeno=v('h-jmeno');
+  if(!jmeno){toast('Zadej jméno hráče',true);return;}
+  syncSt('syncing');
+  try{
+    const row={jmeno,cislo:parseInt(v('h-cislo'))||null,pozice:v('h-pozice'),aktivni:true};
+    const res=await api('vb_hraci','POST',row);
+    state.hraci.push(res[0]);
+    state.hraci.sort((a,b)=>a.jmeno.localeCompare(b.jmeno));
+    document.getElementById('h-jmeno').value='';document.getElementById('h-cislo').value='';
+    toast(`${jmeno} přidán ✓`);syncSt('ok');buildSelects();renderHraci();renderPrehled();
+  }catch(e){toast('Chyba: '+e.message,true);syncSt('error');}
+}
+
+async function toggleHrac(id,aktivni){
+  syncSt('syncing');
+  try{
+    await api('vb_hraci','PATCH',{aktivni},`id=eq.${id}`);
+    const idx=state.hraci.findIndex(h=>h.id===id);
+    if(idx>=0)state.hraci[idx].aktivni=aktivni;
+    toast(aktivni?'Aktivován ✓':'Deaktivován');syncSt('ok');buildSelects();renderHraci();
+  }catch(e){toast('Chyba: '+e.message,true);syncSt('error');}
+}
+
+async function delHrac(id){
+  const h=state.hraci.find(x=>x.id===id);
+  if(!confirm(`Smazat hráče ${h?.jmeno} a všechny jeho statistiky?`))return;
+  syncSt('syncing');
+  try{
+    await api('vb_hraci','DELETE',null,`id=eq.${id}`);
+    state.hraci=state.hraci.filter(h=>h.id!==id);
+    state.stats=state.stats.filter(s=>s.hrac_id!==id);
+    toast('Hráč smazán');syncSt('ok');buildSelects();renderHraci();renderPrehled();renderZebricek();
+  }catch(e){toast('Chyba: '+e.message,true);syncSt('error');}
+}
+
+// ── STATISTIKY ───────────────────────────────────────────────
+function onStatZapasChange(){
+  const zapasId=parseInt(v('st-zapas'));
+  document.getElementById('stat-form').style.display='none';
+  document.getElementById('match-stat-info').style.display='none';
+  renderStatsPanel(zapasId||null);
+}
+
+function onStatHracChange(){
+  const zapasId=parseInt(v('st-zapas'));
+  const hracId=parseInt(v('st-hrac'));
+  if(!zapasId||!hracId){document.getElementById('stat-form').style.display='none';document.getElementById('match-stat-info').style.display='none';return;}
+  const existing=state.stats.find(s=>s.zapas_id===zapasId&&s.hrac_id===hracId);
+  const info=document.getElementById('match-stat-info');
+  info.style.display='block';
+  if(existing){
+    info.className='match-sel-info has-stats';
+    info.textContent='✓ Statistiky již existují — formulář je předvyplněn (úprava)';
+    fillStatForm(existing);
+  }else{
+    info.className='match-sel-info';
+    info.textContent='Nové statistiky pro tohoto hráče v tomto zápase';
+    clearStatForm();
+  }
+  document.getElementById('stat-form').style.display='block';
+}
+
+function clearStatForm(){
+  ['st-smec-pok','st-smec-bod','st-smec-chy','st-serv-pok','st-serv-esa','st-serv-chy',
+   'st-blok-bod','st-blok-chy','st-prij-per','st-prij-dob','st-prij-chy','st-vykopy','st-nahravky']
+  .forEach(id=>document.getElementById(id).value='0');
+}
+
+function fillStatForm(s){
+  document.getElementById('st-smec-pok').value=s.smec_pokusy||0;
+  document.getElementById('st-smec-bod').value=s.smec_body||0;
+  document.getElementById('st-smec-chy').value=s.smec_chyby||0;
+  document.getElementById('st-serv-pok').value=s.servis_pokusy||0;
+  document.getElementById('st-serv-esa').value=s.servis_esa||0;
+  document.getElementById('st-serv-chy').value=s.servis_chyby||0;
+  document.getElementById('st-blok-bod').value=s.blok_body||0;
+  document.getElementById('st-blok-chy').value=s.blok_chyby||0;
+  document.getElementById('st-prij-per').value=s.prijem_perfektni||0;
+  document.getElementById('st-prij-dob').value=s.prijem_dobry||0;
+  document.getElementById('st-prij-chy').value=s.prijem_chyba||0;
+  document.getElementById('st-vykopy').value=s.vykopy||0;
+  document.getElementById('st-nahravky').value=s.nahravky||0;
+}
+
+async function saveStats(){
+  const zapas_id=parseInt(v('st-zapas'));
+  const hrac_id=parseInt(v('st-hrac'));
+  if(!zapas_id||!hrac_id){toast('Vyber zápas a hráče',true);return;}
+  syncSt('syncing');setBtn('btn-stat',true);
+  try{
+    const row={
+      zapas_id,hrac_id,
+      smec_pokusy:n('st-smec-pok'),smec_body:n('st-smec-bod'),smec_chyby:n('st-smec-chy'),
+      servis_pokusy:n('st-serv-pok'),servis_esa:n('st-serv-esa'),servis_chyby:n('st-serv-chy'),
+      blok_body:n('st-blok-bod'),blok_chyby:n('st-blok-chy'),
+      prijem_perfektni:n('st-prij-per'),prijem_dobry:n('st-prij-dob'),prijem_chyba:n('st-prij-chy'),
+      vykopy:n('st-vykopy'),nahravky:n('st-nahravky')
+    };
+    const res=await upsert('vb_statistiky',row,'zapas_id,hrac_id');
+    const idx=state.stats.findIndex(s=>s.zapas_id===zapas_id&&s.hrac_id===hrac_id);
+    if(idx>=0)state.stats[idx]={...state.stats[idx],...res[0]};
+    else state.stats.push(res[0]);
+    toast('Statistiky uloženy ✓');syncSt('ok');
+    renderStatsPanel(zapas_id);renderPrehled();renderHraci();renderZebricek();
+    onStatHracChange();
+  }catch(e){toast('Chyba: '+e.message,true);syncSt('error');}
+  setBtn('btn-stat',false,'💾 Uložit statistiky');
+}
+
+function renderStatistiky(){
+  const zapasId=parseInt(v('st-zapas'))||null;
+  renderStatsPanel(zapasId);
+}
+
+function renderStatsPanel(zapasId){
+  const panel=document.getElementById('stats-match-panel');
+  if(!zapasId){
+    panel.innerHTML='<div class="empty"><span class="empty-icon">📋</span><div class="empty-text">Vyber zápas</div><div>Pak uvidíš statistiky hráčů</div></div>';
+    return;
+  }
+  const matchStats=state.stats.filter(s=>s.zapas_id===zapasId);
+  const zapas=state.zapasy.find(z=>z.id===zapasId);
+  if(!matchStats.length){
+    panel.innerHTML=`<div class="empty"><span class="empty-icon">📊</span><div class="empty-text">Žádné statistiky pro ${zapas?.soupet||'tento zápas'}</div><div>Vyber hráče a zadej statistiky</div></div>`;
+    return;
+  }
+  const stats_cols=[
+    {key:'smec_body',label:'Kills',color:'var(--accent)'},
+    {key:'servis_esa',label:'Esa',color:'var(--yellow)'},
+    {key:'blok_body',label:'Bloky',color:'var(--accent3)'},
+    {key:'vykopy',label:'Vykopy',color:'var(--green)'},
+    {key:'nahravky',label:'Nahrávky',color:'var(--accent2)'},
+    {key:'smec_chyby',label:'Chyby',color:'var(--red)'},
+  ];
+  panel.innerHTML=`<div class="table-wrap"><div class="overflow-x"><table>
+    <thead><tr><th>Hráč</th>${stats_cols.map(c=>`<th class="r">${c.label}</th>`).join('')}<th></th></tr></thead>
+    <tbody>
+    ${matchStats.map(s=>{
+      const h=state.hraci.find(x=>x.id===s.hrac_id);
+      return`<tr>
+        <td style="font-weight:600">${h?`#${h.cislo||'?'} ${h.jmeno}`:'Neznámý'}</td>
+        ${stats_cols.map(c=>`<td class="r" style="color:${c.color};font-weight:600;font-family:'Oswald',sans-serif;font-size:15px">${s[c.key]||0}</td>`).join('')}
+        <td><button class="btn-icon" onclick="delStats(${s.zapas_id},${s.hrac_id})" style="color:var(--red)">✕</button></td>
+      </tr>`;
+    }).join('')}
+    </tbody>
+  </table></div></div>`;
+}
+
+async function delStats(zapas_id,hrac_id){
+  if(!confirm('Smazat statistiky tohoto hráče pro tento zápas?'))return;
+  syncSt('syncing');
+  try{
+    await api('vb_statistiky','DELETE',null,`zapas_id=eq.${zapas_id}&hrac_id=eq.${hrac_id}`);
+    state.stats=state.stats.filter(s=>!(s.zapas_id===zapas_id&&s.hrac_id===hrac_id));
+    toast('Smazáno');syncSt('ok');renderStatsPanel(zapas_id);renderPrehled();renderHraci();renderZebricek();
+    onStatHracChange();
+  }catch(e){toast('Chyba: '+e.message,true);syncSt('error');}
+}
+
+// ── ŽEBŘÍČEK ─────────────────────────────────────────────────
+const LB_CONFIG={
+  smec_body:{label:'Útočné body (Kills)',icon:'💥',suffix:'killů'},
+  servis_esa:{label:'Servisní esa',icon:'🎯',suffix:'es'},
+  blok_body:{label:'Blokové body',icon:'🛡️',suffix:'bloků'},
+  vykopy:{label:'Vykopy',icon:'🏃',suffix:'výkopů'},
+  nahravky:{label:'Nahrávky',icon:'🎪',suffix:'nahrávek'},
+  prijem_pct:{label:'Příjem (efektivita)',icon:'🤲',suffix:'%'},
+};
+
+function showLb(cat){
+  currentLbCat=cat;
+  document.querySelectorAll('.lb-tab').forEach(t=>t.classList.remove('active'));
+  const tabs=document.querySelectorAll('.lb-tab');
+  const keys=Object.keys(LB_CONFIG);
+  const idx=keys.indexOf(cat);
+  if(tabs[idx])tabs[idx].classList.add('active');
+  renderZebricek();
+}
+
+function renderZebricek(){
+  const cat=currentLbCat;
+  const cfg=LB_CONFIG[cat];
+  const ranked=state.hraci
+    .map(h=>{const ps=playerStats(h.id);return{h,val:ps[cat]||0,zapasy:ps.zapasy};})
+    .filter(x=>x.val>0)
+    .sort((a,b)=>b.val-a.val);
+
+  if(!ranked.length){
+    document.getElementById('lb-list').innerHTML='<div class="empty"><span class="empty-icon">🥇</span><div class="empty-text">Žádná data</div><div>Zadej statistiky zápasů</div></div>';
+    return;
+  }
+
+  const maxVal=ranked[0].val;
+  const rankLabels=['gold','silver','bronze'];
+  document.getElementById('lb-list').innerHTML=ranked.map((x,i)=>{
+    const avg=x.zapasy>0?(x.val/x.zapasy).toFixed(1):'—';
+    const barPct=Math.round(x.val/maxVal*100);
+    const rc=rankLabels[i]||'';
+    const suffix=cat==='prijem_pct'?'%':` ${cfg.suffix}`;
+    const avgSuffix=cat==='prijem_pct'?'%':` / zápas`;
+    return`<div class="lb-row">
+      <div class="lb-rank ${rc}">${i+1}</div>
+      <div class="lb-info">
+        <div class="lb-name">${x.h.jmeno} ${x.h.cislo?`<span style="color:var(--muted);font-size:12px">#${x.h.cislo}</span>`:''}</div>
+        <div class="lb-pos ${posClass(x.h.pozice)}">${x.h.pozice||'—'}</div>
+        <div class="lb-bar"><div class="lb-bar-fill" style="width:${barPct}%"></div></div>
+      </div>
+      <div class="lb-val">
+        <div class="lb-main">${x.val}${cat==='prijem_pct'?'%':''}</div>
+        <div class="lb-avg">Ø ${avg}${avgSuffix}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+init();
+</script>
+</body>
+</html>
