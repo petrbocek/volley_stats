@@ -206,8 +206,9 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 @media(max-width:600px){
   .form-row{grid-template-columns:1fr}
   .tab-content{padding:12px}
-  .nav-brand{padding:12px 12px}
-  .nav-tab{padding:12px 10px;font-size:12px}
+  .nav-brand{display:none}
+  .nav-tab{padding:12px 14px;font-size:18px}
+  .nav-label{display:none}
 }
 </style>
 </head>
@@ -223,11 +224,11 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 <nav class="nav">
   <div class="nav-brand">🏐 VOLEJBAL</div>
   <div class="nav-tabs">
-    <button class="nav-tab active" onclick="showTab('prehled')">📊 Přehled</button>
-    <button class="nav-tab" onclick="showTab('zapasy')">🏆 Zápasy</button>
-    <button class="nav-tab" onclick="showTab('tym')">👥 Tým</button>
-    <button class="nav-tab" onclick="showTab('live')">⚡ Live</button>
-    <button class="nav-tab" onclick="showTab('statistiky')">📈 Statistiky</button>
+    <button class="nav-tab active" onclick="showTab('prehled')">📊 <span class="nav-label">Přehled</span></button>
+    <button class="nav-tab" onclick="showTab('zapasy')">🏆 <span class="nav-label">Zápasy</span></button>
+    <button class="nav-tab" onclick="showTab('tym')">👥 <span class="nav-label">Tým</span></button>
+    <button class="nav-tab" onclick="showTab('live')">⚡ <span class="nav-label">Live</span></button>
+    <button class="nav-tab" onclick="showTab('statistiky')">📈 <span class="nav-label">Statistiky</span></button>
   </div>
 </nav>
 
