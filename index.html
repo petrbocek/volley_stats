@@ -15,7 +15,8 @@
   );
   CREATE TABLE vb_hraci (
     id bigserial PRIMARY KEY, created_at timestamptz DEFAULT now(),
-    jmeno text NOT NULL, cislo int, pozice text DEFAULT 'smečař'
+    jmeno text NOT NULL, cislo int, pozice text DEFAULT 'smečař',
+    aktivni boolean NOT NULL DEFAULT true
   );
   CREATE TABLE vb_hraci_sezony (
     hrac_id bigint REFERENCES vb_hraci(id) ON DELETE CASCADE,
@@ -868,7 +869,7 @@ async function saveHrac(){
   const cislo=document.getElementById('in-hrac-cislo').value;
   const pozice=document.getElementById('in-hrac-pozice').value;
   try{
-    const res=await api('POST','vb_hraci',{jmeno,cislo:cislo?parseInt(cislo):null,pozice});
+    const res=await api('POST','vb_hraci',{jmeno,cislo:cislo?parseInt(cislo):null,pozice,aktivni:true});
     const nh=res[0];
     state.hraci.push(nh);
     state.hraci.sort((a,b)=>a.jmeno.localeCompare(b.jmeno));
