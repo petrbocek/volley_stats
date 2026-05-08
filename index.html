@@ -407,15 +407,14 @@ const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZ
 const ACTIONS=[
   {key:'utok',label:'Útok',icon:'💥'},
   {key:'servis',label:'Servis',icon:'🎯'},
-  {key:'blok',label:'Blok',icon:'🛡️'},
+  {key:'blok',label:'Blok',icon:'🛡️',varianty:['plus']},
   {key:'prijem',label:'Příjem',icon:'🤲'},
-  {key:'vykop',label:'Výkop',icon:'🏃'},
   {key:'nahravka',label:'Nahrávka',icon:'🎪'},
 ];
 const VARIANTS=[
   {suf:'plus',sym:'+',cls:'plus'},
-  {suf:'minus',sym:'−',cls:'minus'},
   {suf:'neutral',sym:'/',cls:'neutral'},
+  {suf:'minus',sym:'−',cls:'minus'},
 ];
 
 const state={sezony:[],activeSeason:null,hraci:[],hraciSezony:[],zapasy:[],statistiky:[],liveZapasId:null};
@@ -703,7 +702,8 @@ function renderLiveTable(zapasId){
 
   let thead1=`<tr><th class="sticky-col">Hráčka</th>`;
   ACTIONS.forEach(a=>{
-    thead1+=`<th class="action-header" colspan="3">${a.icon} ${a.label}</th>`;
+    const variants=a.varianty?VARIANTS.filter(v=>a.varianty.includes(v.suf)):VARIANTS;
+    thead1+=`<th class="action-header" colspan="${variants.length}">${a.icon} ${a.label}</th>`;
   });
   thead1+=`</tr>`;
 
@@ -711,7 +711,8 @@ function renderLiveTable(zapasId){
   hraci.forEach(h=>{
     tbody+=`<tr><td class="sticky-col player-row-name">${h.jmeno}${h.cislo?` <span class="player-row-num">#${h.cislo}</span>`:''}</td>`;
     ACTIONS.forEach(a=>{
-      VARIANTS.forEach(v=>{
+      const variants=a.varianty?VARIANTS.filter(v=>a.varianty.includes(v.suf)):VARIANTS;
+      variants.forEach(v=>{
         const field=`${a.key}_${v.suf}`;
         const val=getStatVal(zapasId,h.id,field);
         tbody+=`<td class="sc ${v.cls}" onclick="bump(${h.id},${zapasId},'${field}')"><span class="sc-btn">${v.sym}</span><span class="sc-count" id="cnt-${h.id}-${field}">${val}</span></td>`;
