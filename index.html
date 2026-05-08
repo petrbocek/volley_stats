@@ -273,7 +273,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
     <button class="btn btn-sm btn-green" id="btn-end-zapas" style="display:none" onclick="openFinishModal()">✓ Ukončit</button>
   </div>
   <div id="live-table-wrap">
-    <div class="empty"><span class="empty-icon">⚡</span><div class="empty-text">Vyberte probíhající zápas</div><div>Nebo zahajte plánovaný zápas</div></div>
+    <div class="empty"><span class="empty-icon">⚡</span><div class="empty-text">Vyberte sezónu a zápas nahoře</div></div>
   </div>
 </div>
 
@@ -626,17 +626,29 @@ async function toggleHracSezona(hracId,sezonaId,inSeason){
 function renderLiveSelect(){
   const sid=currentSeasonId();
   const sel=document.getElementById('live-zapas-select');
-  const zapasy=sid?state.zapasy.filter(z=>z.sezona_id===sid&&(z.stav==='planovany'||z.stav==='probihajici')):state.zapasy.filter(z=>z.stav==='planovany'||z.stav==='probihajici');
-  const prev=sel.value;
+  const zapasy=sid?state.zapasy.filter(z=>z.sezona_id===sid):state.zapasy;
+  const prev=parseInt(sel.value)||state.liveZapasId||0;
   sel.innerHTML='<option value="">— vyberte zápas —</option>';
   zapasy.forEach(z=>{
     const o=document.createElement('option');
     o.value=z.id;
     o.textContent=`${fmtDate(z.datum)} — ${z.soupet} [${stavLabel(z.stav)}]`;
-    if(parseInt(prev)===z.id)o.selected=true;
+    if(prev===z.id)o.selected=true;
     sel.appendChild(o);
   });
-  if(state.liveZapasId)renderLiveTable(state.liveZapasId);
+  // Auto-select: probíhající → plánovaný → první
+  if(!sel.value&&zapasy.length){
+    const best=zapasy.find(z=>z.stav==='probihajici')||zapasy.find(z=>z.stav==='planovany')||zapasy[0];
+    if(best)sel.value=best.id;
+  }
+  if(sel.value){
+    const id=parseInt(sel.value);
+    state.liveZapasId=id;
+    const z=state.zapasy.find(z=>z.id===id);
+    document.getElementById('btn-start-zapas').style.display=z?.stav==='planovany'?'':'none';
+    document.getElementById('btn-end-zapas').style.display=z?.stav==='probihajici'?'':'none';
+    renderLiveTable(id);
+  }
 }
 
 function onLiveZapasChange(){
@@ -939,7 +951,7 @@ function showTab(name){
   document.getElementById('tab-'+name).classList.add('active');
   const tabs={prehled:0,zapasy:1,tym:2,live:3,statistiky:4};
   document.querySelectorAll('.nav-tab')[tabs[name]]?.classList.add('active');
-  if(name==='live'&&state.liveZapasId)renderLiveTable(state.liveZapasId);
+  if(name==='live')renderLiveSelect();
   if(name==='statistiky')renderStatistiky();
 }
 
