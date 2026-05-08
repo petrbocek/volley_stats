@@ -151,17 +151,17 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 .live-table th.action-header{color:var(--text);font-size:13px}
 .live-table th.sticky-col,.live-table td.sticky-col{position:sticky;left:0;z-index:2;background:var(--surface);min-width:130px;max-width:160px}
 .live-table th.sticky-col{background:var(--surface2)}
-.sc{cursor:pointer;text-align:center;padding:4px 3px;transition:background .1s;min-width:52px;user-select:none}
-.sc:hover{filter:brightness(1.15)}
-.sc:active{transform:scale(.94)}
-.sc.plus{background:rgba(81,207,102,.08)}
-.sc.minus{background:rgba(255,107,107,.08)}
-.sc.neutral{background:rgba(255,212,59,.08)}
-.sc-btn{font-size:16px;font-weight:700;display:block;line-height:1.4}
-.sc.plus .sc-btn{color:var(--green)}
-.sc.minus .sc-btn{color:var(--red)}
-.sc.neutral .sc-btn{color:var(--yellow)}
-.sc-count{font-family:'Oswald',sans-serif;font-size:17px;font-weight:700;display:block;color:var(--text);line-height:1.2;padding-bottom:3px}
+.sc{cursor:pointer;text-align:center;padding:8px 4px;transition:filter .1s;min-width:62px;user-select:none;vertical-align:middle}
+.sc:hover{filter:brightness(1.25)}
+.sc:active{transform:scale(.90)}
+.sc.plus{background:rgba(81,207,102,.06)}
+.sc.minus{background:rgba(255,107,107,.06)}
+.sc.neutral{background:rgba(255,212,59,.06)}
+.sc-btn{display:block;width:44px;height:44px;line-height:44px;margin:0 auto 6px;border-radius:10px;font-size:22px;font-weight:900;pointer-events:none}
+.sc.plus .sc-btn{background:rgba(81,207,102,.22);color:var(--green)}
+.sc.minus .sc-btn{background:rgba(255,107,107,.22);color:var(--red)}
+.sc.neutral .sc-btn{background:rgba(255,212,59,.22);color:var(--yellow)}
+.sc-count{font-family:'Oswald',sans-serif;font-size:21px;font-weight:700;display:block;color:var(--text);line-height:1.2}
 .player-row-name{padding:10px 12px;font-weight:600;font-size:13px}
 .player-row-num{font-size:11px;color:var(--muted);font-weight:400}
 
@@ -593,7 +593,7 @@ function renderTym(){
 function playerCardHtml(h,sid,inSeason){
   const posClass=`pos-${h.pozice==='nahrávač'?'nahravac':h.pozice==='libero'?'libero':h.pozice==='universál'?'universal':'smec'}`;
   const numEl=h.cislo?`<div class="player-num">${h.cislo}</div>`:`<div class="player-num no-num">?</div>`;
-  const toggle=sid?`<button class="player-toggle" title="${inSeason?'Odebrat ze soupisky':'Přidat do soupisky'}" onclick="toggleHracSezona(${h.id},${sid},${inSeason})">${inSeason?'✅':'➕'}</button>`:'';
+  const toggle=sid?`<button class="btn btn-sm ${inSeason?'btn-red':'btn-green'}" style="flex-shrink:0" onclick="toggleHracSezona(${h.id},${sid},${inSeason})">${inSeason?'Odebrat':'+ Přidat'}</button>`:'';
   return `<div class="player-card ${sid&&!inSeason?'inactive':''}" id="pc-${h.id}">
     ${numEl}
     <div class="player-info">
@@ -687,13 +687,11 @@ function renderLiveTable(zapasId){
   // ensure stat objects exist in memory
   hraci.forEach(h=>ensureStat(zapasId,h.id));
 
-  let thead1=`<tr><th class="sticky-col" rowspan="2">Hráčka</th>`;
-  let thead2=`<tr>`;
+  let thead1=`<tr><th class="sticky-col">Hráčka</th>`;
   ACTIONS.forEach(a=>{
     thead1+=`<th class="action-header" colspan="3">${a.icon} ${a.label}</th>`;
-    VARIANTS.forEach(v=>{thead2+=`<th class="${v.cls==='plus'?'':v.cls==='minus'?'':''}" style="font-size:16px;padding:6px 8px">${v.sym}</th>`;});
   });
-  thead1+=`</tr>`;thead2+=`</tr>`;
+  thead1+=`</tr>`;
 
   let tbody='';
   hraci.forEach(h=>{
@@ -708,7 +706,7 @@ function renderLiveTable(zapasId){
     tbody+=`</tr>`;
   });
 
-  el.innerHTML=`<div class="live-wrap"><table class="live-table"><thead>${thead1}${thead2}</thead><tbody>${tbody}</tbody></table></div>`;
+  el.innerHTML=`<div class="live-wrap"><table class="live-table"><thead>${thead1}</thead><tbody>${tbody}</tbody></table></div>`;
 }
 
 function ensureStat(zapasId,hracId){
