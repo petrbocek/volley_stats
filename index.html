@@ -162,30 +162,36 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 .player-pos{font-size:11px;color:var(--muted);margin-top:2px}
 .player-toggle{cursor:pointer;font-size:18px;flex-shrink:0;border:none;background:none;padding:4px}
 
-/* LIVE TABLE */
-.live-wrap{overflow-x:auto;border-radius:12px;border:1px solid var(--border)}
-.live-table{border-collapse:collapse;min-width:100%;white-space:nowrap}
-.live-table th,.live-table td{border:1px solid var(--border)}
-.live-table th{background:var(--surface2);text-align:center;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;padding:8px 4px;color:var(--muted)}
-.live-table th.action-header{color:var(--text);font-size:13px}
-.live-table th.sticky-col,.live-table td.sticky-col{position:sticky;left:0;z-index:2;background:var(--surface);min-width:130px;max-width:160px}
-.live-table th.sticky-col{background:var(--surface2)}
-.sc{cursor:pointer;text-align:center;padding:8px 4px;transition:filter .1s;min-width:62px;user-select:none;vertical-align:middle}
-.sc:hover{filter:brightness(1.25)}
-.sc:active{transform:scale(.90)}
-.sc.plus{background:rgba(81,207,102,.06)}
-.sc.minus{background:rgba(255,107,107,.06)}
-.sc.neutral{background:rgba(255,212,59,.06)}
-.sc-btn{display:block;width:44px;height:44px;line-height:44px;margin:0 auto 6px;border-radius:10px;font-size:22px;font-weight:900;pointer-events:none}
-.sc.plus .sc-btn{background:rgba(81,207,102,.22);color:var(--green)}
-.sc.minus .sc-btn{background:rgba(255,107,107,.22);color:var(--red)}
-.sc.neutral .sc-btn{background:rgba(255,212,59,.22);color:var(--yellow)}
-.sc-count{font-family:'Oswald',sans-serif;font-size:21px;font-weight:700;display:block;color:var(--text);line-height:1.2}
-.player-row-name{padding:10px 12px;font-weight:600;font-size:13px}
-.player-row-num{font-size:11px;color:var(--muted);font-weight:400}
+/* LIVE CARDS */
+.live-grid-wrap{height:calc(100dvh - 190px);min-height:240px}
+.live-grid{height:100%;display:grid;grid-template-columns:repeat(2,1fr);grid-auto-rows:1fr;gap:6px}
+@media(min-width:600px){.live-grid{grid-template-columns:repeat(3,1fr)}}
+@media(min-width:960px){.live-grid{grid-template-columns:repeat(auto-fill,minmax(175px,1fr))}}
+.live-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:7px;display:flex;flex-direction:column;gap:3px;overflow:hidden}
+.live-card-header{display:flex;align-items:center;gap:5px;min-height:26px;flex-shrink:0}
+.live-card-num{font-family:'Oswald',sans-serif;font-size:12px;font-weight:700;color:var(--accent);min-width:22px}
+.live-card-name{font-size:12px;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.live-card-remove{background:none;border:none;color:var(--muted);cursor:pointer;font-size:15px;padding:2px 3px;line-height:1;border-radius:4px;flex-shrink:0}
+.live-card-remove:hover{color:var(--red)}
+.live-card-actions{flex:1;display:flex;flex-direction:column;gap:3px;min-height:0}
+.live-action-row{flex:1;display:flex;align-items:stretch;gap:3px;min-height:0}
+.live-action-icon{font-size:12px;width:16px;text-align:center;flex-shrink:0;display:flex;align-items:center;justify-content:center}
+.live-act-btn{flex:1;min-height:24px;border-radius:6px;border:none;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;transition:filter .1s;-webkit-tap-highlight-color:transparent;user-select:none}
+.live-act-btn:active{transform:scale(.9)}
+.live-act-btn:hover{filter:brightness(1.3)}
+.live-act-btn.plus{background:rgba(81,207,102,.2)}
+.live-act-btn.minus{background:rgba(255,107,107,.2)}
+.live-act-btn.neutral{background:rgba(255,212,59,.2)}
+.live-act-sym{font-size:13px;font-weight:900;line-height:1}
+.live-act-sym.plus{color:var(--green)}
+.live-act-sym.minus{color:var(--red)}
+.live-act-sym.neutral{color:var(--yellow)}
+.live-act-cnt{font-family:'Oswald',sans-serif;font-size:12px;font-weight:700;color:var(--text);line-height:1}
+.live-add-card{background:var(--surface);border:2px dashed var(--border);border-radius:10px;padding:7px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px;cursor:pointer;color:var(--muted);transition:border-color .15s,color .15s}
+.live-add-card:hover{border-color:var(--accent);color:var(--accent)}
 
 /* LIVE HEADER */
-.live-header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+.live-header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}
 .live-select{background:var(--surface);border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;flex:1;min-width:200px}
 .live-select:focus{outline:none;border-color:var(--accent)}
 
@@ -302,7 +308,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
     <button class="btn btn-sm btn-primary" id="btn-start-zapas" style="display:none" onclick="startZapas()">▶ Zahájit</button>
     <button class="btn btn-sm btn-green" id="btn-end-zapas" style="display:none" onclick="openFinishModal()">✓ Ukončit</button>
   </div>
-  <div id="live-table-wrap">
+  <div id="live-table-wrap" class="live-grid-wrap">
     <div class="empty"><span class="empty-icon">⚡</span><div class="empty-text">Vyberte sezónu a zápas nahoře</div></div>
   </div>
 </div>
@@ -313,6 +319,18 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 </div>
 
 <!-- ═══════ MODALS ═══════ -->
+
+<!-- Výběr hráčky do sestavy -->
+<div class="modal-overlay hidden" id="modal-hrac-picker">
+  <div class="modal">
+    <div class="modal-title">👤 Přidat do sestavy</div>
+    <input type="hidden" id="picker-zapas-id" />
+    <div id="hrac-picker-list" class="player-grid" style="margin-bottom:16px"></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('modal-hrac-picker')">Zavřít</button>
+    </div>
+  </div>
+</div>
 
 <!-- Nový tým -->
 <div class="modal-overlay hidden" id="modal-tym">
@@ -504,7 +522,7 @@ const VARIANTS=[
   {suf:'minus',sym:'−',cls:'minus'},
 ];
 
-const state={sezony:[],activeSeason:null,hraci:[],hraciSezony:[],zapasy:[],statistiky:[],tymy:[],hraciTymy:[],souteze:[],liveZapasId:null};
+const state={sezony:[],activeSeason:null,hraci:[],hraciSezony:[],zapasy:[],statistiky:[],tymy:[],hraciTymy:[],souteze:[],zapasHraci:[],liveZapasId:null};
 const debounceMap={};
 const dirtyStats={};
 
@@ -539,7 +557,7 @@ async function apiPatch(table,id,body){
 
 async function init(){
   try{
-    const [sez,hr,hs,zap,stat,tym,ht,sout]=await Promise.all([
+    const [sez,hr,hs,zap,stat,tym,ht,sout,zh]=await Promise.all([
       api('GET','vb_sezony?order=id.desc'),
       api('GET','vb_hraci?order=jmeno.asc'),
       api('GET','vb_hraci_sezony'),
@@ -548,6 +566,7 @@ async function init(){
       api('GET','vb_tymy?order=nazev.asc'),
       api('GET','vb_hraci_tymy'),
       api('GET','vb_souteze?order=nazev.asc'),
+      api('GET','vb_zapas_hraci'),
     ]);
     state.sezony=sez||[];
     state.hraci=hr||[];
@@ -557,6 +576,7 @@ async function init(){
     state.tymy=tym||[];
     state.hraciTymy=ht||[];
     state.souteze=sout||[];
+    state.zapasHraci=zh||[];
     state.activeSeason=(sez||[]).find(s=>s.aktivni)||null;
     renderSeasonSelect();
     renderAll();
@@ -789,35 +809,81 @@ function openFinishModal(){
 
 function renderLiveTable(zapasId){
   const sid=currentSeasonId();
-  const hraci=hraciVSezoně(sid||state.zapasy.find(z=>z.id===zapasId)?.sezona_id||0);
+  const sezona_id=sid||state.zapasy.find(z=>z.id===zapasId)?.sezona_id||0;
+  const vsichniHraci=hraciVSezoně(sezona_id);
   const el=document.getElementById('live-table-wrap');
-  if(!hraci.length){el.innerHTML='<div class="empty"><span class="empty-icon">👥</span><div class="empty-text">Soupiska je prázdná</div><div>Přidejte hráčky do sezóny v záložce Tým</div></div>';return;}
 
-  // ensure stat objects exist in memory
+  const lineup=state.zapasHraci.filter(zh=>zh.zapas_id===zapasId).map(zh=>zh.hrac_id);
+  const hraci=vsichniHraci.filter(h=>lineup.includes(h.id));
   hraci.forEach(h=>ensureStat(zapasId,h.id));
 
-  let thead1=`<tr><th class="sticky-col">Hráčka</th>`;
-  ACTIONS.forEach(a=>{
-    const variants=a.varianty?VARIANTS.filter(v=>a.varianty.includes(v.suf)):VARIANTS;
-    thead1+=`<th class="action-header" colspan="${variants.length}">${a.icon} ${a.label}</th>`;
-  });
-  thead1+=`</tr>`;
-
-  let tbody='';
-  hraci.forEach(h=>{
-    tbody+=`<tr><td class="sticky-col player-row-name">${h.jmeno}${h.cislo?` <span class="player-row-num">#${h.cislo}</span>`:''}</td>`;
-    ACTIONS.forEach(a=>{
+  const cards=hraci.map(h=>{
+    const actionRows=ACTIONS.map(a=>{
       const variants=a.varianty?VARIANTS.filter(v=>a.varianty.includes(v.suf)):VARIANTS;
-      variants.forEach(v=>{
+      const btns=variants.map(v=>{
         const field=`${a.key}_${v.suf}`;
         const val=getStatVal(zapasId,h.id,field);
-        tbody+=`<td class="sc ${v.cls}" onclick="bump(${h.id},${zapasId},'${field}')"><span class="sc-btn">${v.sym}</span><span class="sc-count" id="cnt-${h.id}-${field}">${val}</span></td>`;
-      });
-    });
-    tbody+=`</tr>`;
-  });
+        return `<button class="live-act-btn ${v.cls}" onclick="bump(${h.id},${zapasId},'${field}')"><span class="live-act-sym ${v.cls}">${v.sym}</span><span class="live-act-cnt" id="cnt-${h.id}-${field}">${val}</span></button>`;
+      }).join('');
+      return `<div class="live-action-row"><span class="live-action-icon">${a.icon}</span>${btns}</div>`;
+    }).join('');
+    return `<div class="live-card">
+      <div class="live-card-header">
+        <span class="live-card-num">${h.cislo?'#'+h.cislo:'—'}</span>
+        <span class="live-card-name">${h.jmeno}</span>
+        <button class="live-card-remove" onclick="removeZeSestava(${zapasId},${h.id})" title="Odebrat ze sestavy">×</button>
+      </div>
+      <div class="live-card-actions">${actionRows}</div>
+    </div>`;
+  }).join('');
 
-  el.innerHTML=`<div class="live-wrap"><table class="live-table"><thead>${thead1}</thead><tbody>${tbody}</tbody></table></div>`;
+  const addCard=`<div class="live-add-card" onclick="openHracPicker(${zapasId})">
+    <span style="font-size:30px;font-weight:700">+</span>
+    <span style="font-size:11px">Přidat hráčku</span>
+  </div>`;
+
+  el.innerHTML=`<div class="live-grid">${cards}${addCard}</div>`;
+}
+
+function openHracPicker(zapasId){
+  document.getElementById('picker-zapas-id').value=zapasId;
+  const z=state.zapasy.find(z=>z.id===zapasId);
+  const sid=currentSeasonId()||z?.sezona_id||0;
+  const vsichni=hraciVSezoně(sid);
+  const lineup=state.zapasHraci.filter(zh=>zh.zapas_id===zapasId).map(zh=>zh.hrac_id);
+  const available=vsichni.filter(h=>!lineup.includes(h.id));
+  const el=document.getElementById('hrac-picker-list');
+  if(!available.length){
+    el.innerHTML='<div class="empty"><span class="empty-icon">👥</span><div class="empty-text">Všechny hráčky jsou v sestavě</div></div>';
+  }else{
+    el.innerHTML=available.map(h=>{
+      const posClass=`pos-${h.pozice==='nahrávač'?'nahravac':h.pozice==='libero'?'libero':h.pozice==='universál'?'universal':'smec'}`;
+      const numEl=h.cislo?`<div class="player-num">${h.cislo}</div>`:`<div class="player-num no-num">?</div>`;
+      return `<div class="player-card" style="cursor:pointer" onclick="addDoSestava(${zapasId},${h.id})">
+        ${numEl}
+        <div class="player-info"><div class="player-name">${h.jmeno}</div><div class="player-pos ${posClass}">${h.pozice||'—'}</div></div>
+        <span style="color:var(--green);font-size:20px;font-weight:700">+</span>
+      </div>`;
+    }).join('');
+  }
+  openModal('modal-hrac-picker');
+}
+
+async function addDoSestava(zapasId,hracId){
+  try{
+    await apiUpsert('vb_zapas_hraci',{zapas_id:zapasId,hrac_id:hracId},'zapas_id,hrac_id');
+    if(!state.zapasHraci.some(zh=>zh.zapas_id===zapasId&&zh.hrac_id===hracId))state.zapasHraci.push({zapas_id:zapasId,hrac_id:hracId});
+    closeModal('modal-hrac-picker');
+    renderLiveTable(zapasId);
+  }catch(e){toast('Chyba: '+e.message,'error');}
+}
+
+async function removeZeSestava(zapasId,hracId){
+  try{
+    await fetch(`${SB_URL}/rest/v1/vb_zapas_hraci?zapas_id=eq.${zapasId}&hrac_id=eq.${hracId}`,{method:'DELETE',headers:{'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY}});
+    state.zapasHraci=state.zapasHraci.filter(zh=>!(zh.zapas_id===zapasId&&zh.hrac_id===hracId));
+    renderLiveTable(zapasId);
+  }catch(e){toast('Chyba: '+e.message,'error');}
 }
 
 function ensureStat(zapasId,hracId){
