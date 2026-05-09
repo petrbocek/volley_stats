@@ -792,7 +792,7 @@ function renderStatistiky(){
     const up=sum('utok_plus'),um=sum('utok_minus'),un=sum('utok_neutral');
     const bp=sum('blok_plus');
     const cm=sum('chyba_minus');
-    return {h,sp,sm,pp,pm,pn,up,um,un,bp,cm,total:sp+pp+up+bp};
+    return {h,sp,sm,pp,pm,pn,up,um,un,bp,cm,total:sp+pp+up+bp-sm-pm-um-cm};
   }).sort((a,b)=>b.total-a.total);
 
   const g='color:var(--green);font-weight:600';
