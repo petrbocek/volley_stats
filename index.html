@@ -1004,8 +1004,9 @@ function renderStatistiky(){
     const up=sum('utok_plus'),um=sum('utok_minus'),un=sum('utok_neutral');
     const bp=sum('blok_plus');
     const cm=sum('chyba_minus');
-    return {h,sp,sm,pp,pm,pn,up,um,un,bp,cm,total:sp+up+bp-sm-pm-um-cm};
-  }).sort((a,b)=>b.total-a.total);
+    const zapasy=stats.length;
+    return {h,sp,sm,pp,pm,pn,up,um,un,bp,cm,total:sp+up+bp-sm-pm-um-cm,zapasy};
+  }).filter(r=>r.zapasy>0).sort((a,b)=>b.total-a.total);
 
   const g='color:var(--green);font-weight:600';
   const r='color:var(--red);font-weight:600';
@@ -1015,7 +1016,7 @@ function renderStatistiky(){
   html+=`<div style="overflow-x:auto"><table class="stats-table">
     <thead>
       <tr>
-        <th rowspan="2">#</th><th rowspan="2">Hráčka</th>
+        <th rowspan="2">#</th><th rowspan="2">Hráčka</th><th rowspan="2">Záp.</th>
         <th colspan="2">🎯 Servis</th>
         <th colspan="3">🤲 Příjem</th>
         <th colspan="3">💥 Útok</th>
@@ -1033,6 +1034,7 @@ function renderStatistiky(){
       ${rows.map((row,i)=>`<tr>
         <td style="color:var(--muted);font-weight:700">${i+1}</td>
         <td><strong>${row.h.jmeno}</strong>${row.h.cislo?` <span style="color:var(--muted);font-size:11px">#${row.h.cislo}</span>`:''}</td>
+        <td style="color:var(--muted);font-weight:600;text-align:center">${row.zapasy}</td>
         <td style="${g}">${row.sp}</td><td style="${r}">${row.sm}</td>
         <td style="${g}">${row.pp}</td><td style="${r}">${row.pm}</td><td style="${b}">${pct(row.pp,row.pm,row.pn)}</td>
         <td style="${g}">${row.up}</td><td style="${r}">${row.um}</td><td style="${b}">${pct(row.up,row.um,row.un)}</td>
