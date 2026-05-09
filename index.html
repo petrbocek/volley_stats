@@ -221,7 +221,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 .toast.error{border-color:var(--red);color:var(--red)}
 
 /* POSITION BADGES */
-.pos-smec{color:#4dabf7}.pos-nahravac{color:#7950f2}.pos-libero{color:#f97316}.pos-universal{color:#51cf66}
+.pos-smec{color:#4dabf7}.pos-nahravac{color:#7950f2}.pos-libero{color:#f97316}.pos-universal{color:#51cf66}.pos-blokar{color:#ff6b6b}
 
 /* TEAMS */
 .tymy-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
@@ -462,6 +462,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
         <label class="form-label">Pozice</label>
         <select class="form-input" id="in-hrac-pozice">
           <option value="smečař">Smečař</option>
+          <option value="blokař">Blokař</option>
           <option value="nahrávač">Nahrávač</option>
           <option value="libero">Libero</option>
           <option value="universál">Universál</option>
@@ -709,7 +710,7 @@ function renderTym(){
 }
 
 function playerCardHtml(h,sid,inSeason){
-  const posClass=`pos-${h.pozice==='nahrávač'?'nahravac':h.pozice==='libero'?'libero':h.pozice==='universál'?'universal':'smec'}`;
+  const posClass=`pos-${h.pozice==='nahrávač'?'nahravac':h.pozice==='libero'?'libero':h.pozice==='universál'?'universal':h.pozice==='blokař'?'blokar':'smec'}`;
   const numEl=h.cislo?`<div class="player-num">${h.cislo}</div>`:`<div class="player-num no-num">?</div>`;
   const toggle=sid?`<button class="btn btn-sm ${inSeason?'btn-red':'btn-green'}" style="flex-shrink:0" onclick="toggleHracSezona(${h.id},${sid},${inSeason})">${inSeason?'Odebrat':'+ Přidat'}</button>`:'';
   return `<div class="player-card ${sid&&!inSeason?'inactive':''}" id="pc-${h.id}">
@@ -873,7 +874,7 @@ function openHracPicker(zapasId){
     el.innerHTML='<div class="empty"><span class="empty-icon">👥</span><div class="empty-text">Všechny hráčky jsou v sestavě</div></div>';
   }else{
     el.innerHTML=available.map(h=>{
-      const posClass=`pos-${h.pozice==='nahrávač'?'nahravac':h.pozice==='libero'?'libero':h.pozice==='universál'?'universal':'smec'}`;
+      const posClass=`pos-${h.pozice==='nahrávač'?'nahravac':h.pozice==='libero'?'libero':h.pozice==='universál'?'universal':h.pozice==='blokař'?'blokar':'smec'}`;
       const numEl=h.cislo?`<div class="player-num">${h.cislo}</div>`:`<div class="player-num no-num">?</div>`;
       return `<div class="player-card" style="cursor:pointer" onclick="addDoSestava(${zapasId},${h.id})">
         ${numEl}
@@ -1084,7 +1085,7 @@ function renderTymManage(tymId){
   if(!state.hraci.length){el.innerHTML='<div class="empty"><span class="empty-icon">👥</span><div class="empty-text">Žádné hráčky</div></div>';return;}
   el.innerHTML=state.hraci.map(h=>{
     const isIn=inTym.includes(h.id);
-    const posClass=`pos-${h.pozice==='nahrávač'?'nahravac':h.pozice==='libero'?'libero':h.pozice==='universál'?'universal':'smec'}`;
+    const posClass=`pos-${h.pozice==='nahrávač'?'nahravac':h.pozice==='libero'?'libero':h.pozice==='universál'?'universal':h.pozice==='blokař'?'blokar':'smec'}`;
     const numEl=h.cislo?`<div class="player-num">${h.cislo}</div>`:`<div class="player-num no-num">?</div>`;
     return `<div class="player-card ${isIn?'':'inactive'}">
       ${numEl}
