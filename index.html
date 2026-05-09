@@ -773,49 +773,47 @@ function renderStatistiky(){
   if(!sid){el.innerHTML='<div class="empty"><span class="empty-icon">📈</span><div class="empty-text">Vyberte sezónu</div></div>';return;}
   const hraci=hraciVSezoně(sid);
   if(!hraci.length){el.innerHTML='<div class="empty"><span class="empty-icon">📈</span><div class="empty-text">Prázdná soupiska</div></div>';return;}
-  const zapasy=state.zapasy.filter(z=>z.sezona_id===sid&&z.stav==='dokonceny');
-  if(!zapasy.length){el.innerHTML='<div class="empty"><span class="empty-icon">📈</span><div class="empty-text">Žádné dokončené zápasy</div></div>';return;}
-  const zapasIds=zapasy.map(z=>z.id);
+  const vsechnyZapasy=state.zapasy.filter(z=>z.sezona_id===sid&&(z.stav==='dokonceny'||z.stav==='probihajici'));
+  if(!vsechnyZapasy.length){el.innerHTML='<div class="empty"><span class="empty-icon">📈</span><div class="empty-text">Žádné zápasy se statistikami</div></div>';return;}
+
+  const selectedId=parseInt(document.getElementById('stats-zapas-sel')?.value)||0;
+  const zapasIds=(selectedId?vsechnyZapasy.filter(z=>z.id===selectedId):vsechnyZapasy).map(z=>z.id);
 
   const rows=hraci.map(h=>{
     const stats=state.statistiky.filter(s=>s.hrac_id===h.id&&zapasIds.includes(s.zapas_id));
     const sum=(f)=>stats.reduce((acc,s)=>acc+(s[f]||0),0);
-    return {h,stats,
-      utok_plus:sum('utok_plus'),servis_plus:sum('servis_plus'),blok_plus:sum('blok_plus'),
-      prijem_plus:sum('prijem_plus'),vykop_plus:sum('vykop_plus'),nahravka_plus:sum('nahravka_plus'),
-      total:ACTIONS.reduce((a,ac)=>a+sum(ac.key+'_plus'),0)
-    };
+    const actionData={};
+    ACTIONS.forEach(a=>{
+      const primary=a.varianty?a.varianty[0]:'plus';
+      actionData[a.key]=sum(`${a.key}_${primary}`);
+    });
+    return {h,actionData,total:Object.values(actionData).reduce((a,b)=>a+b,0)};
   }).sort((a,b)=>b.total-a.total);
 
-  let html=`<div class="section-title">Žebříček — pozitivní body</div>`;
-  html+=`<div style="overflow-x:auto"><table class="stats-table">
-    <thead><tr>
-      <th>#</th><th>Hráčka</th>
-      ${ACTIONS.map(a=>`<th>${a.icon} ${a.label}</th>`).join('')}
-      <th>Celkem</th>
-    </tr></thead><tbody>`;
+  let html=`<div style="margin-bottom:16px">
+    <select id="stats-zapas-sel" class="form-input" style="max-width:340px" onchange="renderStatistiky()">
+      <option value="">— celá sezóna —</option>
+      ${vsechnyZapasy.map(z=>`<option value="${z.id}"${z.id===selectedId?' selected':''}>${fmtDate(z.datum)} — ${z.soupet}</option>`).join('')}
+    </select>
+  </div>`;
+
+  html+=`<div style="overflow-x:auto"><table class="stats-table"><thead><tr>
+    <th>#</th><th>Hráčka</th>
+    ${ACTIONS.map(a=>`<th>${a.icon} ${a.label}</th>`).join('')}
+    <th>Celkem</th>
+  </tr></thead><tbody>`;
   rows.forEach((r,i)=>{
     html+=`<tr>
       <td style="color:var(--muted);font-weight:700">${i+1}</td>
       <td><strong>${r.h.jmeno}</strong>${r.h.cislo?` <span style="color:var(--muted);font-size:11px">#${r.h.cislo}</span>`:''}</td>
-      ${ACTIONS.map(a=>`<td style="color:var(--green);font-weight:600">${r[a.key+'_plus']||0}</td>`).join('')}
+      ${ACTIONS.map(a=>{
+        const color=(a.varianty&&a.varianty[0]==='minus')?'var(--red)':'var(--green)';
+        return `<td style="color:${color};font-weight:600">${r.actionData[a.key]||0}</td>`;
+      }).join('')}
       <td style="color:var(--accent);font-family:'Oswald',sans-serif;font-size:16px;font-weight:700">${r.total}</td>
     </tr>`;
   });
   html+=`</tbody></table></div>`;
-
-  // detailed per-action leaderboard
-  html+=`<div class="section-title" style="margin-top:24px">Detail akcí</div>`;
-  html+=`<div class="stats-grid">`;
-  ACTIONS.forEach(a=>{
-    const best=rows.filter(r=>r[a.key+'_plus']>0).sort((x,y)=>y[a.key+'_plus']-x[a.key+'_plus']).slice(0,3);
-    html+=`<div class="stat-card" style="text-align:left">
-      <div style="font-size:20px;margin-bottom:6px">${a.icon} <strong style="font-size:14px">${a.label}</strong></div>
-      ${best.length?best.map((r,i)=>`<div style="display:flex;justify-content:space-between;font-size:13px;padding:3px 0;border-bottom:1px solid var(--border)"><span>${i+1}. ${r.h.jmeno}</span><span style="color:var(--green);font-weight:700">${r[a.key+'_plus']}</span></div>`).join(''):'<div style="color:var(--muted);font-size:12px">Žádná data</div>'}
-    </div>`;
-  });
-  html+=`</div>`;
-
   el.innerHTML=html;
 }
 
