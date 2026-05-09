@@ -867,18 +867,52 @@ function renderStatistiky(){
   const sid=currentSeasonId();
   const el=document.getElementById('stats-content');
   if(!sid){el.innerHTML='<div class="empty"><span class="empty-icon">📈</span><div class="empty-text">Vyberte sezónu</div></div>';return;}
-  const hraci=hraciVSezoně(sid);
-  if(!hraci.length){el.innerHTML='<div class="empty"><span class="empty-icon">📈</span><div class="empty-text">Prázdná soupiska</div></div>';return;}
+  const vsechnyHraci=hraciVSezoně(sid);
+  if(!vsechnyHraci.length){el.innerHTML='<div class="empty"><span class="empty-icon">📈</span><div class="empty-text">Prázdná soupiska</div></div>';return;}
   const vsechnyZapasy=state.zapasy.filter(z=>z.sezona_id===sid&&(z.stav==='dokonceny'||z.stav==='probihajici'));
   if(!vsechnyZapasy.length){el.innerHTML='<div class="empty"><span class="empty-icon">📈</span><div class="empty-text">Žádné zápasy se statistikami</div></div>';return;}
 
-  const selectedId=parseInt(document.getElementById('stats-zapas-sel')?.value)||0;
-  const zapasIds=(selectedId?vsechnyZapasy.filter(z=>z.id===selectedId):vsechnyZapasy).map(z=>z.id);
+  const selTym=parseInt(document.getElementById('stats-tym-sel')?.value)||0;
+  const selSoutez=parseInt(document.getElementById('stats-soutez-sel')?.value)||0;
+  const selZapas=parseInt(document.getElementById('stats-zapas-sel')?.value)||0;
+  const selHrac=parseInt(document.getElementById('stats-hrac-sel')?.value)||0;
 
-  const pct=(plus,minus,neutral)=>{
-    const t=plus+minus+neutral;
-    return t>0?Math.round(plus/t*100)+'%':'—';
-  };
+  // filter players
+  let hraci=vsechnyHraci;
+  if(selTym){const ids=state.hraciTymy.filter(ht=>ht.tym_id===selTym).map(ht=>ht.hrac_id);hraci=hraci.filter(h=>ids.includes(h.id));}
+  if(selHrac)hraci=hraci.filter(h=>h.id===selHrac);
+
+  // filter matches (competition → specific match)
+  const zapasyPoCsoutezi=selSoutez?vsechnyZapasy.filter(z=>z.soutez_id===selSoutez):vsechnyZapasy;
+  const zapasIds=(selZapas?zapasyPoCsoutezi.filter(z=>z.id===selZapas):zapasyPoCsoutezi).map(z=>z.id);
+
+  const seasonSouteze=state.souteze.filter(s=>!s.sezona_id||s.sezona_id===sid);
+
+  let html=`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
+    <select id="stats-tym-sel" class="form-input" style="min-width:130px;flex:1" onchange="renderStatistiky()">
+      <option value="">— všechny týmy —</option>
+      ${state.tymy.map(t=>`<option value="${t.id}"${t.id===selTym?' selected':''}>${t.nazev}</option>`).join('')}
+    </select>
+    <select id="stats-soutez-sel" class="form-input" style="min-width:130px;flex:1" onchange="renderStatistiky()">
+      <option value="">— všechny soutěže —</option>
+      ${seasonSouteze.map(s=>`<option value="${s.id}"${s.id===selSoutez?' selected':''}>${s.nazev}</option>`).join('')}
+    </select>
+    <select id="stats-zapas-sel" class="form-input" style="min-width:160px;flex:1" onchange="renderStatistiky()">
+      <option value="">— celá sezóna —</option>
+      ${zapasyPoCsoutezi.map(z=>`<option value="${z.id}"${z.id===selZapas?' selected':''}>${fmtDate(z.datum)} — ${z.soupet}</option>`).join('')}
+    </select>
+    <select id="stats-hrac-sel" class="form-input" style="min-width:130px;flex:1" onchange="renderStatistiky()">
+      <option value="">— všechny hráčky —</option>
+      ${vsechnyHraci.map(h=>`<option value="${h.id}"${h.id===selHrac?' selected':''}>${h.jmeno}</option>`).join('')}
+    </select>
+  </div>`;
+
+  if(!hraci.length){
+    el.innerHTML=html+'<div class="empty" style="padding:32px"><span class="empty-icon">📈</span><div class="empty-text">Žádné výsledky pro zvolené filtry</div></div>';
+    return;
+  }
+
+  const pct=(plus,minus,neutral)=>{const t=plus+minus+neutral;return t>0?Math.round(plus/t*100)+'%':'—';};
 
   const rows=hraci.map(h=>{
     const stats=state.statistiky.filter(s=>s.hrac_id===h.id&&zapasIds.includes(s.zapas_id));
@@ -896,13 +930,7 @@ function renderStatistiky(){
   const b='color:var(--accent2);font-weight:600';
   const a='color:var(--accent);font-family:\'Oswald\',sans-serif;font-size:16px;font-weight:700';
 
-  let html=`<div style="margin-bottom:16px">
-    <select id="stats-zapas-sel" class="form-input" style="max-width:340px" onchange="renderStatistiky()">
-      <option value="">— celá sezóna —</option>
-      ${vsechnyZapasy.map(z=>`<option value="${z.id}"${z.id===selectedId?' selected':''}>${fmtDate(z.datum)} — ${z.soupet}</option>`).join('')}
-    </select>
-  </div>
-  <div style="overflow-x:auto"><table class="stats-table">
+  html+=`<div style="overflow-x:auto"><table class="stats-table">
     <thead>
       <tr>
         <th rowspan="2">#</th><th rowspan="2">Hráčka</th>
