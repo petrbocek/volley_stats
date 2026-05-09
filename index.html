@@ -284,7 +284,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 <!-- ═══════════════════════════════════ TÝM ═══════════════════════════════════ -->
 <div class="tab-content" id="tab-tym">
   <div style="display:flex;justify-content:flex-end;margin-bottom:16px;gap:8px;flex-wrap:wrap">
-    <button class="btn btn-secondary" onclick="openModal('modal-hrac')">+ Přidat hráčku</button>
+    <button class="btn btn-secondary" onclick="openAddHracModal()">+ Přidat hráčku</button>
     <button class="btn btn-secondary" onclick="openModal('modal-tym')">+ Nový tým</button>
   </div>
   <div id="tym-season-note" style="margin-bottom:12px;font-size:13px;color:var(--muted)"></div>
@@ -408,7 +408,14 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
       <label class="form-label">Soutěž</label>
       <div style="display:flex;gap:8px">
         <select class="form-input" id="in-zapas-soutez" style="flex:1"></select>
-        <button class="btn btn-sm btn-secondary" onclick="openSoutezModal()" type="button">+ Nová</button>
+        <button class="btn btn-sm btn-secondary" onclick="toggleNovaSoutezForm()" type="button">+ Nová</button>
+      </div>
+      <div id="nova-soutez-inline" style="display:none;margin-top:8px">
+        <div style="display:flex;gap:8px">
+          <input class="form-input" id="in-nova-soutez-nazev" placeholder="název soutěže" style="flex:1" />
+          <button class="btn btn-sm btn-primary" onclick="saveNovaSoutezInline()" type="button">Přidat</button>
+          <button class="btn btn-sm btn-secondary" onclick="toggleNovaSoutezForm()" type="button">✕</button>
+        </div>
       </div>
     </div>
     <div class="modal-footer">
@@ -418,10 +425,11 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
   </div>
 </div>
 
-<!-- Přidat hráčku -->
+<!-- Přidat / upravit hráčku -->
 <div class="modal-overlay hidden" id="modal-hrac">
   <div class="modal">
-    <div class="modal-title">👤 Přidat hráčku</div>
+    <div class="modal-title" id="hrac-modal-title">👤 Přidat hráčku</div>
+    <input type="hidden" id="in-hrac-id" />
     <div class="form-group">
       <label class="form-label">Jméno *</label>
       <input class="form-input" id="in-hrac-jmeno" placeholder="jméno hráčky" />
@@ -443,7 +451,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
     </div>
     <div class="modal-footer">
       <button class="btn btn-secondary" onclick="closeModal('modal-hrac')">Zrušit</button>
-      <button class="btn btn-primary" onclick="saveHrac()">Přidat</button>
+      <button class="btn btn-primary" id="btn-save-hrac" onclick="saveHrac()">Přidat</button>
     </div>
   </div>
 </div>
@@ -688,6 +696,7 @@ function playerCardHtml(h,sid,inSeason){
       <div class="player-name">${h.jmeno}</div>
       <div class="player-pos ${posClass}">${h.pozice||'—'}</div>
     </div>
+    <button class="btn btn-sm btn-secondary" style="flex-shrink:0" onclick="editHrac(${h.id})">✏️</button>
     ${toggle}
   </div>`;
 }
@@ -1017,12 +1026,34 @@ async function deleteTym(){
 
 /* ─── SOUTĚŽE ─── */
 function openZapasModal(){
+  document.getElementById('nova-soutez-inline').style.display='none';
+  document.getElementById('in-nova-soutez-nazev').value='';
   refreshSoutezSelect();
   openModal('modal-zapas');
 }
 
-function openSoutezModal(){
-  openModal('modal-soutez');
+function toggleNovaSoutezForm(){
+  const el=document.getElementById('nova-soutez-inline');
+  const visible=el.style.display!=='none';
+  el.style.display=visible?'none':'block';
+  if(!visible)document.getElementById('in-nova-soutez-nazev').focus();
+}
+
+async function saveNovaSoutezInline(){
+  const nazev=document.getElementById('in-nova-soutez-nazev').value.trim();
+  if(!nazev){toast('Zadej název soutěže','error');return;}
+  const sid=currentSeasonId();
+  const body={nazev};if(sid)body.sezona_id=sid;
+  try{
+    const res=await api('POST','vb_souteze',body);
+    state.souteze.push(res[0]);
+    state.souteze.sort((a,b)=>a.nazev.localeCompare(b.nazev));
+    document.getElementById('in-nova-soutez-nazev').value='';
+    toggleNovaSoutezForm();
+    refreshSoutezSelect();
+    document.getElementById('in-zapas-soutez').value=res[0].id;
+    toast('Soutěž přidána','success');
+  }catch(e){toast('Chyba: '+e.message,'error');}
 }
 
 function refreshSoutezSelect(){
@@ -1113,28 +1144,59 @@ async function deleteZapas(id){
   }catch(e){toast('Chyba: '+e.message,'error');}
 }
 
-/* ─── SAVE HRÁČ ─── */
+/* ─── HRÁČKY ─── */
+function openAddHracModal(){
+  document.getElementById('in-hrac-id').value='';
+  document.getElementById('in-hrac-jmeno').value='';
+  document.getElementById('in-hrac-cislo').value='';
+  document.getElementById('in-hrac-pozice').value='smečař';
+  document.getElementById('hrac-modal-title').textContent='👤 Přidat hráčku';
+  document.getElementById('btn-save-hrac').textContent='Přidat';
+  openModal('modal-hrac');
+}
+
+function editHrac(id){
+  const h=state.hraci.find(h=>h.id===id);if(!h)return;
+  document.getElementById('in-hrac-id').value=id;
+  document.getElementById('in-hrac-jmeno').value=h.jmeno;
+  document.getElementById('in-hrac-cislo').value=h.cislo||'';
+  document.getElementById('in-hrac-pozice').value=h.pozice||'smečař';
+  document.getElementById('hrac-modal-title').textContent='✏️ Upravit hráčku';
+  document.getElementById('btn-save-hrac').textContent='Uložit';
+  openModal('modal-hrac');
+}
+
 async function saveHrac(){
+  const id=parseInt(document.getElementById('in-hrac-id').value)||null;
   const jmeno=document.getElementById('in-hrac-jmeno').value.trim();
   if(!jmeno){toast('Zadej jméno','error');return;}
   const cislo=document.getElementById('in-hrac-cislo').value;
   const pozice=document.getElementById('in-hrac-pozice').value;
   try{
-    const res=await api('POST','vb_hraci',{jmeno,cislo:cislo?parseInt(cislo):null,pozice,aktivni:true});
-    const nh=res[0];
-    state.hraci.push(nh);
-    state.hraci.sort((a,b)=>a.jmeno.localeCompare(b.jmeno));
-    // auto-add to current season
-    const sid=currentSeasonId();
-    if(sid){
-      await apiUpsert('vb_hraci_sezony',{hrac_id:nh.id,sezona_id:sid},'hrac_id,sezona_id');
-      state.hraciSezony.push({hrac_id:nh.id,sezona_id:sid});
+    if(id){
+      const res=await apiPatch('vb_hraci',id,{jmeno,cislo:cislo?parseInt(cislo):null,pozice});
+      const idx=state.hraci.findIndex(h=>h.id===id);
+      if(idx>=0)state.hraci[idx]={...state.hraci[idx],...(res&&res[0]?res[0]:{jmeno,cislo:cislo?parseInt(cislo):null,pozice})};
+      state.hraci.sort((a,b)=>a.jmeno.localeCompare(b.jmeno));
+      closeModal('modal-hrac');
+      renderTym();renderPrehled();renderLiveSelect();renderStatistiky();
+      toast('Hráčka upravena','success');
+    }else{
+      const res=await api('POST','vb_hraci',{jmeno,cislo:cislo?parseInt(cislo):null,pozice,aktivni:true});
+      const nh=res[0];
+      state.hraci.push(nh);
+      state.hraci.sort((a,b)=>a.jmeno.localeCompare(b.jmeno));
+      const sid=currentSeasonId();
+      if(sid){
+        await apiUpsert('vb_hraci_sezony',{hrac_id:nh.id,sezona_id:sid},'hrac_id,sezona_id');
+        state.hraciSezony.push({hrac_id:nh.id,sezona_id:sid});
+      }
+      closeModal('modal-hrac');
+      renderTym();renderPrehled();renderLiveSelect();
+      toast('Hráčka přidána','success');
     }
-    closeModal('modal-hrac');
     document.getElementById('in-hrac-jmeno').value='';
     document.getElementById('in-hrac-cislo').value='';
-    renderTym();renderPrehled();renderLiveSelect();
-    toast('Hráčka přidána','success');
   }catch(e){toast('Chyba: '+e.message,'error');}
 }
 
