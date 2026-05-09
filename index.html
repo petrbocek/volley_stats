@@ -779,41 +779,63 @@ function renderStatistiky(){
   const selectedId=parseInt(document.getElementById('stats-zapas-sel')?.value)||0;
   const zapasIds=(selectedId?vsechnyZapasy.filter(z=>z.id===selectedId):vsechnyZapasy).map(z=>z.id);
 
+  const pct=(plus,minus,neutral)=>{
+    const t=plus+minus+neutral;
+    return t>0?Math.round(plus/t*100)+'%':'—';
+  };
+
   const rows=hraci.map(h=>{
     const stats=state.statistiky.filter(s=>s.hrac_id===h.id&&zapasIds.includes(s.zapas_id));
     const sum=(f)=>stats.reduce((acc,s)=>acc+(s[f]||0),0);
-    const actionData={};
-    ACTIONS.forEach(a=>{
-      const primary=a.varianty?a.varianty[0]:'plus';
-      actionData[a.key]=sum(`${a.key}_${primary}`);
-    });
-    return {h,actionData,total:Object.values(actionData).reduce((a,b)=>a+b,0)};
+    const sp=sum('servis_plus'),sm=sum('servis_minus');
+    const pp=sum('prijem_plus'),pm=sum('prijem_minus'),pn=sum('prijem_neutral');
+    const up=sum('utok_plus'),um=sum('utok_minus'),un=sum('utok_neutral');
+    const bp=sum('blok_plus');
+    const cm=sum('chyba_minus');
+    return {h,sp,sm,pp,pm,pn,up,um,un,bp,cm,total:sp+pp+up+bp};
   }).sort((a,b)=>b.total-a.total);
+
+  const g='color:var(--green);font-weight:600';
+  const r='color:var(--red);font-weight:600';
+  const b='color:var(--accent2);font-weight:600';
+  const a='color:var(--accent);font-family:\'Oswald\',sans-serif;font-size:16px;font-weight:700';
 
   let html=`<div style="margin-bottom:16px">
     <select id="stats-zapas-sel" class="form-input" style="max-width:340px" onchange="renderStatistiky()">
       <option value="">— celá sezóna —</option>
       ${vsechnyZapasy.map(z=>`<option value="${z.id}"${z.id===selectedId?' selected':''}>${fmtDate(z.datum)} — ${z.soupet}</option>`).join('')}
     </select>
-  </div>`;
-
-  html+=`<div style="overflow-x:auto"><table class="stats-table"><thead><tr>
-    <th>#</th><th>Hráčka</th>
-    ${ACTIONS.map(a=>`<th>${a.icon} ${a.label}</th>`).join('')}
-    <th>Celkem</th>
-  </tr></thead><tbody>`;
-  rows.forEach((r,i)=>{
-    html+=`<tr>
-      <td style="color:var(--muted);font-weight:700">${i+1}</td>
-      <td><strong>${r.h.jmeno}</strong>${r.h.cislo?` <span style="color:var(--muted);font-size:11px">#${r.h.cislo}</span>`:''}</td>
-      ${ACTIONS.map(a=>{
-        const color=(a.varianty&&a.varianty[0]==='minus')?'var(--red)':'var(--green)';
-        return `<td style="color:${color};font-weight:600">${r.actionData[a.key]||0}</td>`;
-      }).join('')}
-      <td style="color:var(--accent);font-family:'Oswald',sans-serif;font-size:16px;font-weight:700">${r.total}</td>
-    </tr>`;
-  });
-  html+=`</tbody></table></div>`;
+  </div>
+  <div style="overflow-x:auto"><table class="stats-table">
+    <thead>
+      <tr>
+        <th rowspan="2">#</th><th rowspan="2">Hráčka</th>
+        <th colspan="2">🎯 Servis</th>
+        <th colspan="3">🤲 Příjem</th>
+        <th colspan="3">💥 Útok</th>
+        <th rowspan="2">🛡️ Blok</th>
+        <th rowspan="2">❌ Chyba</th>
+        <th rowspan="2">Celkem</th>
+      </tr>
+      <tr>
+        <th>Es</th><th>Chyby</th>
+        <th>Výb.</th><th>Chyby</th><th>%</th>
+        <th>Výb.</th><th>Chyby</th><th>%</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rows.map((row,i)=>`<tr>
+        <td style="color:var(--muted);font-weight:700">${i+1}</td>
+        <td><strong>${row.h.jmeno}</strong>${row.h.cislo?` <span style="color:var(--muted);font-size:11px">#${row.h.cislo}</span>`:''}</td>
+        <td style="${g}">${row.sp}</td><td style="${r}">${row.sm}</td>
+        <td style="${g}">${row.pp}</td><td style="${r}">${row.pm}</td><td style="${b}">${pct(row.pp,row.pm,row.pn)}</td>
+        <td style="${g}">${row.up}</td><td style="${r}">${row.um}</td><td style="${b}">${pct(row.up,row.um,row.un)}</td>
+        <td style="${g}">${row.bp}</td>
+        <td style="${r}">${row.cm}</td>
+        <td style="${a}">${row.total}</td>
+      </tr>`).join('')}
+    </tbody>
+  </table></div>`;
   el.innerHTML=html;
 }
 
