@@ -50,6 +50,23 @@
   ALTER TABLE vb_hraci_sezony DISABLE ROW LEVEL SECURITY;
   ALTER TABLE vb_zapasy DISABLE ROW LEVEL SECURITY;
   ALTER TABLE vb_statistiky DISABLE ROW LEVEL SECURITY;
+  CREATE TABLE vb_tymy (
+    id bigserial PRIMARY KEY, created_at timestamptz DEFAULT now(),
+    nazev text NOT NULL
+  );
+  CREATE TABLE vb_hraci_tymy (
+    hrac_id bigint REFERENCES vb_hraci(id) ON DELETE CASCADE,
+    tym_id bigint REFERENCES vb_tymy(id) ON DELETE CASCADE,
+    PRIMARY KEY (hrac_id, tym_id)
+  );
+  CREATE TABLE vb_souteze (
+    id bigserial PRIMARY KEY, created_at timestamptz DEFAULT now(),
+    sezona_id bigint REFERENCES vb_sezony(id), nazev text NOT NULL
+  );
+  ALTER TABLE vb_zapasy ADD COLUMN IF NOT EXISTS soutez_id bigint REFERENCES vb_souteze(id);
+  ALTER TABLE vb_tymy DISABLE ROW LEVEL SECURITY;
+  ALTER TABLE vb_hraci_tymy DISABLE ROW LEVEL SECURITY;
+  ALTER TABLE vb_souteze DISABLE ROW LEVEL SECURITY;
   -- projekt: cqcjdslqygayijxfhzof
   ─────────────────────────────────────────────────────────────
 */
@@ -203,6 +220,14 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 /* POSITION BADGES */
 .pos-smec{color:#4dabf7}.pos-nahravac{color:#7950f2}.pos-libero{color:#f97316}.pos-universal{color:#51cf66}
 
+/* TEAMS */
+.tymy-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
+.tym-card{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px}
+.tym-card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.tym-card-title{font-family:'Oswald',sans-serif;font-size:15px;font-weight:600}
+.tym-members{font-size:12px;color:var(--muted);display:flex;flex-wrap:wrap;gap:4px;min-height:20px}
+.tym-member{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:2px 8px}
+
 /* RESPONSIVE */
 @media(max-width:600px){
   .form-row{grid-template-columns:1fr}
@@ -251,7 +276,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 <!-- ═══════════════════════════════════ ZÁPASY ═══════════════════════════════════ -->
 <div class="tab-content" id="tab-zapasy">
   <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
-    <button class="btn btn-primary" onclick="openModal('modal-zapas')">+ Nový zápas</button>
+    <button class="btn btn-primary" onclick="openZapasModal()">+ Nový zápas</button>
   </div>
   <div id="zapasy-list"><div class="empty"><span class="empty-icon">🏆</span><div class="empty-text">Žádné zápasy</div></div></div>
 </div>
@@ -260,9 +285,12 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 <div class="tab-content" id="tab-tym">
   <div style="display:flex;justify-content:flex-end;margin-bottom:16px;gap:8px;flex-wrap:wrap">
     <button class="btn btn-secondary" onclick="openModal('modal-hrac')">+ Přidat hráčku</button>
+    <button class="btn btn-secondary" onclick="openModal('modal-tym')">+ Nový tým</button>
   </div>
   <div id="tym-season-note" style="margin-bottom:12px;font-size:13px;color:var(--muted)"></div>
   <div id="hraci-list"><div class="empty"><span class="empty-icon">👥</span><div class="empty-text">Žádné hráčky</div></div></div>
+  <div class="section-title" style="margin-top:24px">Týmy</div>
+  <div id="tymy-list"><div class="empty" style="padding:24px"><span class="empty-icon" style="font-size:28px">🏐</span><div class="empty-text" style="font-size:14px">Žádné týmy</div></div></div>
 </div>
 
 <!-- ═══════════════════════════════════ LIVE ═══════════════════════════════════ -->
@@ -285,6 +313,49 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 </div>
 
 <!-- ═══════ MODALS ═══════ -->
+
+<!-- Nový tým -->
+<div class="modal-overlay hidden" id="modal-tym">
+  <div class="modal">
+    <div class="modal-title">👥 Nový tým</div>
+    <div class="form-group">
+      <label class="form-label">Název týmu</label>
+      <input class="form-input" id="in-tym-nazev" placeholder="např. A tým" />
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('modal-tym')">Zrušit</button>
+      <button class="btn btn-primary" onclick="saveTym()">Vytvořit</button>
+    </div>
+  </div>
+</div>
+
+<!-- Nová soutěž -->
+<div class="modal-overlay hidden" id="modal-soutez">
+  <div class="modal">
+    <div class="modal-title">🏆 Nová soutěž</div>
+    <div class="form-group">
+      <label class="form-label">Název soutěže</label>
+      <input class="form-input" id="in-soutez-nazev" placeholder="např. Krajský přebor" />
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('modal-soutez')">Zrušit</button>
+      <button class="btn btn-primary" onclick="saveSoutez()">Vytvořit</button>
+    </div>
+  </div>
+</div>
+
+<!-- Správa týmu -->
+<div class="modal-overlay hidden" id="modal-tym-manage">
+  <div class="modal">
+    <div class="modal-title" id="tym-manage-title">👥 Správa týmu</div>
+    <input type="hidden" id="tym-manage-id" />
+    <div id="tym-manage-content" class="player-grid" style="margin-bottom:16px"></div>
+    <div class="modal-footer" style="justify-content:space-between">
+      <button class="btn btn-red btn-sm" onclick="deleteTym()">🗑️ Smazat tým</button>
+      <button class="btn btn-secondary" onclick="closeModal('modal-tym-manage')">Zavřít</button>
+    </div>
+  </div>
+</div>
 
 <!-- Nová sezóna -->
 <div class="modal-overlay hidden" id="modal-sezona">
@@ -332,6 +403,13 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
         <option value="venku">Venku</option>
         <option value="neutral">Neutrální</option>
       </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Soutěž</label>
+      <div style="display:flex;gap:8px">
+        <select class="form-input" id="in-zapas-soutez" style="flex:1"></select>
+        <button class="btn btn-sm btn-secondary" onclick="openSoutezModal()" type="button">+ Nová</button>
+      </div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-secondary" onclick="closeModal('modal-zapas')">Zrušit</button>
@@ -418,7 +496,7 @@ const VARIANTS=[
   {suf:'minus',sym:'−',cls:'minus'},
 ];
 
-const state={sezony:[],activeSeason:null,hraci:[],hraciSezony:[],zapasy:[],statistiky:[],liveZapasId:null};
+const state={sezony:[],activeSeason:null,hraci:[],hraciSezony:[],zapasy:[],statistiky:[],tymy:[],hraciTymy:[],souteze:[],liveZapasId:null};
 const debounceMap={};
 const dirtyStats={};
 
@@ -453,18 +531,24 @@ async function apiPatch(table,id,body){
 
 async function init(){
   try{
-    const [sez,hr,hs,zap,stat]=await Promise.all([
+    const [sez,hr,hs,zap,stat,tym,ht,sout]=await Promise.all([
       api('GET','vb_sezony?order=id.desc'),
       api('GET','vb_hraci?order=jmeno.asc'),
       api('GET','vb_hraci_sezony'),
       api('GET','vb_zapasy?order=datum.desc'),
       api('GET','vb_statistiky'),
+      api('GET','vb_tymy?order=nazev.asc'),
+      api('GET','vb_hraci_tymy'),
+      api('GET','vb_souteze?order=nazev.asc'),
     ]);
     state.sezony=sez||[];
     state.hraci=hr||[];
     state.hraciSezony=hs||[];
     state.zapasy=zap||[];
     state.statistiky=stat||[];
+    state.tymy=tym||[];
+    state.hraciTymy=ht||[];
+    state.souteze=sout||[];
     state.activeSeason=(sez||[]).find(s=>s.aktivni)||null;
     renderSeasonSelect();
     renderAll();
@@ -545,6 +629,7 @@ function matchHtml(z,withActions=false){
   const score=z.stav==='dokonceny'&&z.sety_my!=null?`<span class="match-score ${win?'win':lose?'lose':''}">${z.sety_my}:${z.sety_oni}</span>`:'<span class="match-score" style="color:var(--muted)">—:—</span>';
   const badge=`<span class="match-badge badge-${z.stav==='probihajici'?'probiha':z.stav==='dokonceny'?'dokonceny':'planovany'}">${stavLabel(z.stav)}</span>`;
   const misto=z.misto==='doma'?'🏠 Doma':z.misto==='venku'?'✈️ Venku':'⚖️ Neutrál';
+  const soutez=state.souteze.find(s=>s.id===z.soutez_id);
   let actions='';
   if(withActions){
     if(z.stav==='planovany')actions=`<button class="btn btn-sm btn-primary" onclick="goLive(${z.id})">⚡ Live</button><button class="btn btn-sm btn-secondary" onclick="editVysledek(${z.id})">📝 Výsledek</button><button class="btn btn-sm btn-red" onclick="deleteZapas(${z.id})">🗑️</button>`;
@@ -554,7 +639,7 @@ function matchHtml(z,withActions=false){
   return `<div class="match-item">
     <div class="match-date">${fmtDate(z.datum)}${z.cas?'<br><span style="font-size:11px">'+z.cas.slice(0,5)+'</span>':''}</div>
     ${score}
-    <div style="flex:1;min-width:120px"><div class="match-vs">${z.soupet}</div><div class="match-misto">${misto}</div></div>
+    <div style="flex:1;min-width:120px"><div class="match-vs">${z.soupet}</div><div class="match-misto">${misto}${soutez?` · <span style="color:var(--accent2)">${soutez.nazev}</span>`:''}</div></div>
     ${badge}
     ${withActions?`<div class="match-actions">${actions}</div>`:''}
   </div>`;
@@ -590,6 +675,7 @@ function renderTym(){
     html+=inactive.map(h=>playerCardHtml(h,sid,false)).join('');
   }
   el.innerHTML=html||'<div class="empty"><span class="empty-icon">👥</span><div class="empty-text">Žádné hráčky</div></div>';
+  renderTymy();
 }
 
 function playerCardHtml(h,sid,inSeason){
@@ -840,6 +926,134 @@ function renderStatistiky(){
   el.innerHTML=html;
 }
 
+/* ─── TÝMY ─── */
+function renderTymy(){
+  const el=document.getElementById('tymy-list');
+  if(!state.tymy.length){
+    el.innerHTML='<div class="empty" style="padding:24px"><span class="empty-icon" style="font-size:28px">🏐</span><div class="empty-text" style="font-size:14px">Žádné týmy</div></div>';
+    return;
+  }
+  el.innerHTML=`<div class="tymy-grid">${state.tymy.map(t=>{
+    const members=state.hraciTymy.filter(ht=>ht.tym_id===t.id);
+    const playerChips=members.map(ht=>{
+      const h=state.hraci.find(h=>h.id===ht.hrac_id);
+      return h?`<span class="tym-member">${h.jmeno}</span>`:'';
+    }).join('');
+    return `<div class="tym-card">
+      <div class="tym-card-header">
+        <div class="tym-card-title">${t.nazev}</div>
+        <button class="btn btn-sm btn-secondary" onclick="openTymManage(${t.id})">✏️ Spravovat</button>
+      </div>
+      <div class="tym-members">${playerChips||'<span style="color:var(--muted)">Prázdný tým</span>'}</div>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+function openTymManage(tymId){
+  const tym=state.tymy.find(t=>t.id===tymId);if(!tym)return;
+  document.getElementById('tym-manage-id').value=tymId;
+  document.getElementById('tym-manage-title').textContent=`👥 ${tym.nazev}`;
+  renderTymManage(tymId);
+  openModal('modal-tym-manage');
+}
+
+function renderTymManage(tymId){
+  const inTym=state.hraciTymy.filter(ht=>ht.tym_id===tymId).map(ht=>ht.hrac_id);
+  const el=document.getElementById('tym-manage-content');
+  if(!state.hraci.length){el.innerHTML='<div class="empty"><span class="empty-icon">👥</span><div class="empty-text">Žádné hráčky</div></div>';return;}
+  el.innerHTML=state.hraci.map(h=>{
+    const isIn=inTym.includes(h.id);
+    const posClass=`pos-${h.pozice==='nahrávač'?'nahravac':h.pozice==='libero'?'libero':h.pozice==='universál'?'universal':'smec'}`;
+    const numEl=h.cislo?`<div class="player-num">${h.cislo}</div>`:`<div class="player-num no-num">?</div>`;
+    return `<div class="player-card ${isIn?'':'inactive'}">
+      ${numEl}
+      <div class="player-info"><div class="player-name">${h.jmeno}</div><div class="player-pos ${posClass}">${h.pozice||'—'}</div></div>
+      <button class="btn btn-sm ${isIn?'btn-red':'btn-green'}" style="flex-shrink:0" onclick="toggleHracTym(${h.id},${tymId},${isIn})">${isIn?'Odebrat':'+ Přidat'}</button>
+    </div>`;
+  }).join('');
+}
+
+async function toggleHracTym(hracId,tymId,inTym){
+  try{
+    if(inTym){
+      await fetch(`${SB_URL}/rest/v1/vb_hraci_tymy?hrac_id=eq.${hracId}&tym_id=eq.${tymId}`,{method:'DELETE',headers:{'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY}});
+      state.hraciTymy=state.hraciTymy.filter(ht=>!(ht.hrac_id===hracId&&ht.tym_id===tymId));
+    }else{
+      await apiUpsert('vb_hraci_tymy',{hrac_id:hracId,tym_id:tymId},'hrac_id,tym_id');
+      if(!state.hraciTymy.some(ht=>ht.hrac_id===hracId&&ht.tym_id===tymId))state.hraciTymy.push({hrac_id:hracId,tym_id:tymId});
+    }
+    const tid=parseInt(document.getElementById('tym-manage-id').value);
+    renderTymManage(tid);
+    renderTymy();
+  }catch(e){toast('Chyba: '+e.message,'error');}
+}
+
+async function saveTym(){
+  const nazev=document.getElementById('in-tym-nazev').value.trim();
+  if(!nazev){toast('Zadej název týmu','error');return;}
+  try{
+    const res=await api('POST','vb_tymy',{nazev});
+    state.tymy.push(res[0]);
+    state.tymy.sort((a,b)=>a.nazev.localeCompare(b.nazev));
+    closeModal('modal-tym');
+    document.getElementById('in-tym-nazev').value='';
+    renderTymy();
+    toast('Tým vytvořen','success');
+  }catch(e){toast('Chyba: '+e.message,'error');}
+}
+
+async function deleteTym(){
+  const tymId=parseInt(document.getElementById('tym-manage-id').value);
+  if(!confirm('Opravdu smazat tým?'))return;
+  try{
+    await fetch(`${SB_URL}/rest/v1/vb_tymy?id=eq.${tymId}`,{method:'DELETE',headers:{'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY}});
+    state.tymy=state.tymy.filter(t=>t.id!==tymId);
+    state.hraciTymy=state.hraciTymy.filter(ht=>ht.tym_id!==tymId);
+    closeModal('modal-tym-manage');
+    renderTymy();
+    toast('Tým smazán','success');
+  }catch(e){toast('Chyba: '+e.message,'error');}
+}
+
+/* ─── SOUTĚŽE ─── */
+function openZapasModal(){
+  refreshSoutezSelect();
+  openModal('modal-zapas');
+}
+
+function openSoutezModal(){
+  openModal('modal-soutez');
+}
+
+function refreshSoutezSelect(){
+  const sid=currentSeasonId();
+  const sel=document.getElementById('in-zapas-soutez');
+  const list=sid?state.souteze.filter(s=>s.sezona_id===sid||!s.sezona_id):state.souteze;
+  sel.innerHTML='<option value="">— žádná soutěž —</option>';
+  list.forEach(s=>{
+    const o=document.createElement('option');
+    o.value=s.id;o.textContent=s.nazev;
+    sel.appendChild(o);
+  });
+}
+
+async function saveSoutez(){
+  const nazev=document.getElementById('in-soutez-nazev').value.trim();
+  if(!nazev){toast('Zadej název soutěže','error');return;}
+  const sid=currentSeasonId();
+  const body={nazev};if(sid)body.sezona_id=sid;
+  try{
+    const res=await api('POST','vb_souteze',body);
+    state.souteze.push(res[0]);
+    state.souteze.sort((a,b)=>a.nazev.localeCompare(b.nazev));
+    closeModal('modal-soutez');
+    document.getElementById('in-soutez-nazev').value='';
+    refreshSoutezSelect();
+    document.getElementById('in-zapas-soutez').value=res[0].id;
+    toast('Soutěž přidána','success');
+  }catch(e){toast('Chyba: '+e.message,'error');}
+}
+
 /* ─── SAVE SEASON ─── */
 async function saveSezona(){
   const nazev=document.getElementById('in-sezona-nazev').value.trim();
@@ -872,8 +1086,10 @@ async function saveZapas(){
   const soupet=document.getElementById('in-zapas-soupet').value.trim();
   if(!datum||!soupet){toast('Zadej datum a soupeře','error');return;}
   const sid=currentSeasonId();
+  const soutezId=parseInt(document.getElementById('in-zapas-soutez').value)||null;
   const body={datum,soupet,cas:document.getElementById('in-zapas-cas').value||null,misto:document.getElementById('in-zapas-misto').value,stav:'planovany'};
   if(sid)body.sezona_id=sid;
+  if(soutezId)body.soutez_id=soutezId;
   try{
     const res=await api('POST','vb_zapasy',body);
     state.zapasy.unshift(res[0]);
