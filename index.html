@@ -415,6 +415,10 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
       <input class="form-input" id="in-zapas-soupet" placeholder="název soupeře" />
     </div>
     <div class="form-group">
+      <label class="form-label">Tým</label>
+      <select class="form-input" id="in-zapas-tym"></select>
+    </div>
+    <div class="form-group">
       <label class="form-label">Místo</label>
       <select class="form-input" id="in-zapas-misto">
         <option value="doma">Doma</option>
@@ -658,6 +662,7 @@ function matchHtml(z,withActions=false){
   const badge=`<span class="match-badge badge-${z.stav==='probihajici'?'probiha':z.stav==='dokonceny'?'dokonceny':'planovany'}">${stavLabel(z.stav)}</span>`;
   const misto=z.misto==='doma'?'🏠 Doma':z.misto==='venku'?'✈️ Venku':'⚖️ Neutrál';
   const soutez=state.souteze.find(s=>s.id===z.soutez_id);
+  const tym=state.tymy.find(t=>t.id===z.tym_id);
   let actions='';
   if(withActions){
     if(z.stav==='planovany')actions=`<button class="btn btn-sm btn-primary" onclick="goLive(${z.id})">⚡ Live</button><button class="btn btn-sm btn-secondary" onclick="editVysledek(${z.id})">📝 Výsledek</button><button class="btn btn-sm btn-red" onclick="deleteZapas(${z.id})">🗑️</button>`;
@@ -667,7 +672,7 @@ function matchHtml(z,withActions=false){
   return `<div class="match-item">
     <div class="match-date">${fmtDate(z.datum)}${z.cas?'<br><span style="font-size:11px">'+z.cas.slice(0,5)+'</span>':''}</div>
     ${score}
-    <div style="flex:1;min-width:120px"><div class="match-vs">${z.soupet}</div><div class="match-misto">${misto}${soutez?` · <span style="color:var(--accent2)">${soutez.nazev}</span>`:''}</div></div>
+    <div style="flex:1;min-width:120px"><div class="match-vs">${z.soupet}</div><div class="match-misto">${misto}${tym?` · <span style="color:var(--purple)">${tym.nazev}</span>`:''}${soutez?` · <span style="color:var(--accent2)">${soutez.nazev}</span>`:''}</div></div>
     ${badge}
     ${withActions?`<div class="match-actions">${actions}</div>`:''}
   </div>`;
@@ -849,7 +854,12 @@ function openHracPicker(zapasId){
   document.getElementById('picker-zapas-id').value=zapasId;
   const z=state.zapasy.find(z=>z.id===zapasId);
   const sid=currentSeasonId()||z?.sezona_id||0;
-  const vsichni=hraciVSezoně(sid);
+  let vsichni=hraciVSezoně(sid);
+  // filtrovat podle týmu zápasu
+  if(z?.tym_id){
+    const tymIds=state.hraciTymy.filter(ht=>ht.tym_id===z.tym_id).map(ht=>ht.hrac_id);
+    vsichni=vsichni.filter(h=>tymIds.includes(h.id));
+  }
   const lineup=state.zapasHraci.filter(zh=>zh.zapas_id===zapasId).map(zh=>zh.hrac_id);
   const available=vsichni.filter(h=>!lineup.includes(h.id));
   const el=document.getElementById('hrac-picker-list');
@@ -1123,7 +1133,18 @@ function openZapasModal(){
   document.getElementById('nova-soutez-inline').style.display='none';
   document.getElementById('in-nova-soutez-nazev').value='';
   refreshSoutezSelect();
+  refreshTymZapasSelect();
   openModal('modal-zapas');
+}
+
+function refreshTymZapasSelect(){
+  const sel=document.getElementById('in-zapas-tym');
+  sel.innerHTML='<option value="">— žádný tým —</option>';
+  state.tymy.forEach(t=>{
+    const o=document.createElement('option');
+    o.value=t.id;o.textContent=t.nazev;
+    sel.appendChild(o);
+  });
 }
 
 function toggleNovaSoutezForm(){
@@ -1212,9 +1233,11 @@ async function saveZapas(){
   if(!datum||!soupet){toast('Zadej datum a soupeře','error');return;}
   const sid=currentSeasonId();
   const soutezId=parseInt(document.getElementById('in-zapas-soutez').value)||null;
+  const tymId=parseInt(document.getElementById('in-zapas-tym').value)||null;
   const body={datum,soupet,cas:document.getElementById('in-zapas-cas').value||null,misto:document.getElementById('in-zapas-misto').value,stav:'planovany'};
   if(sid)body.sezona_id=sid;
   if(soutezId)body.soutez_id=soutezId;
+  if(tymId)body.tym_id=tymId;
   try{
     const res=await api('POST','vb_zapasy',body);
     state.zapasy.unshift(res[0]);
