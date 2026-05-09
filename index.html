@@ -162,33 +162,30 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 .player-pos{font-size:11px;color:var(--muted);margin-top:2px}
 .player-toggle{cursor:pointer;font-size:18px;flex-shrink:0;border:none;background:none;padding:4px}
 
-/* LIVE CARDS */
-.live-grid-wrap{height:calc(100dvh - 190px);min-height:240px}
-.live-grid{height:100%;display:grid;grid-template-columns:repeat(2,1fr);grid-auto-rows:1fr;gap:6px}
-@media(min-width:600px){.live-grid{grid-template-columns:repeat(3,1fr)}}
-@media(min-width:960px){.live-grid{grid-template-columns:repeat(auto-fill,minmax(175px,1fr))}}
-.live-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:7px;display:flex;flex-direction:column;gap:3px;overflow:hidden}
-.live-card-header{display:flex;align-items:center;gap:5px;min-height:26px;flex-shrink:0}
-.live-card-num{font-family:'Oswald',sans-serif;font-size:12px;font-weight:700;color:var(--accent);min-width:22px}
-.live-card-name{font-size:12px;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.live-card-remove{background:none;border:none;color:var(--muted);cursor:pointer;font-size:15px;padding:2px 3px;line-height:1;border-radius:4px;flex-shrink:0}
+/* LIVE TABLE */
+#live-table-wrap{height:calc(100dvh - 190px);min-height:240px;border-radius:12px;border:1px solid var(--border);overflow:hidden}
+.live-table{width:100%;height:100%;border-collapse:collapse;table-layout:fixed}
+.live-table th,.live-table td{border:1px solid var(--border);padding:0;text-align:center;overflow:hidden}
+.live-table thead th{background:var(--surface2);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:var(--muted);height:28px;padding:0 2px}
+.live-table thead th.col-action{color:var(--text);font-size:11px}
+.live-col-hrac{position:sticky;left:0;z-index:2;background:var(--surface);width:72px}
+.live-table thead .live-col-hrac{background:var(--surface2)}
+.live-player-cell{padding:3px 5px;text-align:left;vertical-align:middle}
+.live-player-name{font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
+.live-player-num{font-size:10px;color:var(--accent);font-family:'Oswald',sans-serif;display:block}
+.live-card-remove{background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;padding:1px 3px;line-height:1;border-radius:3px;float:right;margin-bottom:2px}
 .live-card-remove:hover{color:var(--red)}
-.live-card-actions{flex:1;display:flex;flex-direction:column;gap:3px;min-height:0}
-.live-action-row{flex:1;display:flex;align-items:stretch;gap:3px;min-height:0}
-.live-action-icon{font-size:12px;width:16px;text-align:center;flex-shrink:0;display:flex;align-items:center;justify-content:center}
-.live-act-btn{flex:1;min-height:24px;border-radius:6px;border:none;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;transition:filter .1s;-webkit-tap-highlight-color:transparent;user-select:none}
+.live-act-btn{width:100%;height:100%;min-height:28px;border:none;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;transition:filter .1s;user-select:none;-webkit-tap-highlight-color:transparent}
 .live-act-btn:active{transform:scale(.9)}
 .live-act-btn:hover{filter:brightness(1.3)}
-.live-act-btn.plus{background:rgba(81,207,102,.2)}
-.live-act-btn.minus{background:rgba(255,107,107,.2)}
-.live-act-btn.neutral{background:rgba(255,212,59,.2)}
-.live-act-sym{font-size:13px;font-weight:900;line-height:1}
+.live-act-btn.plus{background:rgba(81,207,102,.15)}
+.live-act-btn.minus{background:rgba(255,107,107,.15)}
+.live-act-btn.neutral{background:rgba(255,212,59,.15)}
+.live-act-sym{font-size:14px;font-weight:900;line-height:1}
 .live-act-sym.plus{color:var(--green)}
 .live-act-sym.minus{color:var(--red)}
 .live-act-sym.neutral{color:var(--yellow)}
-.live-act-cnt{font-family:'Oswald',sans-serif;font-size:12px;font-weight:700;color:var(--text);line-height:1}
-.live-add-card{background:var(--surface);border:2px dashed var(--border);border-radius:10px;padding:7px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px;cursor:pointer;color:var(--muted);transition:border-color .15s,color .15s}
-.live-add-card:hover{border-color:var(--accent);color:var(--accent)}
+.live-act-cnt{font-family:'Oswald',sans-serif;font-size:13px;font-weight:700;color:var(--text);line-height:1}
 
 /* LIVE HEADER */
 .live-header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}
@@ -308,7 +305,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
     <button class="btn btn-sm btn-primary" id="btn-start-zapas" style="display:none" onclick="startZapas()">▶ Zahájit</button>
     <button class="btn btn-sm btn-green" id="btn-end-zapas" style="display:none" onclick="openFinishModal()">✓ Ukončit</button>
   </div>
-  <div id="live-table-wrap" class="live-grid-wrap">
+  <div id="live-table-wrap">
     <div class="empty"><span class="empty-icon">⚡</span><div class="empty-text">Vyberte sezónu a zápas nahoře</div></div>
   </div>
 </div>
@@ -822,32 +819,41 @@ function renderLiveTable(zapasId){
   const hraci=vsichniHraci.filter(h=>lineup.includes(h.id));
   hraci.forEach(h=>ensureStat(zapasId,h.id));
 
-  const cards=hraci.map(h=>{
-    const actionRows=ACTIONS.map(a=>{
+  // header
+  let thead=`<tr><th class="live-col-hrac"></th>`;
+  ACTIONS.forEach(a=>{
+    const variants=a.varianty?VARIANTS.filter(v=>a.varianty.includes(v.suf)):VARIANTS;
+    thead+=`<th colspan="${variants.length}" class="col-action">${a.icon} ${a.label}</th>`;
+  });
+  thead+=`</tr>`;
+
+  // player rows
+  const rows=hraci.map(h=>{
+    let cells=`<td class="live-col-hrac live-player-cell">
+      <button class="live-card-remove" onclick="removeZeSestava(${zapasId},${h.id})">×</button>
+      <span class="live-player-name">${h.jmeno}</span>
+      <span class="live-player-num">${h.cislo?'#'+h.cislo:''}</span>
+    </td>`;
+    ACTIONS.forEach(a=>{
       const variants=a.varianty?VARIANTS.filter(v=>a.varianty.includes(v.suf)):VARIANTS;
-      const btns=variants.map(v=>{
+      variants.forEach(v=>{
         const field=`${a.key}_${v.suf}`;
         const val=getStatVal(zapasId,h.id,field);
-        return `<button class="live-act-btn ${v.cls}" onclick="bump(${h.id},${zapasId},'${field}')"><span class="live-act-sym ${v.cls}">${v.sym}</span><span class="live-act-cnt" id="cnt-${h.id}-${field}">${val}</span></button>`;
-      }).join('');
-      return `<div class="live-action-row"><span class="live-action-icon">${a.icon}</span>${btns}</div>`;
-    }).join('');
-    return `<div class="live-card">
-      <div class="live-card-header">
-        <span class="live-card-num">${h.cislo?'#'+h.cislo:'—'}</span>
-        <span class="live-card-name">${h.jmeno}</span>
-        <button class="live-card-remove" onclick="removeZeSestava(${zapasId},${h.id})" title="Odebrat ze sestavy">×</button>
-      </div>
-      <div class="live-card-actions">${actionRows}</div>
-    </div>`;
+        cells+=`<td style="padding:0"><button class="live-act-btn ${v.cls}" onclick="bump(${h.id},${zapasId},'${field}')"><span class="live-act-sym ${v.cls}">${v.sym}</span><span class="live-act-cnt" id="cnt-${h.id}-${field}">${val}</span></button></td>`;
+      });
+    });
+    return `<tr>${cells}</tr>`;
   }).join('');
 
-  const addCard=`<div class="live-add-card" onclick="openHracPicker(${zapasId})">
-    <span style="font-size:30px;font-weight:700">+</span>
-    <span style="font-size:11px">Přidat hráčku</span>
-  </div>`;
+  // add-player row spanning all columns
+  const totalCols=1+ACTIONS.reduce((s,a)=>s+(a.varianty?a.varianty.length:VARIANTS.length),0);
+  const addRow=`<tr><td colspan="${totalCols}" style="padding:0;height:44px">
+    <button onclick="openHracPicker(${zapasId})" style="width:100%;height:100%;background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;gap:6px;transition:color .15s" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--muted)'">
+      <span style="font-size:20px;font-weight:700">+</span> Přidat hráčku
+    </button>
+  </td></tr>`;
 
-  el.innerHTML=`<div class="live-grid">${cards}${addCard}</div>`;
+  el.innerHTML=`<table class="live-table"><thead>${thead}</thead><tbody>${rows}${addRow}</tbody></table>`;
 }
 
 function openHracPicker(zapasId){
