@@ -500,10 +500,18 @@ function renderStatistiky(){
     return {h,sp,sm,pp,pm,pn,up,um,un,bp,cm,total:sp+up+bp-sm-pm-um-cm,zapasy};
   }).filter(r=>r.zapasy>0).sort((a,b)=>b.total-a.total);
 
+  const tot=rows.reduce((acc,r)=>({
+    zapasy:acc.zapasy+r.zapasy,sp:acc.sp+r.sp,sm:acc.sm+r.sm,
+    pp:acc.pp+r.pp,pm:acc.pm+r.pm,pn:acc.pn+r.pn,
+    up:acc.up+r.up,um:acc.um+r.um,un:acc.un+r.un,
+    bp:acc.bp+r.bp,cm:acc.cm+r.cm,total:acc.total+r.total
+  }),{zapasy:0,sp:0,sm:0,pp:0,pm:0,pn:0,up:0,um:0,un:0,bp:0,cm:0,total:0});
+
   const g='color:var(--green);font-weight:600';
   const r='color:var(--red);font-weight:600';
   const b='color:var(--accent2);font-weight:600';
   const a='color:var(--accent);font-family:\'Oswald\',sans-serif;font-size:16px;font-weight:700';
+  const muted='color:var(--muted);font-weight:600;text-align:center';
 
   html+=`<div style="overflow-x:auto"><table class="stats-table">
     <thead>
@@ -526,7 +534,7 @@ function renderStatistiky(){
       ${rows.map((row,i)=>`<tr>
         <td style="color:var(--muted);font-weight:700">${i+1}</td>
         <td><strong>${row.h.jmeno}</strong>${row.h.cislo?` <span style="color:var(--muted);font-size:11px">#${row.h.cislo}</span>`:''}</td>
-        <td style="color:var(--muted);font-weight:600;text-align:center">${row.zapasy}</td>
+        <td style="${muted}">${row.zapasy}</td>
         <td style="${g}">${row.sp}</td><td style="${r}">${row.sm}</td>
         <td style="${g}">${row.pp}</td><td style="${r}">${row.pm}</td><td style="${b}">${pct(row.pp,row.pm,row.pn)}</td>
         <td style="${g}">${row.up}</td><td style="${r}">${row.um}</td><td style="${b}">${pct(row.up,row.um,row.un)}</td>
@@ -535,6 +543,18 @@ function renderStatistiky(){
         <td style="${a}">${row.total}</td>
       </tr>`).join('')}
     </tbody>
+    <tfoot>
+      <tr style="background:var(--surface2);border-top:2px solid var(--border)">
+        <td colspan="2" style="padding:10px 12px;font-family:'Oswald',sans-serif;font-size:13px;font-weight:700;color:var(--text);letter-spacing:.3px">Σ Celkem</td>
+        <td style="${muted}">${tot.zapasy}</td>
+        <td style="${g}">${tot.sp}</td><td style="${r}">${tot.sm}</td>
+        <td style="${g}">${tot.pp}</td><td style="${r}">${tot.pm}</td><td style="${b}">${pct(tot.pp,tot.pm,tot.pn)}</td>
+        <td style="${g}">${tot.up}</td><td style="${r}">${tot.um}</td><td style="${b}">${pct(tot.up,tot.um,tot.un)}</td>
+        <td style="${g}">${tot.bp}</td>
+        <td style="${r}">${tot.cm}</td>
+        <td style="${a}">${tot.total}</td>
+      </tr>
+    </tfoot>
   </table></div>`;
   el.innerHTML=html;
 }
