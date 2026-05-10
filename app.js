@@ -2,11 +2,11 @@ const SB_URL='https://cqcjdslqygayijxfhzof.supabase.co';
 const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNxY2pkc2xxeWdheWlqeGZoem9mIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgyNDYxMTcsImV4cCI6MjA5MzgyMjExN30.8RxdnXDybGehH9pMKxNkJuXw5f_vIGjfSRE_-tJciK0';
 
 const ACTIONS=[
-  {key:'servis',label:'Servis',icon:'🎯'},
-  {key:'prijem',label:'Příjem',icon:'🤲'},
-  {key:'utok',label:'Útok',icon:'💥'},
-  {key:'blok',label:'Blok',icon:'🛡️',varianty:['plus']},
-  {key:'chyba',label:'Chyba',icon:'❌',varianty:['minus']},
+  {key:'servis',label:'Servis',icon:'🎯',color:'#4dabf7'},
+  {key:'prijem',label:'Příjem',icon:'🤲',color:'#51cf66'},
+  {key:'utok',label:'Útok',icon:'💥',color:'#f97316'},
+  {key:'blok',label:'Blok',icon:'🛡️',varianty:['plus'],color:'#7950f2'},
+  {key:'chyba',label:'Chyba',icon:'❌',varianty:['minus'],color:'#ff6b6b'},
 ];
 const VARIANTS=[
   {suf:'plus',sym:'+',cls:'plus'},
@@ -314,7 +314,7 @@ function renderLiveTable(zapasId){
   let thead=`<tr><th class="live-col-hrac"></th>`;
   ACTIONS.forEach(a=>{
     const variants=a.varianty?VARIANTS.filter(v=>a.varianty.includes(v.suf)):VARIANTS;
-    thead+=`<th colspan="${variants.length}" class="col-action">${a.icon} ${a.label}</th>`;
+    thead+=`<th colspan="${variants.length}" class="col-action" style="border-left:3px solid ${a.color};color:${a.color}">${a.icon} ${a.label}</th>`;
   });
   thead+=`</tr>`;
 
@@ -327,10 +327,11 @@ function renderLiveTable(zapasId){
     </td>`;
     ACTIONS.forEach(a=>{
       const variants=a.varianty?VARIANTS.filter(v=>a.varianty.includes(v.suf)):VARIANTS;
-      variants.forEach(v=>{
+      variants.forEach((v,vi)=>{
         const field=`${a.key}_${v.suf}`;
         const val=getStatVal(zapasId,h.id,field);
-        cells+=`<td style="padding:0"><button class="live-act-btn ${v.cls}" onclick="bump(${h.id},${zapasId},'${field}')"><span class="live-act-sym ${v.cls}">${v.sym}</span><span class="live-act-cnt" id="cnt-${h.id}-${field}">${val}</span></button></td>`;
+        const border=vi===0?`border-left:3px solid ${a.color};`:'';
+        cells+=`<td style="padding:0;${border}"><button class="live-act-btn ${v.cls}" onclick="bump(${h.id},${zapasId},'${field}')"><span class="live-act-sym ${v.cls}">${v.sym}</span><span class="live-act-cnt" id="cnt-${h.id}-${field}">${val}</span></button></td>`;
       });
     });
     return `<tr>${cells}</tr>`;
