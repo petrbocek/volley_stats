@@ -61,12 +61,24 @@ CREATE TABLE vb_zapas_hraci (
 ALTER TABLE vb_zapasy ADD COLUMN IF NOT EXISTS soutez_id bigint REFERENCES vb_souteze(id);
 ALTER TABLE vb_zapasy ADD COLUMN IF NOT EXISTS tym_id bigint REFERENCES vb_tymy(id);
 
-ALTER TABLE vb_sezony DISABLE ROW LEVEL SECURITY;
-ALTER TABLE vb_hraci DISABLE ROW LEVEL SECURITY;
-ALTER TABLE vb_hraci_sezony DISABLE ROW LEVEL SECURITY;
-ALTER TABLE vb_zapasy DISABLE ROW LEVEL SECURITY;
-ALTER TABLE vb_statistiky DISABLE ROW LEVEL SECURITY;
-ALTER TABLE vb_tymy DISABLE ROW LEVEL SECURITY;
-ALTER TABLE vb_hraci_tymy DISABLE ROW LEVEL SECURITY;
-ALTER TABLE vb_souteze DISABLE ROW LEVEL SECURITY;
-ALTER TABLE vb_zapas_hraci DISABLE ROW LEVEL SECURITY;
+ALTER TABLE vb_sezony      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE vb_hraci       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE vb_hraci_sezony ENABLE ROW LEVEL SECURITY;
+ALTER TABLE vb_zapasy      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE vb_statistiky  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE vb_tymy        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE vb_hraci_tymy  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE vb_souteze     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE vb_zapas_hraci ENABLE ROW LEVEL SECURITY;
+
+-- App používá anon klíč bez autentizace → permissive policy pro anon roli
+DO $$
+DECLARE tbl text;
+BEGIN
+  FOREACH tbl IN ARRAY ARRAY[
+    'vb_sezony','vb_hraci','vb_hraci_sezony','vb_zapasy',
+    'vb_statistiky','vb_tymy','vb_hraci_tymy','vb_souteze','vb_zapas_hraci'
+  ] LOOP
+    EXECUTE format('CREATE POLICY anon_all ON %I FOR ALL TO anon USING (true) WITH CHECK (true)', tbl);
+  END LOOP;
+END $$;
