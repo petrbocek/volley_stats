@@ -8,7 +8,7 @@
 //   python3 -m http.server 8099 &         (v kořeni repa)
 //   node tests/live-stats.test.mjs
 //
-// Proti kódu před opravou padá T1, T2, T3, T6b-d a T7.
+// Proti kódu před opravou padá T1, T2, T3, T6b-d, T7 a T8-T10.
 
 import { chromium } from 'playwright';
 
@@ -43,6 +43,20 @@ await page.route('**/rest/v1/**', async route => {
   return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: 999, ...row }]) });
 });
 
+let authCalls = 0;
+await page.route('**/auth/v1/token**', async route => {
+  authCalls++;
+  const body = route.request().postDataJSON();
+  if (body.password === 'spatne') {
+    return route.fulfill({ status: 400, contentType: 'application/json',
+      body: JSON.stringify({ error_description: 'Invalid login credentials' }) });
+  }
+  return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+    access_token: 'TESTTOKEN', refresh_token: 'TESTREFRESH', expires_in: 3600,
+    user: { email: 'test@example.com' },
+  }) });
+});
+
 const errors = [];
 page.on('pageerror', e => errors.push(String(e)));
 
@@ -51,6 +65,54 @@ await page.waitForFunction(() => !document.getElementById('loading') || document
 
 const ok = (n, c) => console.log(`${c ? '  OK  ' : ' FAIL '} ${n}`) || c;
 let pass = true;
+
+// ── T8: #24 — bez přihlášení se nic nezapíše ───────────────────────────────
+await page.click('.nav-tab:nth-child(4)');
+await page.waitForSelector('#cnt-10-servis_plus');
+writes.length = 0;
+await page.click('#cnt-10-servis_plus');
+await page.waitForTimeout(600);
+pass &= ok('T8a odhlášený klik neposílá zápis (#24)',
+           writes.filter(w => w.method !== 'GET').length === 0);
+pass &= ok('T8b odhlášenému se počítadlo nezvedne (#24)',
+           (await page.textContent('#cnt-10-servis_plus')).trim() === '0');
+pass &= ok('T8c odhlášený vidí lištu "jen pro čtení" (#24)',
+           await page.isVisible('#readonly-bar'));
+
+// ── T9: #24 — špatné heslo nepřihlásí ──────────────────────────────────────
+await page.click('#btn-auth');
+await page.fill('#in-login-email', 'test@example.com');
+await page.fill('#in-login-heslo', 'spatne');
+await page.click('#btn-do-login');
+await page.waitForTimeout(300);
+pass &= ok('T9 špatné heslo nepřihlásí (#24)',
+           await page.evaluate(() => !isLoggedIn()));
+
+// ── T10: #24 — po přihlášení jde zápis a nese token ────────────────────────
+await page.fill('#in-login-heslo', 'spravne');
+await page.click('#btn-do-login');
+await page.waitForTimeout(300);
+pass &= ok('T10a přihlášení schová lištu a přepne tlačítko (#24)',
+           !(await page.isVisible('#readonly-bar')) &&
+           (await page.textContent('#btn-auth')).includes('test@example.com'));
+const authHeaders = [];
+await page.route('**/rest/v1/vb_statistiky**', async route => {
+  if (route.request().method() !== 'GET') authHeaders.push(route.request().headers()['authorization']);
+  return route.fallback();
+});
+writes.length = 0;
+await page.click('#cnt-10-servis_plus');
+await page.waitForTimeout(600);
+pass &= ok('T10b přihlášený zápis projde a nese access token (#24)',
+           writes.filter(w => w.table === 'vb_statistiky').length === 1 &&
+           authHeaders.some(h => h === 'Bearer TESTTOKEN'));
+pass &= ok('T10c token se uloží do localStorage (#24)',
+           await page.evaluate(() => !!JSON.parse(localStorage.getItem('vb_auth') || 'null')?.token));
+
+// Reload = čistý stav počítadel pro další bloky (přihlášení přežije v localStorage).
+await page.reload();
+await page.waitForFunction(() => !document.getElementById('loading') || document.getElementById('loading').classList.contains('hidden'));
+pass &= ok('T10d přihlášení přežije reload stránky (#24)', await page.evaluate(() => isLoggedIn()));
 
 // ── T1: klik se uloží po debounce, a jen za tu jednu hráčku ─────────────────
 await page.click('.nav-tab:nth-child(4)');
