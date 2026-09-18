@@ -11,17 +11,28 @@
 
 import { chromium } from 'playwright';
 
+// #35 — text z databáze, který se nesmí vyhodnotit jako HTML
+const JMENO_S_HTML = 'Gama & <b>tučně</b>';
+const TYM_S_XSS = '<img src=x onerror="window.__xss_tym=1">';
+const SOUTEZ_S_XSS = 'Pohár <img src=y onerror="window.__xss_soutez=1">';
+
 const FIX = {
   vb_sezony: [{ id: 1, nazev: '2025/26', aktivni: true },
               { id: 2, nazev: '2024/25', aktivni: false },
               { id: 3, nazev: '2023/24 (bez zápasů)', aktivni: false }],
   vb_hraci: [{ id: 10, jmeno: 'Alfa', cislo: 1, pozice: 'smečař', aktivni: true },
-             { id: 11, jmeno: 'Beta', cislo: 2, pozice: 'blokař', aktivni: true }],
-  vb_hraci_sezony: [{ hrac_id: 10, sezona_id: 1 }, { hrac_id: 11, sezona_id: 1 }, { hrac_id: 10, sezona_id: 2 }],
-  vb_zapasy: [{ id: 100, sezona_id: 1, datum: '2026-09-10', soupet: 'Soupeř A', misto: 'doma', stav: 'probihajici' },
+             { id: 11, jmeno: 'Beta', cislo: 2, pozice: 'blokař', aktivni: true },
+             // #35 — jména, která by neescapovaný innerHTML rozbila
+             { id: 12, jmeno: JMENO_S_HTML, cislo: 3, pozice: 'libero', aktivni: true }],
+  vb_hraci_sezony: [{ hrac_id: 10, sezona_id: 1 }, { hrac_id: 11, sezona_id: 1 },
+                    { hrac_id: 12, sezona_id: 1 }, { hrac_id: 10, sezona_id: 2 }],
+  vb_zapasy: [{ id: 100, sezona_id: 1, soutez_id: 7, datum: '2026-09-10', soupet: 'Soupeř A', misto: 'doma', stav: 'probihajici' },
               { id: 200, sezona_id: 2, datum: '2025-03-01', soupet: 'Soupeř B', misto: 'venku', stav: 'dokonceny', sety_my: 3, sety_oni: 1 }],
-  vb_tymy: [], vb_hraci_tymy: [], vb_souteze: [],
-  vb_zapas_hraci: [{ zapas_id: 100, hrac_id: 10 }, { zapas_id: 100, hrac_id: 11 }, { zapas_id: 200, hrac_id: 10 }],
+  vb_tymy: [{ id: 5, nazev: TYM_S_XSS }],
+  vb_hraci_tymy: [{ hrac_id: 12, tym_id: 5 }],
+  vb_souteze: [{ id: 7, sezona_id: 1, nazev: SOUTEZ_S_XSS }],
+  vb_zapas_hraci: [{ zapas_id: 100, hrac_id: 10 }, { zapas_id: 100, hrac_id: 11 },
+                   { zapas_id: 100, hrac_id: 12 }, { zapas_id: 200, hrac_id: 10 }],
 };
 
 // stav "databáze" statistik, na který RPC aplikuje delty
@@ -91,6 +102,7 @@ await nactenoOK();
 const ok = (n, c) => (console.log(`${c ? '  OK  ' : ' FAIL '} ${n}`), !!c);
 let pass = true;
 const cnt = sel => page.textContent(sel).then(t => parseInt(t.trim()));
+const JMENO = JMENO_S_HTML, TYM = TYM_S_XSS;
 const longPress = async sel => { await page.hover(sel); await page.mouse.down(); await page.waitForTimeout(700); await page.mouse.up(); };
 
 // ── #24: bez přihlášení se nic nezapíše ────────────────────────────────────
@@ -241,6 +253,41 @@ await page.click('#cnt-10-chyba_minus');
 await page.selectOption('#season-select', '2');
 await page.waitForTimeout(300);
 pass &= ok('T7 změna sezóny nejdřív uloží rozepsané', rpcCalls.length === 1);
+
+// ── #35: text z databáze se nesmí vyhodnotit jako HTML ─────────────────────
+await page.selectOption('#season-select', '1');
+await page.waitForTimeout(300);
+for (const tab of [1, 2, 3, 5]) {          // Přehled, Zápasy, Tým, Statistiky
+  await page.click(`.nav-tab:nth-child(${tab})`);
+  await page.waitForTimeout(150);
+}
+await page.click('.nav-tab:nth-child(4)');
+await page.waitForSelector('.live-player-name');
+await page.waitForTimeout(200);
+
+const xss = await page.evaluate(() => ({
+  tym: typeof window.__xss_tym !== 'undefined',
+  soutez: typeof window.__xss_soutez !== 'undefined',
+  injektovaneImg: document.querySelectorAll('img[src="x"], img[src="y"]').length,
+}));
+pass &= ok('T13a podstrčené <img onerror> se nespustí (#35)', !xss.tym && !xss.soutez);
+pass &= ok('T13b do stránky se nedostal žádný injektovaný <img> (#35)', xss.injektovaneImg === 0);
+
+const jmena = await page.$$eval('.live-player-name', els => els.map(e => e.textContent));
+const tucneVJmene = await page.$('.live-player-name b');
+pass &= ok('T13c jméno s HTML se v Live vypíše doslova (#35)',
+  jmena.includes(JMENO) && tucneVJmene === null);
+await page.click('.nav-tab:nth-child(3)');
+await page.waitForTimeout(200);
+const tymTitul = await page.textContent('.tym-card-title');
+pass &= ok('T13d název týmu se v kartě vypíše doslova (#35)', tymTitul === TYM);
+const clen = await page.textContent('.tym-member');
+pass &= ok('T13e jméno člena týmu se vypíše doslova (#35)', clen === JMENO);
+
+await page.click('.nav-tab:nth-child(5)');
+await page.waitForTimeout(200);
+const volby = await page.$$eval('#stats-hrac-sel option', els => els.map(e => e.textContent));
+pass &= ok('T13f jméno ve filtru statistik se vypíše doslova (#35)', volby.includes(JMENO));
 
 // ── přihlášení přežije reload ──────────────────────────────────────────────
 await page.reload();

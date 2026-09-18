@@ -214,6 +214,16 @@ function renderAll(){
   renderStatistiky();
 }
 
+/* Text z databáze jde do innerHTML, takže se musí escapovat: jméno s '&'
+   nebo '<' by jinak rozbilo zobrazení řádku, a protože do tabulek zapisuje
+   víc lidí, je to i cesta, jak do appky dostat cizí skript.
+   Čísla a ID interpolovaná do onclick projdou přes parseInt, ta jsou v pořádku. */
+const ESC={'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'};
+function esc(v){
+  if(v===null||v===undefined)return '';
+  return String(v).replace(/[&<>"']/g,c=>ESC[c]);
+}
+
 /* ─── PŘEHLED ─── */
 function renderPrehled(){
   const sid=currentSeasonId();
@@ -227,7 +237,7 @@ function renderPrehled(){
 
   el.innerHTML=`
     <div class="card" style="border-color:var(--accent);margin-bottom:16px">
-      <div style="font-family:'Oswald',sans-serif;font-size:22px;font-weight:700;color:var(--accent)">${sezNazev}</div>
+      <div style="font-family:'Oswald',sans-serif;font-size:22px;font-weight:700;color:var(--accent)">${esc(sezNazev)}</div>
       <div style="color:var(--muted);font-size:13px;margin-top:4px">${hraciVSezoně(sid).length} hráček v soupisce</div>
     </div>
     <div class="stats-grid">
@@ -267,7 +277,7 @@ function matchHtml(z,withActions=false){
   return `<div class="match-item">
     <div class="match-date">${fmtDate(z.datum)}${z.cas?'<br><span style="font-size:11px">'+z.cas.slice(0,5)+'</span>':''}</div>
     ${score}
-    <div style="flex:1;min-width:120px"><div class="match-vs">${z.soupet}</div><div class="match-misto">${misto}${tym?` · <span style="color:var(--purple)">${tym.nazev}</span>`:''}${soutez?` · <span style="color:var(--accent2)">${soutez.nazev}</span>`:''}</div></div>
+    <div style="flex:1;min-width:120px"><div class="match-vs">${esc(z.soupet)}</div><div class="match-misto">${misto}${tym?` · <span style="color:var(--purple)">${esc(tym.nazev)}</span>`:''}${soutez?` · <span style="color:var(--accent2)">${esc(soutez.nazev)}</span>`:''}</div></div>
     ${badge}
     ${withActions?`<div class="match-actions">${actions}</div>`:''}
   </div>`;
@@ -313,8 +323,8 @@ function playerCardHtml(h,sid,inSeason){
   return `<div class="player-card ${sid&&!inSeason?'inactive':''}" id="pc-${h.id}">
     ${numEl}
     <div class="player-info">
-      <div class="player-name">${h.jmeno}</div>
-      <div class="player-pos ${posClass}">${h.pozice||'—'}</div>
+      <div class="player-name">${esc(h.jmeno)}</div>
+      <div class="player-pos ${posClass}">${esc(h.pozice)||'—'}</div>
     </div>
     <button class="btn btn-sm btn-secondary" style="flex-shrink:0" onclick="editHrac(${h.id})">✏️</button>
     ${toggle}
@@ -446,7 +456,7 @@ function renderLiveTable(zapasId){
   const rows=hraci.map(h=>{
     let cells=`<td class="live-col-hrac live-player-cell">
       <button class="live-card-remove" onclick="removeZeSestava(${zapasId},${h.id})">×</button>
-      <span class="live-player-name">${h.jmeno}</span>
+      <span class="live-player-name">${esc(h.jmeno)}</span>
       <span class="live-player-num">${h.cislo?'#'+h.cislo:''}</span>
     </td>`;
     ACTIONS.forEach(a=>{
@@ -494,7 +504,7 @@ function openHracPicker(zapasId){
       const numEl=h.cislo?`<div class="player-num">${h.cislo}</div>`:`<div class="player-num no-num">?</div>`;
       return `<div class="player-card" style="cursor:pointer" onclick="addDoSestava(${zapasId},${h.id})">
         ${numEl}
-        <div class="player-info"><div class="player-name">${h.jmeno}</div><div class="player-pos ${posClass}">${h.pozice||'—'}</div></div>
+        <div class="player-info"><div class="player-name">${esc(h.jmeno)}</div><div class="player-pos ${posClass}">${esc(h.pozice)||'—'}</div></div>
         <span style="color:var(--green);font-size:20px;font-weight:700">+</span>
       </div>`;
     }).join('');
@@ -693,19 +703,19 @@ function renderStatistiky(){
   let html=`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
     <select id="stats-tym-sel" class="form-input" style="min-width:130px;flex:1" onchange="renderStatistiky()">
       <option value="">— všechny týmy —</option>
-      ${state.tymy.map(t=>`<option value="${t.id}"${t.id===selTym?' selected':''}>${t.nazev}</option>`).join('')}
+      ${state.tymy.map(t=>`<option value="${t.id}"${t.id===selTym?' selected':''}>${esc(t.nazev)}</option>`).join('')}
     </select>
     <select id="stats-soutez-sel" class="form-input" style="min-width:130px;flex:1" onchange="renderStatistiky()">
       <option value="">— všechny soutěže —</option>
-      ${seasonSouteze.map(s=>`<option value="${s.id}"${s.id===selSoutez?' selected':''}>${s.nazev}</option>`).join('')}
+      ${seasonSouteze.map(s=>`<option value="${s.id}"${s.id===selSoutez?' selected':''}>${esc(s.nazev)}</option>`).join('')}
     </select>
     <select id="stats-zapas-sel" class="form-input" style="min-width:160px;flex:1" onchange="renderStatistiky()">
       <option value="">— celá sezóna —</option>
-      ${zapasyPoCsoutezi.map(z=>`<option value="${z.id}"${z.id===selZapas?' selected':''}>${fmtDate(z.datum)} — ${z.soupet}</option>`).join('')}
+      ${zapasyPoCsoutezi.map(z=>`<option value="${z.id}"${z.id===selZapas?' selected':''}>${fmtDate(z.datum)} — ${esc(z.soupet)}</option>`).join('')}
     </select>
     <select id="stats-hrac-sel" class="form-input" style="min-width:130px;flex:1" onchange="renderStatistiky()">
       <option value="">— všechny hráčky —</option>
-      ${vsechnyHraci.map(h=>`<option value="${h.id}"${h.id===selHrac?' selected':''}>${h.jmeno}</option>`).join('')}
+      ${vsechnyHraci.map(h=>`<option value="${h.id}"${h.id===selHrac?' selected':''}>${esc(h.jmeno)}</option>`).join('')}
     </select>
   </div>`;
 
@@ -761,7 +771,7 @@ function renderStatistiky(){
     <tbody>
       ${rows.map((row,i)=>`<tr>
         <td style="color:var(--muted);font-weight:700">${i+1}</td>
-        <td><strong>${row.h.jmeno}</strong>${row.h.cislo?` <span style="color:var(--muted);font-size:11px">#${row.h.cislo}</span>`:''}</td>
+        <td><strong>${esc(row.h.jmeno)}</strong>${row.h.cislo?` <span style="color:var(--muted);font-size:11px">#${row.h.cislo}</span>`:''}</td>
         <td style="${muted}">${row.zapasy}</td>
         <td style="${g}">${row.sp}</td><td style="${r}">${row.sm}</td>
         <td style="${g}">${row.pp}</td><td style="${r}">${row.pm}</td><td style="${b}">${pct(row.pp,row.pm,row.pn)}</td>
@@ -798,11 +808,11 @@ function renderTymy(){
     const members=state.hraciTymy.filter(ht=>ht.tym_id===t.id);
     const playerChips=members.map(ht=>{
       const h=state.hraci.find(h=>h.id===ht.hrac_id);
-      return h?`<span class="tym-member">${h.jmeno}</span>`:'';
+      return h?`<span class="tym-member">${esc(h.jmeno)}</span>`:'';
     }).join('');
     return `<div class="tym-card">
       <div class="tym-card-header">
-        <div class="tym-card-title">${t.nazev}</div>
+        <div class="tym-card-title">${esc(t.nazev)}</div>
         <button class="btn btn-sm btn-secondary" onclick="openTymManage(${t.id})">✏️ Spravovat</button>
       </div>
       <div class="tym-members">${playerChips||'<span style="color:var(--muted)">Prázdný tým</span>'}</div>
@@ -828,7 +838,7 @@ function renderTymManage(tymId){
     const numEl=h.cislo?`<div class="player-num">${h.cislo}</div>`:`<div class="player-num no-num">?</div>`;
     return `<div class="player-card ${isIn?'':'inactive'}">
       ${numEl}
-      <div class="player-info"><div class="player-name">${h.jmeno}</div><div class="player-pos ${posClass}">${h.pozice||'—'}</div></div>
+      <div class="player-info"><div class="player-name">${esc(h.jmeno)}</div><div class="player-pos ${posClass}">${esc(h.pozice)||'—'}</div></div>
       <button class="btn btn-sm ${isIn?'btn-red':'btn-green'}" style="flex-shrink:0" onclick="toggleHracTym(${h.id},${tymId},${isIn})">${isIn?'Odebrat':'+ Přidat'}</button>
     </div>`;
   }).join('');
