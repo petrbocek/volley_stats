@@ -24,7 +24,7 @@ const pendingStats=new Set();
 const STAT_FLUSH_MS=300;
 
 /* ─── PŘIHLÁŠENÍ ───
-   Čtení je veřejné, zápis smí jen přihlášený zapisovatel (viz schema.sql).
+   Čtení je veřejné, zápis smí jen přihlášený zapisovatel (viz supabase/README.md).
    Token držíme sami, bez supabase-js — appka jinak nemá žádné závislosti. */
 const AUTH={token:null,refresh:null,expires:0,email:null};
 
