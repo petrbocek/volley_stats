@@ -4,10 +4,8 @@
 // produkční data. Stub si drží vlastní stav statistik a na RPC vb_zapis_akce
 // aplikuje deltu stejně jako databáze, aby šlo ověřit i souběh dvou zařízení.
 //
-// Spuštění:
-//   npm i playwright                      (jednorázově)
-//   python3 -m http.server 8099 &         (v kořeni repa)
-//   node tests/live-stats.test.mjs
+// Spuštění viz README.md — stručně:
+//   npm i playwright ; python3 -m http.server 8099 & ; node tests/live-stats.test.mjs
 
 import { chromium } from 'playwright';
 
@@ -373,6 +371,48 @@ pass &= ok('T16h „i se statistikami" smaže obojí (#30)',
   otherWrites.some(w => w.table === 'vb_statistiky' && w.method === 'DELETE') &&
   otherWrites.some(w => w.table === 'vb_zapas_hraci' && w.method === 'DELETE') &&
   !db.has('100_11'));
+
+// ── #39: karta hráčky vypadá stejně na všech třech místech ─────────────────
+// Historicky se mapování pozice na CSS třídu opisovalo zvlášť v každé kopii,
+// takže přidání Blokaře se muselo opravovat třikrát.
+const kartaPozice = async (sel) => page.$$eval(sel, els => els.map(e => ({
+  jmeno: e.querySelector('.player-name')?.textContent,
+  pozice: e.querySelector('.player-pos')?.textContent,
+  trida: e.querySelector('.player-pos')?.className,
+  maCislo: !!e.querySelector('.player-num'),
+})));
+
+await page.click('.nav-tab:nth-child(3)');                    // Tým
+await page.waitForSelector('#hraci-list .player-card');
+const soupiska = await kartaPozice('#hraci-list .player-card');
+const sBeta = soupiska.find(k => k.jmeno === 'Beta');
+pass &= ok('T17a soupiska: blokař má svou barvu pozice (#39)',
+  sBeta && sBeta.trida.includes('pos-blokar') && sBeta.pozice === 'blokař' && sBeta.maCislo);
+
+await page.evaluate(() => openTymManage(5));                  // správa týmu
+await page.waitForTimeout(150);
+const sprava = await kartaPozice('#tym-manage-content .player-card');
+const spBeta = sprava.find(k => k.jmeno === 'Beta');
+pass &= ok('T17b správa týmu: stejná karta, stejná třída (#39)',
+  spBeta && spBeta.trida === sBeta.trida && spBeta.pozice === sBeta.pozice);
+await page.click('#modal-tym-manage .btn-secondary');
+
+await page.click('.nav-tab:nth-child(4)');                    // Live → picker
+await page.waitForTimeout(150);
+await page.evaluate(() => openHracPicker(100));
+await page.waitForTimeout(150);
+const picker = await kartaPozice('#hrac-picker-list .player-card');
+const pBeta = picker.find(k => k.jmeno === 'Beta');
+pass &= ok('T17c výběr do sestavy: stejná karta, stejná třída (#39)',
+  pBeta && pBeta.trida === sBeta.trida && pBeta.pozice === sBeta.pozice);
+
+// každá pozice má vlastní třídu, žádná nepadá do výchozí
+const vsechny = await page.evaluate(() =>
+  ['smečař','blokař','nahrávač','libero','universál','nesmysl'].map(p => poziceTrida(p)));
+pass &= ok('T17d každá pozice má vlastní třídu, neznámá spadne na smečaře (#39)',
+  JSON.stringify(vsechny) === JSON.stringify(
+    ['pos-smec','pos-blokar','pos-nahravac','pos-libero','pos-universal','pos-smec']));
+await page.click('#modal-hrac-picker .btn-secondary');
 
 // ── #34: export CSV ────────────────────────────────────────────────────────
 // minimální CSV parser, ať se ověřuje význam a ne konkrétní tvar uvozovek
