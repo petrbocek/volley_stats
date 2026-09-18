@@ -167,3 +167,14 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
   .nav-tab{padding:12px 14px;font-size:18px}
   .nav-label{display:none}
 }
+
+.readonly-bar{
+  display:none;
+  padding:7px 16px;
+  background:rgba(255,193,7,.12);
+  border-bottom:1px solid rgba(255,193,7,.3);
+  color:#ffc107;
+  font-size:12.5px;
+  text-align:center;
+}
+.readonly-bar.show{display:block}

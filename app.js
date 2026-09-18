@@ -23,10 +23,76 @@ const dirtyStats={};
 const pendingStats=new Set();
 const STAT_FLUSH_MS=300;
 
+/* ─── PŘIHLÁŠENÍ ───
+   Čtení je veřejné, zápis smí jen přihlášený zapisovatel (viz schema.sql).
+   Token držíme sami, bez supabase-js — appka jinak nemá žádné závislosti. */
+const AUTH={token:null,refresh:null,expires:0,email:null};
+
+function authLoad(){
+  try{const r=JSON.parse(localStorage.getItem('vb_auth')||'null');if(r)Object.assign(AUTH,r);}catch(e){}
+}
+function authSave(){
+  try{localStorage.setItem('vb_auth',JSON.stringify(AUTH));}catch(e){}
+}
+function authClear(){
+  AUTH.token=null;AUTH.refresh=null;AUTH.expires=0;AUTH.email=null;
+  try{localStorage.removeItem('vb_auth');}catch(e){}
+}
+function isLoggedIn(){return !!AUTH.token;}
+
+async function authLogin(email,password){
+  const r=await fetch(`${SB_URL}/auth/v1/token?grant_type=password`,{
+    method:'POST',
+    headers:{'apikey':SB_KEY,'Content-Type':'application/json'},
+    body:JSON.stringify({email,password})
+  });
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok)throw new Error(d.error_description||d.msg||d.message||'Přihlášení se nepovedlo');
+  AUTH.token=d.access_token;AUTH.refresh=d.refresh_token;
+  AUTH.expires=Date.now()+((d.expires_in||3600)*1000);
+  AUTH.email=(d.user&&d.user.email)||email;
+  authSave();
+}
+
+async function authRefresh(){
+  if(!AUTH.refresh)return false;
+  try{
+    const r=await fetch(`${SB_URL}/auth/v1/token?grant_type=refresh_token`,{
+      method:'POST',
+      headers:{'apikey':SB_KEY,'Content-Type':'application/json'},
+      body:JSON.stringify({refresh_token:AUTH.refresh})
+    });
+    if(!r.ok){authClear();return false;}
+    const d=await r.json();
+    AUTH.token=d.access_token;AUTH.refresh=d.refresh_token||AUTH.refresh;
+    AUTH.expires=Date.now()+((d.expires_in||3600)*1000);
+    authSave();
+    return true;
+  }catch(e){return false;}
+}
+
+// Token obnovujeme minutu předem, ať uprostřed zápisu nevyprší.
+async function bearer(){
+  if(!AUTH.token)return 'Bearer '+SB_KEY;
+  if(Date.now()>AUTH.expires-60000&&!await authRefresh())return 'Bearer '+SB_KEY;
+  return 'Bearer '+AUTH.token;
+}
+
+function requireLogin(method){
+  if(method!=='GET'&&!isLoggedIn()){
+    throw new Error('Na změny se musíš přihlásit (tlačítko 🔒 nahoře).');
+  }
+}
+
+async function authHeaders(method,extra){
+  requireLogin(method);
+  return Object.assign({'apikey':SB_KEY,'Authorization':await bearer()},extra||{});
+}
+
 async function api(method,path,body){
   const r=await fetch(SB_URL+'/rest/v1/'+path,{
     method,
-    headers:{'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY,'Content-Type':'application/json','Prefer':method==='POST'?'return=representation':'return=representation'},
+    headers:await authHeaders(method,{'Content-Type':'application/json','Prefer':'return=representation'}),
     body:body?JSON.stringify(body):undefined
   });
   if(!r.ok){const e=await r.text();throw new Error(e);}
@@ -36,17 +102,24 @@ async function api(method,path,body){
 async function apiUpsert(table,body,conflict,opts={}){
   const r=await fetch(`${SB_URL}/rest/v1/${table}?on_conflict=${conflict}`,{
     method:'POST',
-    headers:{'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates,return=representation'},
+    headers:await authHeaders('POST',{'Content-Type':'application/json','Prefer':'resolution=merge-duplicates,return=representation'}),
     body:JSON.stringify(body),
     keepalive:!!opts.keepalive
   });
   if(!r.ok){const e=await r.text();throw new Error(e);}
   return r.status===204?null:await r.json();
 }
+async function apiDelete(table,query){
+  const r=await fetch(`${SB_URL}/rest/v1/${table}?${query}`,{
+    method:'DELETE',
+    headers:await authHeaders('DELETE')
+  });
+  if(!r.ok){const e=await r.text();throw new Error(e);}
+}
 async function apiPatch(table,id,body){
   const r=await fetch(`${SB_URL}/rest/v1/${table}?id=eq.${id}`,{
     method:'PATCH',
-    headers:{'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY,'Content-Type':'application/json','Prefer':'return=representation'},
+    headers:await authHeaders('PATCH',{'Content-Type':'application/json','Prefer':'return=representation'}),
     body:JSON.stringify(body)
   });
   if(!r.ok){const e=await r.text();throw new Error(e);}
@@ -228,9 +301,7 @@ function playerCardHtml(h,sid,inSeason){
 async function toggleHracSezona(hracId,sezonaId,inSeason){
   try{
     if(inSeason){
-      await fetch(`${SB_URL}/rest/v1/vb_hraci_sezony?hrac_id=eq.${hracId}&sezona_id=eq.${sezonaId}`,{
-        method:'DELETE',headers:{'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY}
-      });
+      await apiDelete('vb_hraci_sezony',`hrac_id=eq.${hracId}&sezona_id=eq.${sezonaId}`);
       state.hraciSezony=state.hraciSezony.filter(hs=>!(hs.hrac_id===hracId&&hs.sezona_id===sezonaId));
     }else{
       await apiUpsert('vb_hraci_sezony',{hrac_id:hracId,sezona_id:sezonaId},'hrac_id,sezona_id');
@@ -407,7 +478,7 @@ async function addDoSestava(zapasId,hracId){
 
 async function removeZeSestava(zapasId,hracId){
   try{
-    await fetch(`${SB_URL}/rest/v1/vb_zapas_hraci?zapas_id=eq.${zapasId}&hrac_id=eq.${hracId}`,{method:'DELETE',headers:{'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY}});
+    await apiDelete('vb_zapas_hraci',`zapas_id=eq.${zapasId}&hrac_id=eq.${hracId}`);
     state.zapasHraci=state.zapasHraci.filter(zh=>!(zh.zapas_id===zapasId&&zh.hrac_id===hracId));
     renderLiveTable(zapasId);
   }catch(e){toast('Chyba: '+e.message,'error');}
@@ -435,6 +506,8 @@ function getStatVal(zapasId,hracId,field){
 }
 
 function bump(hracId,zapasId,field){
+  // bez tohohle by počítadlo naskočilo a teprve pak přišla chyba ze serveru
+  if(!isLoggedIn()){toast('Na zapisování se přihlas (🔒 nahoře)','error');return;}
   ensureStat(zapasId,hracId);
   const key=`${zapasId}_${hracId}`;
   dirtyStats[key][field]=(dirtyStats[key][field]||0)+1;
@@ -649,7 +722,7 @@ function renderTymManage(tymId){
 async function toggleHracTym(hracId,tymId,inTym){
   try{
     if(inTym){
-      await fetch(`${SB_URL}/rest/v1/vb_hraci_tymy?hrac_id=eq.${hracId}&tym_id=eq.${tymId}`,{method:'DELETE',headers:{'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY}});
+      await apiDelete('vb_hraci_tymy',`hrac_id=eq.${hracId}&tym_id=eq.${tymId}`);
       state.hraciTymy=state.hraciTymy.filter(ht=>!(ht.hrac_id===hracId&&ht.tym_id===tymId));
     }else{
       await apiUpsert('vb_hraci_tymy',{hrac_id:hracId,tym_id:tymId},'hrac_id,tym_id');
@@ -679,7 +752,7 @@ async function deleteTym(){
   const tymId=parseInt(document.getElementById('tym-manage-id').value);
   if(!confirm('Opravdu smazat tým?'))return;
   try{
-    await fetch(`${SB_URL}/rest/v1/vb_tymy?id=eq.${tymId}`,{method:'DELETE',headers:{'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY}});
+    await apiDelete('vb_tymy',`id=eq.${tymId}`);
     state.tymy=state.tymy.filter(t=>t.id!==tymId);
     state.hraciTymy=state.hraciTymy.filter(ht=>ht.tym_id!==tymId);
     closeModal('modal-tym-manage');
@@ -813,7 +886,7 @@ async function saveZapas(){
 async function deleteZapas(id){
   if(!confirm('Opravdu smazat zápas?'))return;
   try{
-    await fetch(`${SB_URL}/rest/v1/vb_zapasy?id=eq.${id}`,{method:'DELETE',headers:{'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY}});
+    await apiDelete('vb_zapasy',`id=eq.${id}`);
     state.zapasy=state.zapasy.filter(z=>z.id!==id);
     state.statistiky=state.statistiky.filter(s=>s.zapas_id!==id);
     renderZapasy();renderPrehled();renderLiveSelect();
@@ -922,6 +995,49 @@ async function saveVysledek(){
   }catch(e){toast('Chyba: '+e.message,'error');}
 }
 
+/* ─── UI PŘIHLÁŠENÍ ─── */
+function renderAuthUI(){
+  const btn=document.getElementById('btn-auth');
+  const bar=document.getElementById('readonly-bar');
+  if(btn){
+    btn.textContent=isLoggedIn()?`🔓 ${AUTH.email||'přihlášen'}`:'🔒 Přihlásit';
+    btn.title=isLoggedIn()?'Kliknutím se odhlásíš':'Přihlásit se k zapisování';
+  }
+  if(bar)bar.classList.toggle('show',!isLoggedIn());
+}
+
+function onAuthButton(){
+  if(isLoggedIn()){
+    if(!confirm('Odhlásit se? Zapisovat pak půjde až po dalším přihlášení.'))return;
+    authClear();
+    renderAuthUI();
+    toast('Odhlášeno','success');
+    return;
+  }
+  document.getElementById('in-login-heslo').value='';
+  openModal('modal-login');
+  document.getElementById('in-login-email').focus();
+}
+
+async function doLogin(){
+  const email=document.getElementById('in-login-email').value.trim();
+  const heslo=document.getElementById('in-login-heslo').value;
+  if(!email||!heslo){toast('Vyplň e-mail a heslo','error');return;}
+  const btn=document.getElementById('btn-do-login');
+  btn.disabled=true;btn.textContent='Přihlašuji…';
+  try{
+    await authLogin(email,heslo);
+    closeModal('modal-login');
+    document.getElementById('in-login-heslo').value='';
+    renderAuthUI();
+    toast('Přihlášeno','success');
+  }catch(e){
+    toast(e.message,'error');
+  }finally{
+    btn.disabled=false;btn.textContent='Přihlásit';
+  }
+}
+
 /* ─── UI HELPERS ─── */
 function showTab(name){
   document.querySelectorAll('.tab-content').forEach(el=>el.classList.remove('active'));
@@ -952,4 +1068,6 @@ function toast(msg,type='success'){
 // set today as default for new match
 document.getElementById('in-zapas-datum').valueAsDate=new Date();
 
+authLoad();
+renderAuthUI();
 init();
