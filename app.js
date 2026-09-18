@@ -17,11 +17,24 @@ const VARIANTS=[
 const state={sezony:[],activeSeason:null,hraci:[],hraciSezony:[],zapasy:[],statistiky:[],tymy:[],hraciTymy:[],souteze:[],zapasHraci:[],liveZapasId:null};
 const debounceMap={};
 const dirtyStats={};
-// dirtyStats drží řádek pro každou vykreslenou hráčku (viz ensureStat), i tu bez
-// jediného kliku. pendingStats proto značí jen ty, kde je opravdu co uložit —
-// jinak by flush založil nulové řádky celé sestavě.
-const pendingStats=new Set();
+// dirtyStats drží zobrazenou hodnotu řádku pro každou vykreslenou hráčku (viz
+// ensureStat), i tu bez jediného kliku. pendingDeltas proto drží zvlášť jen to,
+// co se ještě neodeslalo — jinak by flush založil nulové řádky celé sestavě.
+//
+// Posílají se změny (±1), ne absolutní hodnoty: při dvou zapisovatelích
+// u jednoho zápasu by upsert celého řádku přebil kliky toho druhého (#27).
+const pendingDeltas={};          // `${zapasId}_${hracId}` -> { pole: delta }
 const STAT_FLUSH_MS=300;
+const LIVE_REFRESH_MS=10000;     // dorovnání s druhým zařízením
+let liveRefreshTimer=null;
+
+function hasPending(key){
+  const d=pendingDeltas[key];
+  return !!d&&Object.keys(d).length>0;
+}
+function pendingKeys(){
+  return Object.keys(pendingDeltas).filter(hasPending);
+}
 
 /* ─── PŘIHLÁŠENÍ ───
    Čtení je veřejné, zápis smí jen přihlášený zapisovatel (viz supabase/README.md).
@@ -104,6 +117,16 @@ async function apiUpsert(table,body,conflict,opts={}){
     method:'POST',
     headers:await authHeaders('POST',{'Content-Type':'application/json','Prefer':'resolution=merge-duplicates,return=representation'}),
     body:JSON.stringify(body),
+    keepalive:!!opts.keepalive
+  });
+  if(!r.ok){const e=await r.text();throw new Error(e);}
+  return r.status===204?null:await r.json();
+}
+async function apiRpc(fn,args,opts={}){
+  const r=await fetch(`${SB_URL}/rest/v1/rpc/${fn}`,{
+    method:'POST',
+    headers:await authHeaders('POST',{'Content-Type':'application/json'}),
+    body:JSON.stringify(args),
     keepalive:!!opts.keepalive
   });
   if(!r.ok){const e=await r.text();throw new Error(e);}
@@ -390,6 +413,17 @@ function openFinishModal(){
   if(state.liveZapasId)editVysledek(state.liveZapasId,true);
 }
 
+// Dlouhý stisk je jinak funkce, o které se nikdo nedozví; tooltip na mobilu
+// nefunguje. Ukážeme ji jednou a pak už ne.
+function napovedaZpet(){
+  if(!isLoggedIn())return;
+  try{
+    if(localStorage.getItem('vb_napoveda_zpet'))return;
+    localStorage.setItem('vb_napoveda_zpet','1');
+  }catch(e){return;}
+  setTimeout(()=>toast('Tip: překlik vezmeš zpět dlouhým stiskem počítadla','success'),800);
+}
+
 function renderLiveTable(zapasId){
   const sid=currentSeasonId();
   const sezona_id=sid||state.zapasy.find(z=>z.id===zapasId)?.sezona_id||0;
@@ -421,7 +455,7 @@ function renderLiveTable(zapasId){
         const field=`${a.key}_${v.suf}`;
         const val=getStatVal(zapasId,h.id,field);
         const border=vi===0?`border-left:3px solid ${a.color};`:'';
-        cells+=`<td style="padding:0;${border}"><button class="live-act-btn ${v.cls}" onclick="bump(${h.id},${zapasId},'${field}')"><span class="live-act-sym ${v.cls}">${v.sym}</span><span class="live-act-cnt" id="cnt-${h.id}-${field}">${val}</span></button></td>`;
+        cells+=`<td style="padding:0;${border}"><button class="live-act-btn ${v.cls}" title="Klepnutím přidáš, dlouhým stiskem nebo pravým tlačítkem vezmeš zpět" onpointerdown="pressStart(event,${h.id},${zapasId},'${field}')" onpointerup="pressEnd(event,${h.id},${zapasId},'${field}')" onpointerleave="clearTimeout(this._pressTimer)" oncontextmenu="event.preventDefault();clearTimeout(this._pressTimer);this.dataset.dlouhy='0';bumpDown(${h.id},${zapasId},'${field}');return false"><span class="live-act-sym ${v.cls}">${v.sym}</span><span class="live-act-cnt" id="cnt-${h.id}-${field}">${val}</span></button></td>`;
       });
     });
     return `<tr>${cells}</tr>`;
@@ -436,6 +470,7 @@ function renderLiveTable(zapasId){
   </td></tr>`;
 
   el.innerHTML=`<table class="live-table"><thead>${thead}</thead><tbody>${rows}${addRow}</tbody></table>`;
+  if(hraci.length)napovedaZpet();
 }
 
 function openHracPicker(zapasId){
@@ -505,40 +540,120 @@ function getStatVal(zapasId,hracId,field){
   return s?s[field]||0:0;
 }
 
-function bump(hracId,zapasId,field){
+function bump(hracId,zapasId,field,delta=1){
   // bez tohohle by počítadlo naskočilo a teprve pak přišla chyba ze serveru
   if(!isLoggedIn()){toast('Na zapisování se přihlas (🔒 nahoře)','error');return;}
   ensureStat(zapasId,hracId);
   const key=`${zapasId}_${hracId}`;
-  dirtyStats[key][field]=(dirtyStats[key][field]||0)+1;
+  const puvodni=dirtyStats[key][field]||0;
+  const nova=Math.max(0,puvodni+delta);
+  if(nova===puvodni)return;                    // odečítat pod nulu nedává smysl
+  dirtyStats[key][field]=nova;
   const el=document.getElementById(`cnt-${hracId}-${field}`);
-  if(el)el.textContent=dirtyStats[key][field];
-  pendingStats.add(key);
+  if(el)el.textContent=nova;
+  pendingDeltas[key]=pendingDeltas[key]||{};
+  pendingDeltas[key][field]=(pendingDeltas[key][field]||0)+(nova-puvodni);
+  if(pendingDeltas[key][field]===0)delete pendingDeltas[key][field];
   clearTimeout(debounceMap[key]);
   debounceMap[key]=setTimeout(()=>flushStat(key),STAT_FLUSH_MS);
 }
 
+// Vzetí zpět (#29): dlouhý stisk nebo pravé tlačítko na počítadle.
+function bumpDown(hracId,zapasId,field){
+  const el=document.getElementById(`cnt-${hracId}-${field}`);
+  const pred=el?parseInt(el.textContent)||0:0;
+  bump(hracId,zapasId,field,-1);
+  const po=el?parseInt(el.textContent)||0:0;
+  if(po<pred)toast('Vzato zpět','success');
+}
+
+// Dlouhý stisk se musí rozlišit od běžného klepnutí, jinak by každý zápis
+// akce skončil odečtením.
+function pressStart(ev,hracId,zapasId,field){
+  if(ev.button!==0)return;                 // pravé tlačítko řeší oncontextmenu
+  const btn=ev.currentTarget;
+  btn.dataset.dlouhy='0';
+  clearTimeout(btn._pressTimer);
+  btn._pressTimer=setTimeout(()=>{
+    btn.dataset.dlouhy='1';
+    bumpDown(hracId,zapasId,field);
+  },500);
+}
+function pressEnd(ev,hracId,zapasId,field){
+  if(ev.button!==0)return;                 // jinak by pointerup po pravém kliku
+  const btn=ev.currentTarget;              // hned přičetl to, co contextmenu odečetl
+  clearTimeout(btn._pressTimer);
+  if(btn.dataset.dlouhy==='1'){btn.dataset.dlouhy='0';return;}   // odečet už proběhl
+  bump(hracId,zapasId,field,1);
+}
+
 async function flushStat(key,opts={}){
-  const data=dirtyStats[key];
-  if(!data||!pendingStats.has(key))return;
+  if(!hasPending(key))return;
   clearTimeout(debounceMap[key]);
   delete debounceMap[key];
-  pendingStats.delete(key);
+  const [zapasId,hracId]=key.split('_').map(Number);
+  const odeslane=pendingDeltas[key];
+  pendingDeltas[key]={};
+  const zmeny=Object.entries(odeslane).map(([pole,delta])=>({zapas_id:zapasId,hrac_id:hracId,pole,delta}));
+  if(!zmeny.length)return;
   try{
-    const res=await apiUpsert('vb_statistiky',data,'zapas_id,hrac_id',opts);
-    if(res&&res[0]){
-      const idx=state.statistiky.findIndex(s=>s.zapas_id===data.zapas_id&&s.hrac_id===data.hrac_id);
-      if(idx>=0)state.statistiky[idx]=res[0];else state.statistiky.push(res[0]);
-    }
+    const res=await apiRpc('vb_zapis_akce',{p_zmeny:zmeny},opts);
+    // server vrací výslednou hodnotu po přičtení, včetně toho, co mezitím
+    // zapsalo druhé zařízení — bereme ji jako pravdu
+    if(Array.isArray(res))res.forEach(r=>prijmiHodnotu(r.zapas_id,r.hrac_id,r.pole,r.hodnota));
   }catch(e){
-    pendingStats.add(key); // ať to zkusí další flush, ne že se to ztratí
+    // vrátit zpět do fronty, ať se to neztratí
+    Object.entries(odeslane).forEach(([pole,delta])=>{
+      pendingDeltas[key][pole]=(pendingDeltas[key][pole]||0)+delta;
+    });
     toast('Chyba uložení: '+e.message,'error');
   }
 }
 
+function prijmiHodnotu(zapasId,hracId,pole,hodnota){
+  const key=`${zapasId}_${hracId}`;
+  ensureStat(zapasId,hracId);
+  dirtyStats[key][pole]=hodnota;
+  let s=state.statistiky.find(s=>s.zapas_id===zapasId&&s.hrac_id===hracId);
+  if(!s){s={zapas_id:zapasId,hrac_id:hracId};state.statistiky.push(s);}
+  s[pole]=hodnota;
+  const el=document.getElementById(`cnt-${hracId}-${pole}`);
+  if(el)el.textContent=hodnota;
+}
+
 function flushAllStats(opts={}){
-  // kopie klíčů — flushStat množinu mění
-  return Promise.all([...pendingStats].map(k=>flushStat(k,opts)));
+  return Promise.all(pendingKeys().map(k=>flushStat(k,opts)));
+}
+
+// Dorovnání s druhým zařízením (#27). Realtime by byl elegantnější, ale
+// znamenal by websocket a další závislost; na jeden otevřený zápas stačí
+// občasné dotažení. Rozepsané hodnoty se nepřepisují.
+async function refreshLiveStats(){
+  const zapasId=state.liveZapasId;
+  if(!zapasId||document.hidden)return;
+  try{
+    const rows=await api('GET',`vb_statistiky?zapas_id=eq.${zapasId}`);
+    (rows||[]).forEach(row=>{
+      const key=`${row.zapas_id}_${row.hrac_id}`;
+      const ceka=pendingDeltas[key]||{};
+      const idx=state.statistiky.findIndex(s=>s.zapas_id===row.zapas_id&&s.hrac_id===row.hrac_id);
+      if(idx>=0)state.statistiky[idx]=row;else state.statistiky.push(row);
+      if(!dirtyStats[key])return;
+      Object.keys(row).forEach(pole=>{
+        if(pole in ceka)return;                      // tohle si drží uživatel
+        if(typeof row[pole]!=='number')return;
+        if(dirtyStats[key][pole]===row[pole])return;
+        dirtyStats[key][pole]=row[pole];
+        const el=document.getElementById(`cnt-${row.hrac_id}-${pole}`);
+        if(el)el.textContent=row[pole];
+      });
+    });
+  }catch(e){/* dorovnání je best effort, chybu netlačíme uživateli do obličeje */}
+}
+
+function startLiveRefresh(){
+  clearInterval(liveRefreshTimer);
+  liveRefreshTimer=setInterval(refreshLiveStats,LIVE_REFRESH_MS);
 }
 
 // Zamčený telefon, přepnutá záložka nebo zavřené okno jinak timeout nikdy
@@ -1071,3 +1186,4 @@ document.getElementById('in-zapas-datum').valueAsDate=new Date();
 authLoad();
 renderAuthUI();
 init();
+startLiveRefresh();
