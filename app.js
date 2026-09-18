@@ -343,19 +343,35 @@ function renderTym(){
   renderTymy();
 }
 
-function playerCardHtml(h,sid,inSeason){
-  const posClass=`pos-${h.pozice==='nahrávač'?'nahravac':h.pozice==='libero'?'libero':h.pozice==='universál'?'universal':h.pozice==='blokař'?'blokar':'smec'}`;
-  const numEl=h.cislo?`<div class="player-num">${h.cislo}</div>`:`<div class="player-num no-num">?</div>`;
-  const toggle=sid?`<button class="btn btn-sm ${inSeason?'btn-red':'btn-green'}" style="flex-shrink:0" onclick="toggleHracSezona(${h.id},${sid},${inSeason})">${inSeason?'Odebrat':'+ Přidat'}</button>`:'';
-  return `<div class="player-card ${sid&&!inSeason?'inactive':''}" id="pc-${h.id}">
-    ${numEl}
+// Karta hráčky se kreslí na třech místech (soupiska, výběr do sestavy, správa
+// týmu) a lišila se jen obalem a tlačítky vpravo. Mapování pozice na CSS třídu
+// bylo v každé kopii opsané znovu, takže přidání Blokaře se muselo opravovat
+// třikrát.
+const POZICE_TRIDA={'nahrávač':'nahravac','libero':'libero','universál':'universal',
+                    'blokař':'blokar','smečař':'smec'};
+function poziceTrida(pozice){return 'pos-'+(POZICE_TRIDA[pozice]||'smec');}
+
+function playerCard(h,{tridy='',atributy='',ovladani=''}={}){
+  const cislo=h.cislo
+    ?`<div class="player-num">${h.cislo}</div>`
+    :`<div class="player-num no-num">?</div>`;
+  return `<div class="player-card ${tridy}" ${atributy}>
+    ${cislo}
     <div class="player-info">
       <div class="player-name">${esc(h.jmeno)}</div>
-      <div class="player-pos ${posClass}">${esc(h.pozice)||'—'}</div>
+      <div class="player-pos ${poziceTrida(h.pozice)}">${esc(h.pozice)||'—'}</div>
     </div>
-    <button class="btn btn-sm btn-secondary" style="flex-shrink:0" onclick="editHrac(${h.id})">✏️</button>
-    ${toggle}
+    ${ovladani}
   </div>`;
+}
+
+function playerCardHtml(h,sid,inSeason){
+  const toggle=sid?`<button class="btn btn-sm ${inSeason?'btn-red':'btn-green'}" style="flex-shrink:0" onclick="toggleHracSezona(${h.id},${sid},${inSeason})">${inSeason?'Odebrat':'+ Přidat'}</button>`:'';
+  return playerCard(h,{
+    tridy:sid&&!inSeason?'inactive':'',
+    atributy:`id="pc-${h.id}"`,
+    ovladani:`<button class="btn btn-sm btn-secondary" style="flex-shrink:0" onclick="editHrac(${h.id})">✏️</button>${toggle}`
+  });
 }
 
 async function toggleHracSezona(hracId,sezonaId,inSeason){
@@ -526,15 +542,10 @@ function openHracPicker(zapasId){
   if(!available.length){
     el.innerHTML='<div class="empty"><span class="empty-icon">👥</span><div class="empty-text">Všechny hráčky jsou v sestavě</div></div>';
   }else{
-    el.innerHTML=available.map(h=>{
-      const posClass=`pos-${h.pozice==='nahrávač'?'nahravac':h.pozice==='libero'?'libero':h.pozice==='universál'?'universal':h.pozice==='blokař'?'blokar':'smec'}`;
-      const numEl=h.cislo?`<div class="player-num">${h.cislo}</div>`:`<div class="player-num no-num">?</div>`;
-      return `<div class="player-card" style="cursor:pointer" onclick="addDoSestava(${zapasId},${h.id})">
-        ${numEl}
-        <div class="player-info"><div class="player-name">${esc(h.jmeno)}</div><div class="player-pos ${posClass}">${esc(h.pozice)||'—'}</div></div>
-        <span style="color:var(--green);font-size:20px;font-weight:700">+</span>
-      </div>`;
-    }).join('');
+    el.innerHTML=available.map(h=>playerCard(h,{
+      atributy:`style="cursor:pointer" onclick="addDoSestava(${zapasId},${h.id})"`,
+      ovladani:'<span style="color:var(--green);font-size:20px;font-weight:700">+</span>'
+    })).join('');
   }
   openModal('modal-hrac-picker');
 }
@@ -980,13 +991,10 @@ function renderTymManage(tymId){
   if(!state.hraci.length){el.innerHTML='<div class="empty"><span class="empty-icon">👥</span><div class="empty-text">Žádné hráčky</div></div>';return;}
   el.innerHTML=state.hraci.map(h=>{
     const isIn=inTym.includes(h.id);
-    const posClass=`pos-${h.pozice==='nahrávač'?'nahravac':h.pozice==='libero'?'libero':h.pozice==='universál'?'universal':h.pozice==='blokař'?'blokar':'smec'}`;
-    const numEl=h.cislo?`<div class="player-num">${h.cislo}</div>`:`<div class="player-num no-num">?</div>`;
-    return `<div class="player-card ${isIn?'':'inactive'}">
-      ${numEl}
-      <div class="player-info"><div class="player-name">${esc(h.jmeno)}</div><div class="player-pos ${posClass}">${esc(h.pozice)||'—'}</div></div>
-      <button class="btn btn-sm ${isIn?'btn-red':'btn-green'}" style="flex-shrink:0" onclick="toggleHracTym(${h.id},${tymId},${isIn})">${isIn?'Odebrat':'+ Přidat'}</button>
-    </div>`;
+    return playerCard(h,{
+      tridy:isIn?'':'inactive',
+      ovladani:`<button class="btn btn-sm ${isIn?'btn-red':'btn-green'}" style="flex-shrink:0" onclick="toggleHracTym(${h.id},${tymId},${isIn})">${isIn?'Odebrat':'+ Přidat'}</button>`
+    });
   }).join('');
 }
 
