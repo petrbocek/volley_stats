@@ -140,6 +140,21 @@
   </div>
 </div>
 
+<!-- Odebrání hráčky ze sestavy -->
+<div class="modal-overlay hidden" id="modal-odebrat">
+  <div class="modal">
+    <div class="modal-title">Odebrat ze sestavy</div>
+    <input type="hidden" id="odebrat-zapas-id" />
+    <input type="hidden" id="odebrat-hrac-id" />
+    <div id="odebrat-text" style="font-size:14px;line-height:1.5;margin-bottom:16px"></div>
+    <div class="modal-footer" style="flex-wrap:wrap;gap:8px">
+      <button class="btn btn-secondary" onclick="closeModal('modal-odebrat')">Zrušit</button>
+      <button class="btn btn-primary" onclick="potvrdOdebrani(false)">Jen odebrat ze sestavy</button>
+      <button class="btn btn-red" id="btn-odebrat-i-statistiky" onclick="potvrdOdebrani(true)">Odebrat i se statistikami</button>
+    </div>
+  </div>
+</div>
+
 <!-- Přihlášení -->
 <div class="modal-overlay hidden" id="modal-login">
   <div class="modal">

@@ -104,7 +104,12 @@ await page.route('**/rest/v1/**', async route => {
       body: JSON.stringify(cast),
     });
   }
-  otherWrites.push({ table, method: req.method() });
+  otherWrites.push({ table, method: req.method(), url: req.url() });
+  if (req.method() === 'DELETE') {
+    const q = new URL(req.url()).search;
+    const z = /zapas_id=eq\.(\d+)/.exec(q), h = /hrac_id=eq\.(\d+)/.exec(q);
+    if (table === 'vb_statistiky' && z && h) db.delete(`${z[1]}_${h[1]}`);
+  }
   return route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
 });
 
@@ -305,6 +310,69 @@ await page.click('.nav-tab:nth-child(5)');
 await page.waitForTimeout(200);
 const volby = await page.$$eval('#stats-hrac-sel option', els => els.map(e => e.textContent));
 pass &= ok('T13f jméno ve filtru statistik se vypíše doslova (#35)', volby.includes(JMENO));
+
+// ── #30: odebrání ze sestavy se ptá a nemlčí o statistikách ────────────────
+await page.selectOption('#season-select', '1');
+await page.waitForTimeout(200);
+await page.click('.nav-tab:nth-child(4)');
+await page.waitForSelector('#cnt-11-servis_plus');
+
+// hráčka BEZ zaznamenaných akcí — prostý dotaz, bez nabídky mazat statistiky
+db.delete('100_11');
+await page.evaluate(() => {
+  delete dirtyStats['100_11'];
+  delete pendingDeltas['100_11'];
+  state.statistiky = state.statistiky.filter(s => !(s.zapas_id === 100 && s.hrac_id === 11));
+  renderLiveTable(100);
+});
+await page.waitForTimeout(150);
+otherWrites = [];
+await page.click('tr:has(#cnt-11-servis_plus) .live-card-remove');
+await page.waitForTimeout(150);
+pass &= ok('T16a odebrání se nejdřív zeptá, nemaže rovnou (#30)',
+  await page.isVisible('#modal-odebrat') && otherWrites.length === 0);
+pass &= ok('T16b bez akcí se nenabízí mazání statistik (#30)',
+  !(await page.isVisible('#btn-odebrat-i-statistiky')));
+
+await page.click('#modal-odebrat .btn-secondary');       // Zrušit
+await page.waitForTimeout(150);
+pass &= ok('T16c zrušení dialogu nic nesmaže (#30)',
+  otherWrites.length === 0 && await page.isVisible('#cnt-11-servis_plus'));
+
+// hráčka SE zaznamenanými akcemi — dialog to musí říct naplno
+Object.assign(radek(100, 11), { servis_plus: 5, utok_plus: 2 });
+await page.evaluate(() => { delete dirtyStats['100_11']; refreshLiveStats(); });
+await page.waitForTimeout(300);
+await page.click('tr:has(#cnt-11-servis_plus) .live-card-remove');
+await page.waitForTimeout(150);
+const text = await page.textContent('#odebrat-text');
+pass &= ok('T16d dialog řekne kolik akcí hráčka má (#30)', /7 akcí/.test(text));
+pass &= ok('T16e dialog upozorní, že akce zůstanou ve statistikách (#30)',
+  /zůstanou ve Statistikách/.test(text));
+pass &= ok('T16f s akcemi se nabídne i smazání statistik (#30)',
+  await page.isVisible('#btn-odebrat-i-statistiky'));
+
+// „jen odebrat" nechá statistiky být
+otherWrites = [];
+await page.click('#modal-odebrat .btn-primary');
+await page.waitForTimeout(300);
+pass &= ok('T16g „jen odebrat" smaže sestavu, ne statistiky (#30)',
+  otherWrites.some(w => w.table === 'vb_zapas_hraci' && w.method === 'DELETE') &&
+  !otherWrites.some(w => w.table === 'vb_statistiky') &&
+  db.has('100_11'));
+
+// a teď varianta i se statistikami
+await page.evaluate(() => addDoSestava(100, 11));
+await page.waitForTimeout(300);
+await page.click('tr:has(#cnt-11-servis_plus) .live-card-remove');
+await page.waitForTimeout(150);
+otherWrites = [];
+await page.click('#btn-odebrat-i-statistiky');
+await page.waitForTimeout(300);
+pass &= ok('T16h „i se statistikami" smaže obojí (#30)',
+  otherWrites.some(w => w.table === 'vb_statistiky' && w.method === 'DELETE') &&
+  otherWrites.some(w => w.table === 'vb_zapas_hraci' && w.method === 'DELETE') &&
+  !db.has('100_11'));
 
 // ── #34: export CSV ────────────────────────────────────────────────────────
 // minimální CSV parser, ať se ověřuje význam a ne konkrétní tvar uvozovek

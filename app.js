@@ -548,11 +548,54 @@ async function addDoSestava(zapasId,hracId){
   }catch(e){toast('Chyba: '+e.message,'error');}
 }
 
-async function removeZeSestava(zapasId,hracId){
+// Kolik akcí má hráčka v zápase zaznamenaných. Bereme i to, co ještě čeká
+// na odeslání, jinak by dialog tvrdil nulu hned po kliknutí.
+function pocetAkci(zapasId,hracId){
+  const key=`${zapasId}_${hracId}`;
+  const zdroj=dirtyStats[key]||state.statistiky.find(s=>s.zapas_id===zapasId&&s.hrac_id===hracId);
+  if(!zdroj)return 0;
+  let n=0;
+  ACTIONS.forEach(a=>VARIANTS.forEach(v=>{n+=zdroj[`${a.key}_${v.suf}`]||0;}));
+  return n;
+}
+
+// Křížek je hned vedle počítadel, po kterých se během zápasu rychle klepe,
+// a mazal bez ptaní — na rozdíl od zápasu i týmu, které se ptají.
+function removeZeSestava(zapasId,hracId){
+  if(!isLoggedIn()){toast('Na změny se přihlas (🔒 nahoře)','error');return;}
+  const h=state.hraci.find(h=>h.id===hracId);
+  const jmeno=h?h.jmeno:'hráčku';
+  const akci=pocetAkci(zapasId,hracId);
+  document.getElementById('odebrat-zapas-id').value=zapasId;
+  document.getElementById('odebrat-hrac-id').value=hracId;
+  document.getElementById('btn-odebrat-i-statistiky').style.display=akci?'':'none';
+  document.getElementById('odebrat-text').innerHTML=akci
+    ? `<strong>${esc(jmeno)}</strong> má v tomto zápase zaznamenaných <strong>${akci}</strong> akcí.<br><br>
+       Když ji jen odebereš ze sestavy, z tabulky zmizí, ale akce zůstanou ve Statistikách
+       a dál se počítají do sloupce „Záp.“ — přes appku se k nim už nedostaneš.`
+    : `Odebrat <strong>${esc(jmeno)}</strong> ze sestavy tohoto zápasu?`;
+  openModal('modal-odebrat');
+}
+
+async function potvrdOdebrani(iStatistiky){
+  const zapasId=parseInt(document.getElementById('odebrat-zapas-id').value);
+  const hracId=parseInt(document.getElementById('odebrat-hrac-id').value);
+  const key=`${zapasId}_${hracId}`;
   try{
+    if(iStatistiky){
+      // nejdřív zahodit rozepsané, ať je flush znovu nezaloží
+      delete pendingDeltas[key];
+      clearTimeout(debounceMap[key]);
+      await apiDelete('vb_statistiky',`zapas_id=eq.${zapasId}&hrac_id=eq.${hracId}`);
+      state.statistiky=state.statistiky.filter(s=>!(s.zapas_id===zapasId&&s.hrac_id===hracId));
+      delete dirtyStats[key];
+    }
     await apiDelete('vb_zapas_hraci',`zapas_id=eq.${zapasId}&hrac_id=eq.${hracId}`);
     state.zapasHraci=state.zapasHraci.filter(zh=>!(zh.zapas_id===zapasId&&zh.hrac_id===hracId));
+    closeModal('modal-odebrat');
     renderLiveTable(zapasId);
+    renderStatistiky();
+    toast(iStatistiky?'Odebráno i se statistikami':'Odebráno ze sestavy','success');
   }catch(e){toast('Chyba: '+e.message,'error');}
 }
 
