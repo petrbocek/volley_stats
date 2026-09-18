@@ -5,6 +5,11 @@ Zdroj pro `gh_issues.py`. Formát: `## Milník`, `### #N Titulek`, v těle řád
 Stav zjištěn revizí `app.js` (915 ř.), `schema.sql` a produkční databáze
 Supabase `cqcjdslqygayijxfhzof` (16 hráček, 98 řádků statistik) k 18. 9. 2026.
 
+**Už založeno na GitHubu jako #24–#41** (backlogové `#N` = GitHub `#N+23`).
+Odkazy v tělech ukazují na skutečná čísla issues; `#6`, `#7` a `#21` jsou
+odkazy na starší PR, ne na issues. Skript pouštěj už jen s `--only` na nové
+položky, jinak založí duplikáty.
+
 ## M1 · Bezpečnost a integrita dat
 
 ### #1 RLS policy anon_all dovoluje komukoli smazat celou databázi
@@ -118,7 +123,7 @@ zařízeními nikdy nesynchronizuje, takže ani jeden z nich nevidí, že o data
 - Minimální varianta, pokud je souběžný zápis mimo záměr: při otevření zápasu,
   který už má statistiky, zobrazit varování.
 
-Souvisí s #3 — obojí je o tom, že zápis z Live tabu není spolehlivý.
+Souvisí s #26 — obojí je o tom, že zápis z Live tabu není spolehlivý.
 
 ---
 
@@ -155,7 +160,7 @@ přímo v Supabase.
 
 - Dlouhý stisk (nebo pravé tlačítko) na počítadle = `−1`, s podlahou na nule.
 - Nebo tlačítko „Zpět“ v hlavičce Live, které vrátí poslední akci — vyžaduje
-  držet zásobník posledních klik, což se hodí i pro #4.
+  držet zásobník posledních klik, což se hodí i pro #27.
 - Ať už to bude cokoli, mělo by to jít ovládat palcem a bez modalu.
 
 ---
@@ -193,7 +198,7 @@ ale `state.liveZapasId` mezitím ukazuje na cizí zápas.
 vrátit se do Live.
 
 **Návrh řešení:** v `onSeasonChange()` vynulovat `state.liveZapasId`
-(a flushnout `dirtyStats`, viz #3) dřív, než se překreslí Live.
+(a flushnout `dirtyStats`, viz #26) dřív, než se překreslí Live.
 
 ---
 
@@ -261,7 +266,7 @@ Veškeré renderování jede přes `innerHTML` s interpolovanými řetězci z da
 `${h.jmeno}`, `${z.soupet}`, `${t.nazev}`, `${s.nazev}` (mj. `app.js:157`,
 `app.js:205`, `app.js:576`). Žádný z nich se neescapuje.
 
-Prakticky: jméno s `&` nebo `<` rozbije zobrazení řádku. Ve spojení s #1
+Prakticky: jméno s `&` nebo `<` rozbije zobrazení řádku. Ve spojení s #24
 (kdokoli může do tabulky zapsat cokoli) je to i cesta, jak do aplikace dostat
 cizí skript — proto `security`, ne jen kosmetika.
 
@@ -296,7 +301,7 @@ tabulce vypadají stejně.
 
 **Návrh řešení:** přidat sloupec úspěšnosti `(plus − minus) / pokusy`, jak se
 běžně vykazuje ve volejbalové statistice. Totéž dává smysl u příjmu.
-Pozor na šířku tabulky na mobilu — možná to patří až do detailu hráčky (#13).
+Pozor na šířku tabulky na mobilu — možná to patří až do detailu hráčky (#36).
 
 ---
 
@@ -311,7 +316,7 @@ v `vb_statistiky` ale zůstaly — šest sloupců, do kterých se od té doby ni
 nic nezapsalo. Matou při čtení schématu i při psaní dotazů nad daty.
 
 **Návrh řešení:** ověřit, že jsou všude nulové, pak `ALTER TABLE ... DROP COLUMN`
-a srovnat schema.sql (souvisí s #2). Jde o destruktivní změnu — nejdřív záloha.
+a srovnat schema.sql (souvisí s #25). Jde o destruktivní změnu — nejdřív záloha.
 
 ---
 
@@ -332,7 +337,7 @@ Další pozice nebo změna vzhledu karty na to narazí znovu.
 
 **Návrh řešení:** jedna funkce `playerCard(h, {action})` a mapa
 `POZICE = {'nahrávač':'nahravac', ...}` místo řetězu ternárních operátorů.
-Souvisí s #12 — escapování se pak dělá na jednom místě.
+Souvisí s #35 — escapování se pak dělá na jednom místě.
 
 ---
 
@@ -348,7 +353,7 @@ spouští lokálně.
 **Návrh řešení:** stručný README — k čemu to je, jak založit Supabase projekt
 a schéma, kde přepsat URL a klíč, jak spustit lokálně
 (`python3 -m http.server`), jak je to nasazené. Plus poznámka o zabezpečení,
-až se vyřeší #1.
+až se vyřeší #24.
 
 ---
 
