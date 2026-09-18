@@ -798,7 +798,7 @@ function spocitejStatistiky(){
     bp:acc.bp+r.bp,cm:acc.cm+r.cm,total:acc.total+r.total
   }),{zapasy:0,sp:0,sm:0,pp:0,pm:0,pn:0,up:0,um:0,un:0,bp:0,cm:0,total:0});
 
-  return {stav:'ok',sid,vsechnyHraci,zapasyPoCsoutezi,seasonSouteze,rows,tot,
+  return {stav:'ok',sid,vsechnyHraci,zapasyPoCsoutezi,seasonSouteze,rows,tot,zapasIds,
           selTym,selSoutez,selZapas,selHrac};
 }
 
@@ -928,7 +928,7 @@ function renderStatistiky(){
     <tbody>
       ${rows.map((row,i)=>`<tr>
         <td style="color:var(--muted);font-weight:700">${i+1}</td>
-        <td><strong>${esc(row.h.jmeno)}</strong>${row.h.cislo?` <span style="color:var(--muted);font-size:11px">#${row.h.cislo}</span>`:''}</td>
+        <td><a href="#" onclick="event.preventDefault();otevriProfil(${row.h.id})" style="color:var(--text);text-decoration:underline;text-decoration-color:var(--border);text-underline-offset:3px"><strong>${esc(row.h.jmeno)}</strong></a>${row.h.cislo?` <span style="color:var(--muted);font-size:11px">#${row.h.cislo}</span>`:''}</td>
         <td style="${muted}">${row.zapasy}</td>
         <td style="${g}">${row.sp}</td><td style="${r}">${row.sm}</td>
         <td style="${g}">${row.pp}</td><td style="${r}">${row.pm}</td><td style="${b}">${pct(row.pp,row.pm,row.pn)}</td>
@@ -952,6 +952,129 @@ function renderStatistiky(){
     </tfoot>
   </table></div>`;
   el.innerHTML=html;
+}
+
+
+/* ─── PROFIL HRÁČKY ─── */
+
+// Zápas po zápase, ve stejném filtru jaký je zrovna ve Statistikách.
+function profilHracky(hracId){
+  const d=spocitejStatistiky();
+  if(d.stav!=='ok')return null;
+  const h=state.hraci.find(h=>h.id===hracId);
+  if(!h)return null;
+  const zapasy=state.zapasy
+    .filter(z=>d.zapasIds.includes(z.id))
+    .filter(z=>state.statistiky.some(s=>s.zapas_id===z.id&&s.hrac_id===hracId))
+    .sort((a,b)=>(a.datum||'').localeCompare(b.datum||'')||a.id-b.id);
+  const radky=zapasy.map(z=>{
+    const s=state.statistiky.find(s=>s.zapas_id===z.id&&s.hrac_id===hracId)||{};
+    const v=f=>s[f]||0;
+    return {z,
+      sp:v('servis_plus'),sm:v('servis_minus'),
+      pp:v('prijem_plus'),pm:v('prijem_minus'),pn:v('prijem_neutral'),
+      up:v('utok_plus'),um:v('utok_minus'),un:v('utok_neutral'),
+      bp:v('blok_plus'),cm:v('chyba_minus'),
+      total:v('servis_plus')+v('utok_plus')+v('blok_plus')
+            -v('servis_minus')-v('prijem_minus')-v('utok_minus')-v('chyba_minus')};
+  });
+  return {h,radky,souhrn:d.rows.find(r=>r.h.id===hracId)};
+}
+
+// Malý spojnicový graf, jedna série. Tři veličiny jsou schválně tři grafy:
+// procenta a bodový součet mají jinou stupnici a do jednoho grafu se dvěma
+// osami nepatří. Jedna série na graf navíc znamená, že identita nestojí na
+// barvě — název je v nadpisu.
+function sparkline(body,{barva,popisky,jednotka=''}){
+  // Poměr stran musí zůstat zachovaný, jinak se z bodů stanou elipsy.
+  // Šířka 400 je kompromis: na desktopu se graf roztáhne, na mobilu
+  // nezploští na proužek.
+  const S={w:400,h:60,l:6,r:6,t:6,b:6};
+  const platne=body.filter(b=>b.y!==null);
+  if(platne.length<1)return '<div class="profil-prazdno">Zatím není z čeho kreslit vývoj.</div>';
+  let min=Math.min(...platne.map(b=>b.y)),max=Math.max(...platne.map(b=>b.y));
+  if(min===max){min-=1;max+=1;}
+  if(min>0&&jednotka==='%')min=0;
+  if(max<0)max=0;
+  const rozpeti=max-min;
+  const px=i=>S.l+(body.length===1?(S.w-S.l-S.r)/2:i*(S.w-S.l-S.r)/(body.length-1));
+  const py=v=>S.t+(1-(v-min)/rozpeti)*(S.h-S.t-S.b);
+
+  const usek=[];let akt=[];
+  body.forEach((b,i)=>{
+    if(b.y===null){if(akt.length)usek.push(akt);akt=[];return;}
+    akt.push(`${px(i)},${py(b.y)}`);
+  });
+  if(akt.length)usek.push(akt);
+
+  const nula=(min<0&&max>0)
+    ?`<line class="graf-mrizka" x1="${S.l}" y1="${py(0)}" x2="${S.w-S.r}" y2="${py(0)}"/>`:'';
+  const popisekOsy=v=>`${Math.round(v)}${jednotka}`;
+  const cary=usek.filter(u=>u.length>1)
+    .map(u=>`<polyline points="${u.join(' ')}" fill="none" stroke="${barva}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`).join('');
+  const body_=body.map((b,i)=>b.y===null?'':
+    `<circle cx="${px(i)}" cy="${py(b.y)}" r="4" fill="${barva}" stroke="var(--surface)" stroke-width="2">
+       <title>${esc(b.popis)}: ${b.y}${jednotka}</title></circle>`).join('');
+  // popisek jen u prvního a posledního zápasu — číslo u každého bodu je šum
+  const kraje=body.length>1
+    ?`<span>${esc(popisky[0])}</span><span>${esc(popisky[popisky.length-1])}</span>`
+    :`<span>${esc(popisky[0])}</span>`;
+  return `<div class="graf-plocha">
+    <div class="graf-osa-y"><span>${popisekOsy(max)}</span><span>${popisekOsy(min)}</span></div>
+    <svg viewBox="0 0 ${S.w} ${S.h}" role="img">${nula}${cary}${body_}</svg>
+  </div>
+  <div class="graf-osa-x">${kraje}</div>`;
+}
+
+function otevriProfil(hracId){
+  const p=profilHracky(hracId);
+  if(!p){toast('Profil se nepodařilo sestavit','error');return;}
+  const {h,radky,souhrn}=p;
+  document.getElementById('profil-title').textContent=
+    `${h.jmeno}${h.cislo?' · #'+h.cislo:''}${h.pozice?' · '+h.pozice:''}`;
+
+  const kostka=(val,lbl,barva)=>`<div class="profil-kostka">
+    <div class="profil-kostka-val"${barva?` style="color:${barva}"`:''}>${val}</div>
+    <div class="profil-kostka-lbl">${lbl}</div></div>`;
+  const souhrnHtml=souhrn?`<div class="profil-souhrn">
+    ${kostka(souhrn.zapasy,'Zápasů')}
+    ${kostka(souhrn.total,'Celkem','var(--accent)')}
+    ${kostka(souhrn.sp,'Esa','var(--green)')}
+    ${kostka(pctCislo(souhrn.up,souhrn.um,souhrn.un)??'—','Útok % výb.')}
+    ${kostka(pctCislo(souhrn.pp,souhrn.pm,souhrn.pn)??'—','Příjem % výb.')}
+    ${kostka(souhrn.cm,'Chyb','var(--red)')}
+  </div>`:'';
+
+  const popisky=radky.map(r=>fmtDate(r.z.datum).slice(0,5));
+  const graf=(nadpis,podnadpis,data,barva,jednotka)=>`<div class="graf">
+    <div class="graf-nadpis">${nadpis}</div>
+    <div class="graf-podnadpis">${podnadpis}</div>
+    ${sparkline(data,{barva,popisky,jednotka})}</div>`;
+
+  const bod=(r,y)=>({y,popis:`${fmtDate(r.z.datum)} — ${r.z.soupet}`});
+  const grafy=radky.length?`
+    ${graf('Útok — % výborných','podíl výborných ze všech pokusů',
+      radky.map(r=>bod(r,pctCislo(r.up,r.um,r.un))),'var(--accent)','%')}
+    ${graf('Příjem — % výborných','podíl výborných ze všech pokusů',
+      radky.map(r=>bod(r,pctCislo(r.pp,r.pm,r.pn))),'var(--green)','%')}
+    ${graf('Celkem','body mínus chyby v zápase',
+      radky.map(r=>bod(r,r.total)),'var(--accent)','')}`
+    :'<div class="profil-prazdno">V tomhle filtru nemá hráčka žádný zápas se záznamem.</div>';
+
+  const tabulka=radky.length?`<div style="overflow-x:auto"><table class="profil-tabulka">
+    <thead><tr><th>Zápas</th><th>Es</th><th>Příj&nbsp;%</th><th>Útok&nbsp;%</th><th>Blok</th><th>Chyb</th><th>Celk.</th></tr></thead>
+    <tbody>${radky.map(r=>`<tr>
+      <td><div class="profil-zapas-datum">${fmtDate(r.z.datum).slice(0,6)}</div><div class="profil-zapas-soupet">${esc(r.z.soupet)}</div></td>
+      <td>${r.sp}</td>
+      <td>${pctCislo(r.pp,r.pm,r.pn)??'—'}</td>
+      <td>${pctCislo(r.up,r.um,r.un)??'—'}</td>
+      <td>${r.bp}</td>
+      <td>${r.cm}</td>
+      <td style="color:var(--accent);font-weight:700">${r.total}</td>
+    </tr>`).join('')}</tbody></table></div>`:'';
+
+  document.getElementById('profil-obsah').innerHTML=souhrnHtml+grafy+tabulka;
+  openModal('modal-profil');
 }
 
 /* ─── TÝMY ─── */
