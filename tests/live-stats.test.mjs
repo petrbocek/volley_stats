@@ -48,6 +48,8 @@ const radek = (z, h) => {
 };
 const statRows = () => [...db.values()];
 
+const SERVER_MAX_ROWS = 1000;   // jako Supabase
+let getPozadavky = [];
 let rpcCalls = [];        // každé volání = pole změn
 let otherWrites = [];     // zápisy mimo RPC (nemají nastat)
 let failNextRpc = false;
@@ -89,7 +91,18 @@ await page.route('**/rest/v1/**', async route => {
   const table = new URL(req.url()).pathname.split('/rest/v1/')[1].split('?')[0];
   if (req.method() === 'GET') {
     const data = table === 'vb_statistiky' ? statRows() : (FIX[table] ?? []);
-    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(data) });
+    getPozadavky.push({ table, range: req.headers()['range'] });
+    // PostgREST vrací jen požadovaný rozsah a přebytek mlčky zahodí
+    const m = /^(\d+)-(\d+)$/.exec(req.headers()['range'] || '');
+    const od = m ? +m[1] : 0;
+    const doIdx = m ? Math.min(+m[2] + 1, data.length) : Math.min(SERVER_MAX_ROWS, data.length);
+    const cast = data.slice(od, m ? Math.min(doIdx, od + SERVER_MAX_ROWS) : doIdx);
+    return route.fulfill({
+      status: cast.length < data.length ? 206 : 200,
+      contentType: 'application/json',
+      headers: { 'content-range': `${od}-${od + cast.length - 1}/${data.length}` },
+      body: JSON.stringify(cast),
+    });
   }
   otherWrites.push({ table, method: req.method() });
   return route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
@@ -360,6 +373,26 @@ pass &= ok('T14h poslední řádek je součet a sedí na patičku tabulky (#34)'
 await page.reload();
 await nactenoOK();
 pass &= ok('T10d přihlášení přežije reload stránky (#24)', await page.evaluate(() => isLoggedIn()));
+
+// ── #28: velká tabulka se načte celá, ne jen prvních 1000 řádků ────────────
+const POCET = 2500;
+for (let i = 0; i < POCET; i++) {
+  db.set(`p${i}`, { zapas_id: 100, hrac_id: 10000 + i, servis_plus: 1 });
+}
+getPozadavky = [];
+await page.reload();
+await nactenoOK();
+const nacteno = await page.evaluate(() => state.statistiky.length);
+const dotazyNaStatistiky = getPozadavky.filter(g => g.table === 'vb_statistiky');
+pass &= ok(`T15a tabulka nad 1000 řádků se načte celá (#28), čekáno ${db.size}`, nacteno === db.size);
+pass &= ok('T15b načítá se po stránkách, ne jedním dotazem (#28)', dotazyNaStatistiky.length >= 3);
+pass &= ok('T15c každá stránka si řekne o svůj rozsah (#28)',
+  dotazyNaStatistiky.slice(0, 3).every((g, i) => g.range === `${i * 1000}-${i * 1000 + 999}`));
+pass &= ok('T15d řazení je jednoznačné, ať se řádky nepřeskočí (#28)',
+  await page.evaluate(() => {
+    const ids = state.statistiky.map(s => `${s.zapas_id}_${s.hrac_id}`);
+    return new Set(ids).size === ids.length;
+  }));
 
 pass &= ok('žádná chyba v konzoli', errors.length === 0);
 if (errors.length) console.log(errors);
