@@ -122,6 +122,31 @@ async function apiUpsert(table,body,conflict,opts={}){
   if(!r.ok){const e=await r.text();throw new Error(e);}
   return r.status===204?null:await r.json();
 }
+// PostgREST vrací nejvýš max-rows (u Supabase 1000) a přebytek zahodí BEZ chyby,
+// takže by appka tiše počítala statistiky z neúplných dat. Čteme proto po
+// stránkách přes hlavičku Range, dokud nepřijde neúplná stránka.
+const STRANKA=1000;
+const MAX_STRANEK=100;       // pojistka proti nekonečné smyčce
+
+async function apiAll(path){
+  const [table,query]=path.split('?');
+  let od=0,vse=[];
+  for(let i=0;i<MAX_STRANEK;i++){
+    const url=`${SB_URL}/rest/v1/${table}${query?'?'+query:''}`;
+    const r=await fetch(url,{
+      headers:Object.assign(await authHeaders('GET'),
+        {'Range-Unit':'items','Range':`${od}-${od+STRANKA-1}`})
+    });
+    if(!r.ok){const e=await r.text();throw new Error(e);}
+    const cast=r.status===204?[]:await r.json();
+    vse=vse.concat(cast);
+    if(cast.length<STRANKA)return vse;
+    od+=STRANKA;
+  }
+  toast(`Tabulka ${table} je větší než ${MAX_STRANEK*STRANKA} řádků, načetla se jen část`,'error');
+  return vse;
+}
+
 async function apiRpc(fn,args,opts={}){
   const r=await fetch(`${SB_URL}/rest/v1/rpc/${fn}`,{
     method:'POST',
@@ -152,15 +177,17 @@ async function apiPatch(table,id,body){
 async function init(){
   try{
     const [sez,hr,hs,zap,stat,tym,ht,sout,zh]=await Promise.all([
-      api('GET','vb_sezony?order=id.desc'),
-      api('GET','vb_hraci?order=jmeno.asc'),
-      api('GET','vb_hraci_sezony'),
-      api('GET','vb_zapasy?order=datum.desc'),
-      api('GET','vb_statistiky'),
-      api('GET','vb_tymy?order=nazev.asc'),
-      api('GET','vb_hraci_tymy'),
-      api('GET','vb_souteze?order=nazev.asc'),
-      api('GET','vb_zapas_hraci'),
+      // Řazení musí být jednoznačné, jinak může stránkování řádky přeskočit
+      // nebo zopakovat — proto všude rozhodující sloupec navíc.
+      apiAll('vb_sezony?order=id.desc'),
+      apiAll('vb_hraci?order=jmeno.asc,id.asc'),
+      apiAll('vb_hraci_sezony?order=hrac_id.asc,sezona_id.asc'),
+      apiAll('vb_zapasy?order=datum.desc,id.asc'),
+      apiAll('vb_statistiky?order=id.asc'),
+      apiAll('vb_tymy?order=nazev.asc,id.asc'),
+      apiAll('vb_hraci_tymy?order=hrac_id.asc,tym_id.asc'),
+      apiAll('vb_souteze?order=nazev.asc,id.asc'),
+      apiAll('vb_zapas_hraci?order=zapas_id.asc,hrac_id.asc'),
     ]);
     state.sezony=sez||[];
     state.hraci=hr||[];
