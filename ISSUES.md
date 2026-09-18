@@ -231,8 +231,9 @@ zapisovatel schovat pod obecnou „Chybu“ — a ta se pak nedá rozpadnout na 
 Sloupce `blok_minus` a `blok_neutral` v databázi **už existují** (obojí
 v schema.sql i v produkci), takže jde čistě o změnu v UI.
 
-**Otázka na zadavatele:** blok byl na jen `+` zúžen záměrně v #6 (PR). Pokud to
-byl záměr kvůli šířce tabulky na mobilu, dá se `−` přidat jen pro tablet.
+**Otázka na zadavatele:** blok byl na jen `+` zúžen záměrně v PR "Akce: smazat
+Výkop, Blok jen +". Pokud šlo o šířku tabulky na mobilu, dá se `−` přidat jen
+pro tablet.
 
 ---
 
