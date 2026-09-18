@@ -17,6 +17,11 @@ const VARIANTS=[
 const state={sezony:[],activeSeason:null,hraci:[],hraciSezony:[],zapasy:[],statistiky:[],tymy:[],hraciTymy:[],souteze:[],zapasHraci:[],liveZapasId:null};
 const debounceMap={};
 const dirtyStats={};
+// dirtyStats drží řádek pro každou vykreslenou hráčku (viz ensureStat), i tu bez
+// jediného kliku. pendingStats proto značí jen ty, kde je opravdu co uložit —
+// jinak by flush založil nulové řádky celé sestavě.
+const pendingStats=new Set();
+const STAT_FLUSH_MS=300;
 
 async function api(method,path,body){
   const r=await fetch(SB_URL+'/rest/v1/'+path,{
@@ -28,11 +33,12 @@ async function api(method,path,body){
   const t=r.status===204?null:await r.json();
   return t;
 }
-async function apiUpsert(table,body,conflict){
+async function apiUpsert(table,body,conflict,opts={}){
   const r=await fetch(`${SB_URL}/rest/v1/${table}?on_conflict=${conflict}`,{
     method:'POST',
     headers:{'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates,return=representation'},
-    body:JSON.stringify(body)
+    body:JSON.stringify(body),
+    keepalive:!!opts.keepalive
   });
   if(!r.ok){const e=await r.text();throw new Error(e);}
   return r.status===204?null:await r.json();
@@ -94,8 +100,13 @@ function currentSeasonId(){
 }
 
 function onSeasonChange(){
+  flushAllStats();
   const id=currentSeasonId();
   state.activeSeason=state.sezony.find(s=>s.id===id)||null;
+  // bez resetu by renderLiveSelect() sáhl po zápasu z předchozí sezóny
+  state.liveZapasId=null;
+  const liveSel=document.getElementById('live-zapas-select');
+  if(liveSel)liveSel.value='';
   renderAll();
 }
 
@@ -257,10 +268,18 @@ function renderLiveSelect(){
     document.getElementById('btn-start-zapas').style.display=z?.stav==='planovany'?'':'none';
     document.getElementById('btn-end-zapas').style.display=z?.stav==='probihajici'?'':'none';
     renderLiveTable(id);
+  }else{
+    // Sezóna bez zápasů: bez téhle větve by na obrazovce zůstala tabulka
+    // předchozího zápasu a liveZapasId by ukazoval do cizí sezóny.
+    state.liveZapasId=null;
+    document.getElementById('btn-start-zapas').style.display='none';
+    document.getElementById('btn-end-zapas').style.display='none';
+    document.getElementById('live-table-wrap').innerHTML='<div class="empty"><span class="empty-icon">⚡</span><div class="empty-text">V této sezóně nejsou žádné zápasy</div></div>';
   }
 }
 
 function onLiveZapasChange(){
+  flushAllStats();
   const v=document.getElementById('live-zapas-select').value;
   if(!v){
     state.liveZapasId=null;
@@ -421,20 +440,41 @@ function bump(hracId,zapasId,field){
   dirtyStats[key][field]=(dirtyStats[key][field]||0)+1;
   const el=document.getElementById(`cnt-${hracId}-${field}`);
   if(el)el.textContent=dirtyStats[key][field];
+  pendingStats.add(key);
   clearTimeout(debounceMap[key]);
-  debounceMap[key]=setTimeout(()=>flushStat(key),800);
+  debounceMap[key]=setTimeout(()=>flushStat(key),STAT_FLUSH_MS);
 }
 
-async function flushStat(key){
-  const data=dirtyStats[key];if(!data)return;
+async function flushStat(key,opts={}){
+  const data=dirtyStats[key];
+  if(!data||!pendingStats.has(key))return;
+  clearTimeout(debounceMap[key]);
+  delete debounceMap[key];
+  pendingStats.delete(key);
   try{
-    const res=await apiUpsert('vb_statistiky',data,'zapas_id,hrac_id');
+    const res=await apiUpsert('vb_statistiky',data,'zapas_id,hrac_id',opts);
     if(res&&res[0]){
       const idx=state.statistiky.findIndex(s=>s.zapas_id===data.zapas_id&&s.hrac_id===data.hrac_id);
       if(idx>=0)state.statistiky[idx]=res[0];else state.statistiky.push(res[0]);
     }
-  }catch(e){toast('Chyba uložení: '+e.message,'error');}
+  }catch(e){
+    pendingStats.add(key); // ať to zkusí další flush, ne že se to ztratí
+    toast('Chyba uložení: '+e.message,'error');
+  }
 }
+
+function flushAllStats(opts={}){
+  // kopie klíčů — flushStat množinu mění
+  return Promise.all([...pendingStats].map(k=>flushStat(k,opts)));
+}
+
+// Zamčený telefon, přepnutá záložka nebo zavřené okno jinak timeout nikdy
+// nespustí a kliky se ztratí. keepalive drží request naživu i po unloadu;
+// sendBeacon použít nejde, neumí poslat hlavičky s apikey.
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden)flushAllStats({keepalive:true});
+});
+window.addEventListener('pagehide',()=>flushAllStats({keepalive:true}));
 
 /* ─── STATISTIKY ─── */
 function renderStatistiky(){
