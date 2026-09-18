@@ -14,6 +14,7 @@ import { chromium } from 'playwright';
 // #35 — text z databáze, který se nesmí vyhodnotit jako HTML
 const JMENO_S_HTML = 'Gama & <b>tučně</b>';
 const TYM_S_XSS = '<img src=x onerror="window.__xss_tym=1">';
+const JMENO_SE_STREDNIKEM = 'Delta; \'Dé\' a "uvozovky"';   // #34 — musí přežít CSV
 const SOUTEZ_S_XSS = 'Pohár <img src=y onerror="window.__xss_soutez=1">';
 
 const FIX = {
@@ -23,16 +24,19 @@ const FIX = {
   vb_hraci: [{ id: 10, jmeno: 'Alfa', cislo: 1, pozice: 'smečař', aktivni: true },
              { id: 11, jmeno: 'Beta', cislo: 2, pozice: 'blokař', aktivni: true },
              // #35 — jména, která by neescapovaný innerHTML rozbila
-             { id: 12, jmeno: JMENO_S_HTML, cislo: 3, pozice: 'libero', aktivni: true }],
+             { id: 12, jmeno: JMENO_S_HTML, cislo: 3, pozice: 'libero', aktivni: true },
+             { id: 13, jmeno: JMENO_SE_STREDNIKEM, cislo: 4, pozice: 'smečař', aktivni: true }],
   vb_hraci_sezony: [{ hrac_id: 10, sezona_id: 1 }, { hrac_id: 11, sezona_id: 1 },
-                    { hrac_id: 12, sezona_id: 1 }, { hrac_id: 10, sezona_id: 2 }],
+                    { hrac_id: 12, sezona_id: 1 }, { hrac_id: 13, sezona_id: 1 },
+                    { hrac_id: 10, sezona_id: 2 }],
   vb_zapasy: [{ id: 100, sezona_id: 1, soutez_id: 7, datum: '2026-09-10', soupet: 'Soupeř A', misto: 'doma', stav: 'probihajici' },
               { id: 200, sezona_id: 2, datum: '2025-03-01', soupet: 'Soupeř B', misto: 'venku', stav: 'dokonceny', sety_my: 3, sety_oni: 1 }],
   vb_tymy: [{ id: 5, nazev: TYM_S_XSS }],
   vb_hraci_tymy: [{ hrac_id: 12, tym_id: 5 }],
   vb_souteze: [{ id: 7, sezona_id: 1, nazev: SOUTEZ_S_XSS }],
   vb_zapas_hraci: [{ zapas_id: 100, hrac_id: 10 }, { zapas_id: 100, hrac_id: 11 },
-                   { zapas_id: 100, hrac_id: 12 }, { zapas_id: 200, hrac_id: 10 }],
+                   { zapas_id: 100, hrac_id: 12 }, { zapas_id: 100, hrac_id: 13 },
+                   { zapas_id: 200, hrac_id: 10 }],
 };
 
 // stav "databáze" statistik, na který RPC aplikuje delty
@@ -288,6 +292,69 @@ await page.click('.nav-tab:nth-child(5)');
 await page.waitForTimeout(200);
 const volby = await page.$$eval('#stats-hrac-sel option', els => els.map(e => e.textContent));
 pass &= ok('T13f jméno ve filtru statistik se vypíše doslova (#35)', volby.includes(JMENO));
+
+// ── #34: export CSV ────────────────────────────────────────────────────────
+// minimální CSV parser, ať se ověřuje význam a ne konkrétní tvar uvozovek
+function parseCsv(text) {
+  const radky = [];
+  let pole = [], bunka = '', vUvoz = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (vUvoz) {
+      if (c === '"' && text[i + 1] === '"') { bunka += '"'; i++; }
+      else if (c === '"') vUvoz = false;
+      else bunka += c;
+    } else if (c === '"') vUvoz = true;
+    else if (c === ';') { pole.push(bunka); bunka = ''; }
+    else if (c === '\r' && text[i + 1] === '\n') { pole.push(bunka); radky.push(pole); pole = []; bunka = ''; i++; }
+    else bunka += c;
+  }
+  if (bunka !== '' || pole.length) { pole.push(bunka); radky.push(pole); }
+  return radky;
+}
+
+Object.assign(radek(100, 13), { utok_plus: 6, utok_minus: 2, utok_neutral: 2, prijem_plus: 3, chyba_minus: 1 });
+await page.selectOption('#season-select', '1');
+await page.waitForTimeout(300);
+await page.click('.nav-tab:nth-child(4)');               // Live drží zápas 100
+await page.waitForTimeout(200);
+await page.evaluate(() => refreshLiveStats());           // dotáhnout nová data
+await page.waitForTimeout(300);
+await page.click('.nav-tab:nth-child(5)');
+await page.waitForTimeout(300);
+
+pass &= ok('T14a tlačítko exportu je ve Statistikách (#34)', await page.isVisible('#btn-export-csv'));
+
+const stazeni = page.waitForEvent('download');
+await page.click('#btn-export-csv');
+const soubor = await stazeni;
+const syrove = await (await import('node:fs/promises')).readFile(await soubor.path(), 'utf8');
+
+if (process.env.UKAZ_CSV) console.log('\n--- ukázka CSV ---\n' + syrove.replace(/^\uFEFF/, '') + '\n--- konec ---\n');
+pass &= ok('T14b soubor začíná BOM, ať Excel zvládne diakritiku (#34)', syrove.charCodeAt(0) === 0xFEFF);
+pass &= ok('T14c název souboru nese sezónu a datum (#34)',
+  /^statistiky_.*_\d{4}-\d{2}-\d{2}\.csv$/.test(soubor.suggestedFilename()));
+
+const csv = parseCsv(syrove.replace(/^﻿/, ''));
+pass &= ok('T14d hlavička sedí a má 15 sloupců (#34)',
+  csv[0].length === 15 && csv[0][0] === 'Poř.' && csv[0][1] === 'Hráčka' && csv[0][4] === 'Servis Es');
+
+const csvDelta = csv.find(r => r[1] === JMENO_SE_STREDNIKEM);
+pass &= ok('T14e jméno se středníkem a uvozovkami zůstane jedna buňka (#34)',
+  !!csvDelta && csvDelta.length === 15);
+
+const tab = await page.$$eval('.stats-table tbody tr', trs =>
+  trs.map(tr => [...tr.children].map(td => td.textContent.trim())));
+const tabDelta = tab.find(r => r[1].includes('Delta'));
+pass &= ok('T14f čísla v CSV sedí na tabulku (#34)',
+  csvDelta[4] === tabDelta[3] && csvDelta[9] === tabDelta[8] && csvDelta[14] === tabDelta[13]);
+pass &= ok('T14g procenta jsou číslo bez %, ať se v Excelu počítá (#34)',
+  csvDelta[11] === '60' && tabDelta[10] === '60%');
+
+const csvSoucet = csv[csv.length - 1];
+const tabSoucet = await page.$$eval('.stats-table tfoot td', tds => tds.map(td => td.textContent.trim()));
+pass &= ok('T14h poslední řádek je součet a sedí na patičku tabulky (#34)',
+  csvSoucet[1] === 'Σ Celkem' && csvSoucet[14] === tabSoucet[tabSoucet.length - 1]);
 
 // ── přihlášení přežije reload ──────────────────────────────────────────────
 await page.reload();

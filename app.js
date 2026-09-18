@@ -675,30 +675,123 @@ document.addEventListener('visibilitychange',()=>{
 window.addEventListener('pagehide',()=>flushAllStats({keepalive:true}));
 
 /* ─── STATISTIKY ─── */
-function renderStatistiky(){
+
+// Tabulka i export CSV čerpají z tohohle jednoho výpočtu. Kdyby si každý
+// počítal po svém, export by časem začal tiše ukazovat něco jiného než obrazovka.
+function spocitejStatistiky(){
   const sid=currentSeasonId();
-  const el=document.getElementById('stats-content');
-  if(!sid){el.innerHTML='<div class="empty"><span class="empty-icon">📈</span><div class="empty-text">Vyberte sezónu</div></div>';return;}
+  if(!sid)return{stav:'bez-sezony'};
   const vsechnyHraci=hraciVSezoně(sid);
-  if(!vsechnyHraci.length){el.innerHTML='<div class="empty"><span class="empty-icon">📈</span><div class="empty-text">Prázdná soupiska</div></div>';return;}
+  if(!vsechnyHraci.length)return{stav:'prazdna-soupiska'};
   const vsechnyZapasy=state.zapasy.filter(z=>z.sezona_id===sid&&(z.stav==='dokonceny'||z.stav==='probihajici'));
-  if(!vsechnyZapasy.length){el.innerHTML='<div class="empty"><span class="empty-icon">📈</span><div class="empty-text">Žádné zápasy se statistikami</div></div>';return;}
+  if(!vsechnyZapasy.length)return{stav:'zadne-zapasy'};
 
   const selTym=parseInt(document.getElementById('stats-tym-sel')?.value)||0;
   const selSoutez=parseInt(document.getElementById('stats-soutez-sel')?.value)||0;
   const selZapas=parseInt(document.getElementById('stats-zapas-sel')?.value)||0;
   const selHrac=parseInt(document.getElementById('stats-hrac-sel')?.value)||0;
 
-  // filter players
   let hraci=vsechnyHraci;
   if(selTym){const ids=state.hraciTymy.filter(ht=>ht.tym_id===selTym).map(ht=>ht.hrac_id);hraci=hraci.filter(h=>ids.includes(h.id));}
   if(selHrac)hraci=hraci.filter(h=>h.id===selHrac);
 
-  // filter matches (competition → specific match)
   const zapasyPoCsoutezi=selSoutez?vsechnyZapasy.filter(z=>z.soutez_id===selSoutez):vsechnyZapasy;
   const zapasIds=(selZapas?zapasyPoCsoutezi.filter(z=>z.id===selZapas):zapasyPoCsoutezi).map(z=>z.id);
-
   const seasonSouteze=state.souteze.filter(s=>!s.sezona_id||s.sezona_id===sid);
+
+  const rows=hraci.map(h=>{
+    const stats=state.statistiky.filter(s=>s.hrac_id===h.id&&zapasIds.includes(s.zapas_id));
+    const sum=(f)=>stats.reduce((acc,s)=>acc+(s[f]||0),0);
+    const sp=sum('servis_plus'),sm=sum('servis_minus');
+    const pp=sum('prijem_plus'),pm=sum('prijem_minus'),pn=sum('prijem_neutral');
+    const up=sum('utok_plus'),um=sum('utok_minus'),un=sum('utok_neutral');
+    const bp=sum('blok_plus');
+    const cm=sum('chyba_minus');
+    return {h,sp,sm,pp,pm,pn,up,um,un,bp,cm,total:sp+up+bp-sm-pm-um-cm,zapasy:stats.length};
+  }).filter(r=>r.zapasy>0).sort((a,b)=>b.total-a.total);
+
+  const tot=rows.reduce((acc,r)=>({
+    zapasy:acc.zapasy+r.zapasy,sp:acc.sp+r.sp,sm:acc.sm+r.sm,
+    pp:acc.pp+r.pp,pm:acc.pm+r.pm,pn:acc.pn+r.pn,
+    up:acc.up+r.up,um:acc.um+r.um,un:acc.un+r.un,
+    bp:acc.bp+r.bp,cm:acc.cm+r.cm,total:acc.total+r.total
+  }),{zapasy:0,sp:0,sm:0,pp:0,pm:0,pn:0,up:0,um:0,un:0,bp:0,cm:0,total:0});
+
+  return {stav:'ok',sid,vsechnyHraci,zapasyPoCsoutezi,seasonSouteze,rows,tot,
+          selTym,selSoutez,selZapas,selHrac};
+}
+
+// podíl výborných ze všech pokusů; null = nebyl žádný pokus
+function pctCislo(plus,minus,neutral){
+  const t=plus+minus+neutral;
+  return t>0?Math.round(plus/t*100):null;
+}
+
+/* ─── EXPORT CSV ─── */
+const CSV_HLAVICKA=['Poř.','Hráčka','Číslo','Záp.','Servis Es','Servis chyby',
+  'Příjem výb.','Příjem chyby','Příjem % výb.','Útok výb.','Útok chyby','Útok % výb.',
+  'Bloky','Chyby','Celkem'];
+
+function csvBunka(v){
+  const t=(v===null||v===undefined)?'':String(v);
+  return /[";\n\r]/.test(t)?'"'+t.replace(/"/g,'""')+'"':t;
+}
+function csvRadek(pole){return pole.map(csvBunka).join(';');}
+
+function statsCsv(d){
+  const radky=[csvRadek(CSV_HLAVICKA)];
+  d.rows.forEach((r,i)=>radky.push(csvRadek([
+    i+1,r.h.jmeno,r.h.cislo??'',r.zapasy,r.sp,r.sm,
+    r.pp,r.pm,pctCislo(r.pp,r.pm,r.pn),
+    r.up,r.um,pctCislo(r.up,r.um,r.un),
+    r.bp,r.cm,r.total])));
+  radky.push(csvRadek(['','Σ Celkem','',d.tot.zapasy,d.tot.sp,d.tot.sm,
+    d.tot.pp,d.tot.pm,pctCislo(d.tot.pp,d.tot.pm,d.tot.pn),
+    d.tot.up,d.tot.um,pctCislo(d.tot.up,d.tot.um,d.tot.un),
+    d.tot.bp,d.tot.cm,d.tot.total]));
+  return radky.join('\r\n');                 // CRLF kvůli Excelu
+}
+
+// Kontext filtrů dávám do názvu souboru, ne do prvních řádků CSV — jinak
+// by se soubor nedal načíst jako tabulka bez ručního přeskakování hlavičky.
+function csvNazev(d){
+  const cast=t=>String(t).normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/[^a-zA-Z0-9]+/g,'-').replace(/^-|-$/g,'').toLowerCase();
+  const kusy=['statistiky',cast(state.sezony.find(s=>s.id===d.sid)?.nazev||'sezona')];
+  if(d.selTym)kusy.push(cast(state.tymy.find(t=>t.id===d.selTym)?.nazev||'tym'));
+  if(d.selSoutez)kusy.push(cast(state.souteze.find(s=>s.id===d.selSoutez)?.nazev||'soutez'));
+  if(d.selZapas){
+    const z=state.zapasy.find(z=>z.id===d.selZapas);
+    if(z)kusy.push(cast(z.datum+'-'+z.soupet));
+  }
+  if(d.selHrac)kusy.push(cast(state.hraci.find(h=>h.id===d.selHrac)?.jmeno||'hracka'));
+  kusy.push(new Date().toISOString().slice(0,10));
+  return kusy.filter(Boolean).join('_')+'.csv';
+}
+
+function exportStatsCsv(){
+  const d=spocitejStatistiky();
+  if(d.stav!=='ok'||!d.rows.length){toast('Není co exportovat','error');return;}
+  // BOM, jinak český Excel přečte diakritiku jako zmatek
+  const blob=new Blob(['\uFEFF'+statsCsv(d)],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;a.download=csvNazev(d);
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+  toast(`Exportováno ${d.rows.length} hráček`,'success');
+}
+
+function renderStatistiky(){
+  const el=document.getElementById('stats-content');
+  const d=spocitejStatistiky();
+  const prazdne=t=>{el.innerHTML=`<div class="empty"><span class="empty-icon">📈</span><div class="empty-text">${t}</div></div>`;};
+  if(d.stav==='bez-sezony')return prazdne('Vyberte sezónu');
+  if(d.stav==='prazdna-soupiska')return prazdne('Prázdná soupiska');
+  if(d.stav==='zadne-zapasy')return prazdne('Žádné zápasy se statistikami');
+
+  const {vsechnyHraci,zapasyPoCsoutezi,seasonSouteze,rows,tot,
+         selTym,selSoutez,selZapas,selHrac}=d;
 
   let html=`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
     <select id="stats-tym-sel" class="form-input" style="min-width:130px;flex:1" onchange="renderStatistiky()">
@@ -717,33 +810,16 @@ function renderStatistiky(){
       <option value="">— všechny hráčky —</option>
       ${vsechnyHraci.map(h=>`<option value="${h.id}"${h.id===selHrac?' selected':''}>${esc(h.jmeno)}</option>`).join('')}
     </select>
+    <button class="btn btn-secondary" id="btn-export-csv" onclick="exportStatsCsv()"
+            title="Stáhne to, co je právě podle filtrů v tabulce">⬇️ Export CSV</button>
   </div>`;
 
-  if(!hraci.length){
+  if(!rows.length){
     el.innerHTML=html+'<div class="empty" style="padding:32px"><span class="empty-icon">📈</span><div class="empty-text">Žádné výsledky pro zvolené filtry</div></div>';
     return;
   }
 
-  const pct=(plus,minus,neutral)=>{const t=plus+minus+neutral;return t>0?Math.round(plus/t*100)+'%':'—';};
-
-  const rows=hraci.map(h=>{
-    const stats=state.statistiky.filter(s=>s.hrac_id===h.id&&zapasIds.includes(s.zapas_id));
-    const sum=(f)=>stats.reduce((acc,s)=>acc+(s[f]||0),0);
-    const sp=sum('servis_plus'),sm=sum('servis_minus');
-    const pp=sum('prijem_plus'),pm=sum('prijem_minus'),pn=sum('prijem_neutral');
-    const up=sum('utok_plus'),um=sum('utok_minus'),un=sum('utok_neutral');
-    const bp=sum('blok_plus');
-    const cm=sum('chyba_minus');
-    const zapasy=stats.length;
-    return {h,sp,sm,pp,pm,pn,up,um,un,bp,cm,total:sp+up+bp-sm-pm-um-cm,zapasy};
-  }).filter(r=>r.zapasy>0).sort((a,b)=>b.total-a.total);
-
-  const tot=rows.reduce((acc,r)=>({
-    zapasy:acc.zapasy+r.zapasy,sp:acc.sp+r.sp,sm:acc.sm+r.sm,
-    pp:acc.pp+r.pp,pm:acc.pm+r.pm,pn:acc.pn+r.pn,
-    up:acc.up+r.up,um:acc.um+r.um,un:acc.un+r.un,
-    bp:acc.bp+r.bp,cm:acc.cm+r.cm,total:acc.total+r.total
-  }),{zapasy:0,sp:0,sm:0,pp:0,pm:0,pn:0,up:0,um:0,un:0,bp:0,cm:0,total:0});
+  const pct=(plus,minus,neutral)=>{const p=pctCislo(plus,minus,neutral);return p===null?'—':p+'%';};
 
   const g='color:var(--green);font-weight:600';
   const r='color:var(--red);font-weight:600';
