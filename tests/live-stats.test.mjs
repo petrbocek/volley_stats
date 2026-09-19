@@ -477,6 +477,57 @@ const tabSoucet = await page.$$eval('.stats-table tfoot td', tds => tds.map(td =
 pass &= ok('T14h poslední řádek je součet a sedí na patičku tabulky (#34)',
   csvSoucet[1] === 'Σ Celkem' && csvSoucet[14] === tabSoucet[tabSoucet.length - 1]);
 
+// ── #36: profil hráčky ─────────────────────────────────────────────────────
+// druhý zápas hráčce 13, ať je z čeho kreslit vývoj
+FIX.vb_zapasy.push({ id: 101, sezona_id: 1, datum: '2026-09-17', soupet: 'Soupeř C', misto: 'venku', stav: 'dokonceny', sety_my: 3, sety_oni: 0 });
+FIX.vb_zapas_hraci.push({ zapas_id: 101, hrac_id: 13 });
+Object.assign(radek(101, 13), { utok_plus: 2, utok_minus: 6, utok_neutral: 2, prijem_plus: 1, prijem_minus: 3, servis_plus: 1 });
+await page.reload();
+await nactenoOK();
+await page.click('.nav-tab:nth-child(5)');
+await page.waitForTimeout(300);
+
+await page.click(`.stats-table tbody tr:has-text("Delta") a`);
+await page.waitForTimeout(300);
+pass &= ok('T18a klik na jméno otevře profil (#36)', await page.isVisible('#modal-profil'));
+pass &= ok('T18b hlavička nese jméno, číslo a pozici (#36)',
+  /Delta.*#4.*smečař/s.test(await page.textContent('#profil-title')));
+
+const grafy = await page.$$eval('#profil-obsah .graf', els => els.map(e => ({
+  nadpis: e.querySelector('.graf-nadpis').textContent,
+  cary: e.querySelectorAll('polyline').length,
+  body: e.querySelectorAll('circle').length,
+  barvy: [...e.querySelectorAll('polyline')].map(p => p.getAttribute('stroke')),
+})));
+pass &= ok('T18c tři samostatné grafy místo dvou os v jednom (#36)', grafy.length === 3);
+pass &= ok('T18d každý graf má právě jednu sérii, identita nestojí na barvě (#36)',
+  grafy.every(g => g.cary === 1 && g.barvy.length === 1) &&
+  grafy.map(g => g.nadpis).join('|').includes('Útok'));
+pass &= ok('T18e graf má bod za každý zápas (#36)', grafy.every(g => g.body === 2));
+
+const popisky = await page.$$eval('#profil-obsah circle title', els => els.map(e => e.textContent));
+pass &= ok('T18f body mají popisek se zápasem a hodnotou (#36)',
+  popisky.some(t => /Soupeř C/.test(t) && /\d/.test(t)));
+
+const radkyTab = await page.$$eval('.profil-tabulka tbody tr', trs =>
+  trs.map(tr => [...tr.children].map(td => td.textContent.trim())));
+pass &= ok('T18g tabulka má řádek na zápas, vzestupně podle data (#36)',
+  radkyTab.length === 2 && radkyTab[0][0].includes('10.09') && radkyTab[1][0].includes('17.09'));
+pass &= ok('T18h procenta v tabulce sedí na data (#36)',
+  radkyTab[0][3] === '60' && radkyTab[1][3] === '20');
+
+// profil respektuje filtr na zápas
+await page.click('#modal-profil .btn-secondary');
+await page.selectOption('#stats-zapas-sel', '101');
+await page.waitForTimeout(300);
+await page.click(`.stats-table tbody tr:has-text("Delta") a`);
+await page.waitForTimeout(300);
+const poFiltru = await page.$$eval('.profil-tabulka tbody tr', trs => trs.length);
+pass &= ok('T18i profil kreslí jen zápasy podle aktivního filtru (#36)', poFiltru === 1);
+await page.click('#modal-profil .btn-secondary');
+await page.selectOption('#stats-zapas-sel', '');
+await page.waitForTimeout(200);
+
 // ── přihlášení přežije reload ──────────────────────────────────────────────
 await page.reload();
 await nactenoOK();

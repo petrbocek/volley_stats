@@ -178,3 +178,31 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
   text-align:center;
 }
 .readonly-bar.show{display:block}
+
+/* profil hráčky */
+.profil-souhrn{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:18px}
+.profil-kostka{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;min-width:76px}
+.profil-kostka-val{font-family:'Oswald',sans-serif;font-size:20px;font-weight:700;line-height:1.1}
+.profil-kostka-lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin-top:2px}
+.graf{margin-bottom:16px}
+.graf-nadpis{font-size:12px;font-weight:600;color:var(--text);margin-bottom:2px}
+.graf-podnadpis{font-size:11px;color:var(--muted);margin-bottom:6px}
+.graf-plocha{display:flex;align-items:stretch;gap:6px}
+.graf-osa-y{display:flex;flex-direction:column;justify-content:space-between;
+  font-size:10px;color:var(--muted);text-align:right;min-width:26px;flex-shrink:0;padding:1px 0}
+.graf-osa-x{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:3px}
+.graf svg{display:block;width:100%;height:auto;flex:1;min-width:0;overflow:visible}
+.graf-mrizka{stroke:var(--border);stroke-width:1}
+.profil-tabulka{width:100%;border-collapse:collapse;font-size:12px}
+.profil-tabulka th{text-align:right;padding:5px 6px;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.3px;border-bottom:1px solid var(--border)}
+.profil-tabulka th:first-child,.profil-tabulka td:first-child{text-align:left}
+.profil-tabulka td{text-align:right;padding:5px 6px;border-bottom:1px solid var(--border);white-space:nowrap}
+.profil-tabulka td:first-child{max-width:150px}
+.profil-zapas-datum{white-space:nowrap}
+.profil-zapas-soupet{color:var(--muted);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media(max-width:560px){
+  .profil-tabulka{font-size:11px}
+  .profil-tabulka th,.profil-tabulka td{padding:5px 3px}
+  .profil-tabulka td:first-child{max-width:78px}
+}
+.profil-prazdno{color:var(--muted);font-size:13px;padding:16px 0}
