@@ -288,9 +288,19 @@ function renderPrehled(){
       <div class="stat-card"><div class="stat-icon">❌</div><div class="stat-val" style="color:var(--red)">${losses}</div><div class="stat-label">Porážky</div></div>
       <div class="stat-card"><div class="stat-icon">📊</div><div class="stat-val">${done.length?Math.round(wins/done.length*100)+'%':'—'}</div><div class="stat-label">Úspěšnost</div></div>
     </div>
-    <div class="section-title">Poslední zápasy</div>
-    ${done.slice(0,5).map(z=>matchHtml(z)).join('')||'<div class="empty" style="padding:20px"><span class="empty-icon" style="font-size:24px">—</span><div>Zatím žádné dokončené zápasy</div></div>'}
+    <div class="section-title">Zápasy</div>
+    ${prehledSeznam(zapasy).map(z=>matchHtml(z,false,true)).join('')||'<div class="empty" style="padding:20px"><span class="empty-icon" style="font-size:24px">—</span><div>Zatím žádné zápasy</div></div>'}
   `;
+}
+
+// Na Přehledu je proklik do Live, takže seznam musí nabídnout i zápas, který
+// se zrovna hraje — jen dokončené by tu funkci minuly.
+function prehledSeznam(zapasy){
+  const probiha=zapasy.filter(z=>z.stav==='probihajici');
+  const planovane=zapasy.filter(z=>z.stav==='planovany')
+    .sort((a,b)=>(a.datum||'').localeCompare(b.datum||''));
+  const done=zapasy.filter(z=>z.stav==='dokonceny');
+  return [...probiha,...planovane.slice(0,1),...done].slice(0,6);
 }
 
 /* ─── ZÁPASY ─── */
@@ -302,7 +312,7 @@ function renderZapasy(){
   el.innerHTML=list.map(z=>matchHtml(z,true)).join('');
 }
 
-function matchHtml(z,withActions=false){
+function matchHtml(z,withActions=false,klikDoLive=false){
   const win=z.stav==='dokonceny'&&z.sety_my>z.sety_oni;
   const lose=z.stav==='dokonceny'&&z.sety_my<z.sety_oni;
   const score=z.stav==='dokonceny'&&z.sety_my!=null?`<span class="match-score ${win?'win':lose?'lose':''}">${z.sety_my}:${z.sety_oni}</span>`:'<span class="match-score" style="color:var(--muted)">—:—</span>';
@@ -316,7 +326,11 @@ function matchHtml(z,withActions=false){
     else if(z.stav==='probihajici')actions=`<button class="btn btn-sm btn-primary" onclick="goLive(${z.id})">⚡ Live</button><button class="btn btn-sm btn-green" onclick="editVysledek(${z.id})">✓ Ukončit</button>`;
     else actions=`<button class="btn btn-sm btn-secondary" onclick="editVysledek(${z.id})">✏️ Upravit</button><button class="btn btn-sm btn-red" onclick="deleteZapas(${z.id})">🗑️</button>`;
   }
-  return `<div class="match-item">
+  const klik=klikDoLive
+    ?` class="match-item match-klik" role="button" tabindex="0" title="Otevřít v Live"
+       onclick="goLive(${z.id})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();goLive(${z.id})}"`
+    :' class="match-item"';
+  return `<div${klik}>
     <div class="match-date">${fmtDate(z.datum)}${z.cas?'<br><span style="font-size:11px">'+z.cas.slice(0,5)+'</span>':''}</div>
     ${score}
     <div style="flex:1;min-width:120px"><div class="match-vs">${esc(z.soupet)}</div><div class="match-misto">${misto}${tym?` · <span style="color:var(--purple)">${esc(tym.nazev)}</span>`:''}${soutez?` · <span style="color:var(--accent2)">${esc(soutez.nazev)}</span>`:''}</div></div>

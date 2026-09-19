@@ -28,6 +28,7 @@ const FIX = {
                     { hrac_id: 12, sezona_id: 1 }, { hrac_id: 13, sezona_id: 1 },
                     { hrac_id: 10, sezona_id: 2 }],
   vb_zapasy: [{ id: 100, sezona_id: 1, soutez_id: 7, datum: '2026-09-10', soupet: 'Soupeř A', misto: 'doma', stav: 'probihajici' },
+              { id: 102, sezona_id: 1, datum: '2026-10-05', soupet: 'Soupeř D', misto: 'doma', stav: 'planovany' },
               { id: 200, sezona_id: 2, datum: '2025-03-01', soupet: 'Soupeř B', misto: 'venku', stav: 'dokonceny', sety_my: 3, sety_oni: 1 }],
   vb_tymy: [{ id: 5, nazev: TYM_S_XSS }],
   vb_hraci_tymy: [{ hrac_id: 12, tym_id: 5 }],
@@ -809,6 +810,45 @@ pass &= ok('T23b ani na nízké obrazovce (regrese)', (await tlacitkoUseknuto())
 await page.setViewportSize({ width: 1100, height: 800 });
 await page.waitForTimeout(300);
 pass &= ok('T23c ani na desktopu (regrese)', (await tlacitkoUseknuto()) <= 0);
+
+// ── proklik z Přehledu do Live ─────────────────────────────────────────────
+await page.setViewportSize({ width: 1100, height: 900 });
+await page.selectOption('#season-select', '1');
+await page.waitForTimeout(200);
+await page.click('.nav-tab:nth-child(1)');                 // Přehled
+await page.waitForSelector('#prehled-content .match-item');
+
+const seznam = await page.$$eval('#prehled-content .match-item', els => els.map(e => ({
+  text: e.textContent.replace(/\s+/g, ' ').trim(),
+  klikaci: e.classList.contains('match-klik'),
+})));
+pass &= ok('T24a zápasy na Přehledu jsou proklikávací',
+  seznam.length > 0 && seznam.every(z => z.klikaci));
+pass &= ok('T24b seznam obsahuje i probíhající zápas, ne jen dokončené',
+  seznam.some(z => /Probíhá/.test(z.text)));
+pass &= ok('T24c a nejbližší plánovaný',
+  seznam.some(z => /Soupeř D/.test(z.text)));
+
+// proklik otevře Live s tím správným zápasem
+const probihajici = await page.$('#prehled-content .match-item:has-text("Probíhá")');
+await probihajici.click();
+await page.waitForTimeout(400);
+pass &= ok('T24d klik přepne na Live a vybere ten zápas',
+  await page.evaluate(() => state.liveZapasId) === 100 &&
+  await page.isVisible('#tab-live.active'));
+
+// klávesnicí taky
+await page.click('.nav-tab:nth-child(1)');
+await page.waitForSelector('#prehled-content .match-item');
+await page.evaluate(() => {
+  const el = [...document.querySelectorAll('#prehled-content .match-item')]
+    .find(e => e.textContent.includes('Soupeř D'));
+  el.focus();
+  el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+});
+await page.waitForTimeout(400);
+pass &= ok('T24e jde otevřít i klávesou Enter',
+  await page.evaluate(() => state.liveZapasId) === 102);
 
 // ── přihlášení přežije reload ──────────────────────────────────────────────
 await page.reload();
