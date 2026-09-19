@@ -133,6 +133,12 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 .stats-table th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:700;background:var(--surface2)}
 .stats-table tr:last-child td{border-bottom:none}
 .stats-table tr:hover td{background:rgba(255,255,255,.03)}
+.stats-table th.sortable{cursor:pointer;user-select:none;white-space:nowrap}
+.stats-table th.sortable:hover{color:var(--text);background:var(--surface)}
+.stats-table th.sortable:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.stats-table th.sort-aktivni{color:var(--accent)}
+/* Šipka má místo i když je prázdná, jinak hlavička při přeřazení poskočí. */
+.sort-sipka{display:inline-block;min-width:11px;font-size:9px}
 
 /* EMPTY */
 .empty{text-align:center;padding:48px 20px;color:var(--muted)}
