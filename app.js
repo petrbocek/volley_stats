@@ -917,6 +917,55 @@ window.addEventListener('pagehide',()=>flushAllStats({keepalive:true}));
 
 // Tabulka i export CSV čerpají z tohohle jednoho výpočtu. Kdyby si každý
 // počítal po svém, export by časem začal tiše ukazovat něco jiného než obrazovka.
+// Řazení tabulky ve Statistikách. Výchozí je „nejlepší nahoře", jak to bylo
+// napevno předtím — jen teď jde přeřadit i podle čehokoli jiného (#72).
+const statsSort={sloupec:'total',smer:'desc'};
+
+// Jméno se řadí abecedně (a česky), čísla od největšího — to je u obojího to,
+// co člověk po prvním kliknutí čeká.
+const STATS_SLOUPCE={
+  jmeno:{hodnota:r=>r.h.jmeno||'',text:true,vychozi:'asc'},
+  zapasy:{hodnota:r=>r.zapasy,vychozi:'desc'},
+  sp:{hodnota:r=>r.sp,vychozi:'desc'},
+  sm:{hodnota:r=>r.sm,vychozi:'desc'},
+  pp:{hodnota:r=>r.pp,vychozi:'desc'},
+  pm:{hodnota:r=>r.pm,vychozi:'desc'},
+  prijem_pct:{hodnota:r=>pctCislo(r.pp,r.pm,r.pn),vychozi:'desc'},
+  up:{hodnota:r=>r.up,vychozi:'desc'},
+  um:{hodnota:r=>r.um,vychozi:'desc'},
+  utok_pct:{hodnota:r=>pctCislo(r.up,r.um,r.un),vychozi:'desc'},
+  bp:{hodnota:r=>r.bp,vychozi:'desc'},
+  cm:{hodnota:r=>r.cm,vychozi:'desc'},
+  total:{hodnota:r=>r.total,vychozi:'desc'},
+};
+
+function seradRadky(rows){
+  const def=STATS_SLOUPCE[statsSort.sloupec]||STATS_SLOUPCE.total;
+  const smer=statsSort.smer==='asc'?1:-1;
+  return [...rows].sort((a,b)=>{
+    const x=def.hodnota(a),y=def.hodnota(b);
+    // „—" (žádný pokus) není nula, patří na konec v obou směrech — jinak by
+    // vzestupné řazení podle % vytáhlo nahoru hráčky, které nic nezkusily.
+    if(x===null&&y===null)return 0;
+    if(x===null)return 1;
+    if(y===null)return -1;
+    const cmp=def.text?String(x).localeCompare(String(y),'cs'):x-y;
+    // shoda se dorovná jménem, ať řádky mezi překresleními nepodskakují
+    return cmp!==0?cmp*smer:(a.h.jmeno||'').localeCompare(b.h.jmeno||'','cs');
+  });
+}
+
+function seradStatistiky(sloupec){
+  if(!STATS_SLOUPCE[sloupec])return;
+  if(statsSort.sloupec===sloupec){
+    statsSort.smer=statsSort.smer==='asc'?'desc':'asc';
+  }else{
+    statsSort.sloupec=sloupec;
+    statsSort.smer=STATS_SLOUPCE[sloupec].vychozi;
+  }
+  renderStatistiky();
+}
+
 function spocitejStatistiky(){
   const sid=currentSeasonId();
   if(!sid)return{stav:'bez-sezony'};
@@ -939,7 +988,7 @@ function spocitejStatistiky(){
   const zapasIds=(selZapas?zapasyPoCsoutezi.filter(z=>z.id===selZapas):zapasyPoCsoutezi).map(z=>z.id);
   const seasonSouteze=state.souteze.filter(s=>!s.sezona_id||s.sezona_id===sid);
 
-  const rows=hraci.map(h=>{
+  const neserazene=hraci.map(h=>{
     const stats=state.statistiky.filter(s=>s.hrac_id===h.id&&zapasIds.includes(s.zapas_id)
       &&(!selSet||(s.set_cislo||1)===selSet));
     const sum=(f)=>stats.reduce((acc,s)=>acc+(s[f]||0),0);
@@ -951,7 +1000,10 @@ function spocitejStatistiky(){
     // jeden řádek na set, takže počet zápasů je počet různých zapas_id
     const zapasy=new Set(stats.map(s=>s.zapas_id)).size;
     return {h,sp,sm,pp,pm,pn,up,um,un,bp,cm,total:sp+up+bp-sm-pm-um-cm,zapasy};
-  }).filter(r=>r.zapasy>0).sort((a,b)=>b.total-a.total);
+  }).filter(r=>r.zapasy>0);
+  // Řadí se tady, ne až při vykreslení, ať CSV export stáhne tabulku v tom
+  // pořadí, v jakém ji má člověk před očima.
+  const rows=seradRadky(neserazene);
 
   const tot=rows.reduce((acc,r)=>({
     zapasy:acc.zapasy+r.zapasy,sp:acc.sp+r.sp,sm:acc.sm+r.sm,
@@ -1086,21 +1138,38 @@ function renderStatistiky(){
   const a='color:var(--accent);font-family:\'Oswald\',sans-serif;font-size:16px;font-weight:700';
   const muted='color:var(--muted);font-weight:600;text-align:center';
 
+  // Hlavička řadí. Aktivní sloupec nese šipku, ať je vidět nejen že se řadilo,
+  // ale i podle čeho — bez toho se pořadí po filtru nedá přečíst.
+  const th=(sloupec,popisek,atributy='')=>{
+    const aktivni=statsSort.sloupec===sloupec;
+    const sipka=aktivni?(statsSort.smer==='asc'?' ▲':' ▼'):'';
+    const dalsi=aktivni?(statsSort.smer==='asc'?'sestupně':'vzestupně')
+                       :(STATS_SLOUPCE[sloupec].vychozi==='asc'?'vzestupně':'sestupně');
+    return `<th ${atributy} class="sortable${aktivni?' sort-aktivni':''}" role="button" tabindex="0"
+      aria-sort="${aktivni?(statsSort.smer==='asc'?'ascending':'descending'):'none'}"
+      title="Seřadit ${dalsi}"
+      onclick="seradStatistiky('${sloupec}')"
+      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();seradStatistiky('${sloupec}')}"
+      >${popisek}<span class="sort-sipka">${sipka}</span></th>`;
+  };
+
   html+=`<div style="overflow-x:auto"><table class="stats-table">
     <thead>
       <tr>
-        <th rowspan="2">#</th><th rowspan="2">Hráčka</th><th rowspan="2">Záp.</th>
+        <th rowspan="2">#</th>
+        ${th('jmeno','Hráčka','rowspan="2"')}
+        ${th('zapasy','Záp.','rowspan="2"')}
         <th colspan="2">🎯 Servis</th>
         <th colspan="3">🤲 Příjem</th>
         <th colspan="3">💥 Útok</th>
-        <th rowspan="2">🛡️ Blok</th>
-        <th rowspan="2">❌ Chyba</th>
-        <th rowspan="2">Celkem</th>
+        ${th('bp','🛡️ Blok','rowspan="2"')}
+        ${th('cm','❌ Chyba','rowspan="2"')}
+        ${th('total','Celkem','rowspan="2"')}
       </tr>
       <tr>
-        <th>Es</th><th>Chyby</th>
-        <th>Výb.</th><th>Chyby</th><th>%</th>
-        <th>Výb.</th><th>Chyby</th><th>%</th>
+        ${th('sp','Es')}${th('sm','Chyby')}
+        ${th('pp','Výb.')}${th('pm','Chyby')}${th('prijem_pct','%')}
+        ${th('up','Výb.')}${th('um','Chyby')}${th('utok_pct','%')}
       </tr>
     </thead>
     <tbody>

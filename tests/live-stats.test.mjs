@@ -1075,6 +1075,110 @@ await page.waitForTimeout(200);
 radky = await prehled();
 pass &= ok('T28g bez turnaje zůstává Přehled krátký (#68)', radky.length <= 6);
 
+// ── #72: tabulka statistik se dá řadit oběma směry ─────────────────────────
+await page.click('.nav-tab:nth-child(5)');                 // Statistiky
+await page.waitForSelector('.stats-table');
+await page.evaluate(() => {
+  ['stats-tym-sel', 'stats-soutez-sel', 'stats-zapas-sel', 'stats-hrac-sel', 'stats-set-sel']
+    .forEach(id => { const e = document.getElementById(id); if (e) e.value = ''; });
+  renderStatistiky();
+});
+await page.waitForTimeout(250);
+
+const sloupec = n => page.$$eval(`.stats-table tbody tr td:nth-child(${n})`,
+  els => els.map(e => e.textContent.trim()));
+const klikHlavicku = txt => page.evaluate(t => {
+  const th = [...document.querySelectorAll('.stats-table th.sortable')]
+    .find(e => e.textContent.trim().startsWith(t));
+  th.click();
+}, txt);
+const cisla = a => a.map(v => parseInt(v)).filter(v => !Number.isNaN(v));
+const klesa = a => a.every((v, i) => i === 0 || a[i - 1] >= v);
+const roste = a => a.every((v, i) => i === 0 || a[i - 1] <= v);
+
+pass &= ok('T29a výchozí pořadí je pořád nejlepší nahoře (#72)',
+  klesa(cisla(await sloupec(14))) &&
+  /▼/.test(await page.textContent('.stats-table th.sort-aktivni')));
+
+await klikHlavicku('Celkem');
+await page.waitForTimeout(200);
+pass &= ok('T29b klik na aktivní sloupec otočí směr (#72)',
+  roste(cisla(await sloupec(14))));
+pass &= ok('T29c otočený směr pozná i šipka (#72)',
+  /▲/.test(await page.textContent('.stats-table th.sort-aktivni')));
+
+await klikHlavicku('Hráčka');
+await page.waitForTimeout(200);
+const jmenaRazeni = (await sloupec(2)).map(t => t.replace(/#\d+$/, '').trim());
+pass &= ok('T29d jméno se řadí abecedně, a česky (#72)',
+  jmenaRazeni.every((v, i) => i === 0 || jmenaRazeni[i - 1].localeCompare(v, 'cs') <= 0));
+pass &= ok('T29e jen jeden sloupec je najednou aktivní (#72)',
+  (await page.$$('.stats-table th.sort-aktivni')).length === 1);
+
+// „—" u procent není nula, patří na konec v obou směrech. V datech žádná
+// taková hráčka není, tak jednu na chvíli vyrobíme — jinak by test prošel
+// naprázdno, protože pomlčku by nikde nenašel.
+await page.evaluate(() => {
+  state.statistiky.filter(s => s.hrac_id === 10).forEach(s => {
+    s.prijem_plus = 0; s.prijem_minus = 0; s.prijem_neutral = 0;
+  });
+  renderStatistiky();
+});
+await page.waitForTimeout(200);
+pass &= ok('T29f0 hráčka bez jediného pokusu má v procentech „—", ne 0 % (#72)',
+  (await sloupec(8)).includes('—'));
+
+await klikHlavicku('%');
+await page.waitForTimeout(200);
+const pctDesc = await sloupec(8);   // příjem %
+await klikHlavicku('%');
+await page.waitForTimeout(200);
+const pctAsc = await sloupec(8);
+const pomlckyNaKonci = a => {
+  const i = a.findIndex(v => v === '—');
+  return i === -1 || a.slice(i).every(v => v === '—');
+};
+pass &= ok('T29f procenta se řadí sestupně i vzestupně (#72)',
+  klesa(cisla(pctDesc)) && roste(cisla(pctAsc)));
+pass &= ok('T29g hráčky bez pokusu zůstávají dole v obou směrech (#72)',
+  pomlckyNaKonci(pctDesc) && pomlckyNaKonci(pctAsc));
+await page.evaluate(() => {
+  state.statistiky.filter(s => s.hrac_id === 10).forEach(s => { s.prijem_plus = 1; });
+  renderStatistiky();
+});
+
+// pořadové číslo je pořadí v tabulce, ne id — po přeřazení musí jít 1..n
+pass &= ok('T29h sloupec # zůstává pořadím řádků (#72)',
+  (await sloupec(1)).join(',') === (await sloupec(1)).map((_, i) => i + 1).join(','));
+
+// CSV bere pořadí z tabulky, ne svoje vlastní
+pass &= ok('T29i export stahuje tabulku v tom pořadí, jaké je vidět (#72)',
+  await page.evaluate(() => {
+    const d = spocitejStatistiky();
+    const vTabulce = [...document.querySelectorAll('.stats-table tbody tr td:nth-child(2)')]
+      .map(e => e.querySelector('strong').textContent);
+    return d.rows.map(r => r.h.jmeno).join('|') === vTabulce.join('|');
+  }));
+
+// řazení přežije změnu filtru
+await page.selectOption('#stats-set-sel', '1');
+await page.waitForTimeout(250);
+pass &= ok('T29j řazení se po změně filtru nezahodí (#72)',
+  await page.evaluate(() => statsSort.sloupec === 'prijem_pct' && statsSort.smer === 'asc'));
+await page.selectOption('#stats-set-sel', '');
+await page.waitForTimeout(250);
+
+// klávesnicí taky
+await page.evaluate(() => {
+  const th = [...document.querySelectorAll('.stats-table th.sortable')]
+    .find(e => e.textContent.trim().startsWith('Záp.'));
+  th.focus();
+  th.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+});
+await page.waitForTimeout(200);
+pass &= ok('T29k seřadit jde i klávesou Enter (#72)',
+  await page.evaluate(() => statsSort.sloupec === 'zapasy'));
+
 // ── přihlášení přežije reload ──────────────────────────────────────────────
 await page.reload();
 await nactenoOK();
