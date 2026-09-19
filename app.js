@@ -323,7 +323,7 @@ function matchHtml(z,withActions=false,klikDoLive=false){
   let actions='';
   if(withActions){
     if(z.stav==='planovany')actions=`<button class="btn btn-sm btn-primary" onclick="goLive(${z.id})">⚡ Live</button><button class="btn btn-sm btn-secondary" onclick="editVysledek(${z.id})">📝 Výsledek</button><button class="btn btn-sm btn-red" onclick="deleteZapas(${z.id})">🗑️</button>`;
-    else if(z.stav==='probihajici')actions=`<button class="btn btn-sm btn-primary" onclick="goLive(${z.id})">⚡ Live</button><button class="btn btn-sm btn-green" onclick="editVysledek(${z.id})">✓ Ukončit</button>`;
+    else if(z.stav==='probihajici')actions=`<button class="btn btn-sm btn-primary" onclick="goLive(${z.id})">⚡ Live</button><button class="btn btn-sm btn-green" onclick="editVysledek(${z.id})">✓ Ukončit</button><button class="btn btn-sm btn-red" onclick="deleteZapas(${z.id})">🗑️</button>`;
     else actions=`<button class="btn btn-sm btn-secondary" onclick="editVysledek(${z.id})">✏️ Upravit</button><button class="btn btn-sm btn-red" onclick="deleteZapas(${z.id})">🗑️</button>`;
   }
   const klik=klikDoLive
@@ -1467,13 +1467,44 @@ async function saveZapas(){
 }
 
 /* ─── DELETE ZÁPAS ─── */
+// Kolik kliků je v zápase zapsaných — ne kolik je řádků. Řádek má sestava
+// i bez jediné akce (viz ensureStat), takže počet řádků by mazání zlehčoval.
+// Počítá se i hráčka, která už v sestavě není, ale akce po sobě nechala.
+function pocetAkciZapasu(zapasId){
+  const hracky=new Set([
+    ...state.zapasHraci.filter(zh=>zh.zapas_id===zapasId).map(zh=>zh.hrac_id),
+    ...state.statistiky.filter(s=>s.zapas_id===zapasId).map(s=>s.hrac_id),
+  ]);
+  return [...hracky].reduce((n,hid)=>n+pocetAkci(zapasId,hid),0);
+}
+
+function sklonujAkce(n){return n===1?'1 zapsaná akce':(n>=2&&n<=4?`${n} zapsané akce`:`${n} zapsaných akcí`);}
+function sklonujHracky(n){return n===1?'1 hráčka':(n>=2&&n<=4?`${n} hráčky`:`${n} hráček`);}
+
 async function deleteZapas(id){
-  if(!confirm('Opravdu smazat zápas?'))return;
+  const z=state.zapasy.find(z=>z.id===id);if(!z)return;
+  const akci=pocetAkciZapasu(id);
+  const vSestave=state.zapasHraci.filter(zh=>zh.zapas_id===id).length;
+
+  // Zápas mizí i s akcemi a sestavou (FK ON DELETE CASCADE) a zpátky to nejde,
+  // takže to dialog musí říct číslem, ne jen „opravdu?".
+  const co=akci||vSestave
+    ? `Smaže se i ${sklonujAkce(akci)} a sestava (${sklonujHracky(vSestave)}).`
+    : 'Zápas nemá zapsanou jedinou akci ani sestavu.';
+  const live=state.liveZapasId===id?'\nZápas máš zrovna otevřený v Live — zavře se.':'';
+  if(!confirm(`Opravdu smazat zápas ${z.soupet} (${fmtDate(z.datum)})?\n${co}\nNejde vzít zpět.${live}`))return;
+
   try{
     await apiDelete('vb_zapasy',`id=eq.${id}`);
     state.zapasy=state.zapasy.filter(z=>z.id!==id);
     state.statistiky=state.statistiky.filter(s=>s.zapas_id!==id);
-    renderZapasy();renderPrehled();renderLiveSelect();
+    state.zapasHraci=state.zapasHraci.filter(zh=>zh.zapas_id!==id);
+    // Rozepsané kliky smazaného zápasu by flush poslal do neexistujícího řádku.
+    Object.keys(pendingDeltas).forEach(k=>{if(k.startsWith(id+'_'))delete pendingDeltas[k];});
+    Object.keys(dirtyStats).forEach(k=>{if(k.startsWith(id+'_'))delete dirtyStats[k];});
+    try{localStorage.removeItem('vb_set_'+id);}catch(e){}
+    if(state.liveZapasId===id)state.liveZapasId=null;
+    renderZapasy();renderPrehled();renderLiveSelect();renderStatistiky();
     toast('Zápas smazán','success');
   }catch(e){toast('Chyba: '+e.message,'error');}
 }
