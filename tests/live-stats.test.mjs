@@ -782,6 +782,34 @@ pass &= ok('T21i obnovení vrátí hráčku zpět (#41)',
   otherWrites.some(w => w.table === 'vb_hraci' && w.method === 'PATCH') &&
   !(await page.textContent('#hraci-list')).includes('Archiv'));
 
+// ── regrese: "+ Přidat hráčku" se nesmí useknout za rámečkem ───────────────
+// Přepínač setu (#32) a řádek Tým (#56) přibyly do rámečku s pevnou výškou,
+// zatímco tabulka měla height:100% — dohromady přerostly rámeček
+// s overflow:hidden a spodní řádek zmizel. isVisible() to nechytí,
+// protože useknutý prvek je pořád "viditelný"; musí se měřit geometrie.
+const tlacitkoUseknuto = () => page.evaluate(() => {
+  const wrap = document.getElementById('live-table-wrap');
+  const btn = [...wrap.querySelectorAll('button')].find(b => b.textContent.includes('Přidat hráčku'));
+  if (!btn) return 'tlačítko v DOM není';
+  const w = wrap.getBoundingClientRect(), t = btn.getBoundingClientRect();
+  return Math.round(t.bottom - w.bottom);
+});
+
+await page.setViewportSize({ width: 390, height: 844 });    // telefon
+await page.click('.nav-tab:nth-child(4)');
+await page.waitForSelector('.live-tym-row');
+await page.waitForTimeout(200);
+pass &= ok('T23a tlačítko „Přidat hráčku" se na telefonu nesekne (regrese)',
+  (await tlacitkoUseknuto()) <= 0);
+
+await page.setViewportSize({ width: 390, height: 600 });    // nízká obrazovka
+await page.waitForTimeout(300);
+pass &= ok('T23b ani na nízké obrazovce (regrese)', (await tlacitkoUseknuto()) <= 0);
+
+await page.setViewportSize({ width: 1100, height: 800 });
+await page.waitForTimeout(300);
+pass &= ok('T23c ani na desktopu (regrese)', (await tlacitkoUseknuto()) <= 0);
+
 // ── přihlášení přežije reload ──────────────────────────────────────────────
 await page.reload();
 await nactenoOK();
