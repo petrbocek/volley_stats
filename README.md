@@ -47,6 +47,15 @@ Bez přihlášení appka všechno ukáže, ale nepustí zapisovat — nahoře sv
 V záložce **Live** se vybere zápas a přidají hráčky do sestavy. Klepnutí na
 počítadlo přidá akci, **dlouhý stisk nebo pravé tlačítko ji vezme zpět**.
 
+Nahoře je **přepínač setu**. Počítadla ukazují vždy jen právě zvolený set;
+tečka u čísla znamená, že v tom setu už něco zapsaného je. Vybraný set si
+appka pamatuje pro každý zápas zvlášť, takže reload uprostřed třetího setu
+neshodí zápis zpátky do prvního.
+
+Ve Statistikách se sety sčítají. Filtrem „set" se dají rozpadnout zpátky.
+Pozor: zápasy z doby před zavedením setů (#32) mají všechno pod 1. setem,
+takže u nich rozpad nic neřekne.
+
 Zapisovat může víc lidí najednou; posílají se přírůstky, ne celé řádky, takže
 se zápisy nepřebíjejí. Čísla z druhého zařízení se dorovnají zhruba do deseti
 sekund.

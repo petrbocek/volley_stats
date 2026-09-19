@@ -38,10 +38,10 @@ const FIX = {
 };
 
 // stav "databáze" statistik, na který RPC aplikuje delty
-const db = new Map();                       // "zapas_hrac" -> { pole: hodnota }
-const radek = (z, h) => {
-  const k = `${z}_${h}`;
-  if (!db.has(k)) db.set(k, { zapas_id: z, hrac_id: h });
+const db = new Map();                       // "zapas_hrac_set" -> { pole: hodnota }
+const radek = (z, h, set = 1) => {
+  const k = `${z}_${h}_${set}`;
+  if (!db.has(k)) db.set(k, { zapas_id: z, hrac_id: h, set_cislo: set });
   return db.get(k);
 };
 const statRows = () => [...db.values()];
@@ -76,9 +76,10 @@ await page.route('**/rest/v1/rpc/vb_zapis_akce', async route => {
   const zmeny = route.request().postDataJSON().p_zmeny;
   rpcCalls.push(zmeny);
   const out = zmeny.map(z => {
-    const r = radek(z.zapas_id, z.hrac_id);
+    const set = z.set_cislo ?? 1;
+    const r = radek(z.zapas_id, z.hrac_id, set);
     r[z.pole] = Math.max(0, (r[z.pole] || 0) + z.delta);
-    return { zapas_id: z.zapas_id, hrac_id: z.hrac_id, pole: z.pole, hodnota: r[z.pole] };
+    return { zapas_id: z.zapas_id, hrac_id: z.hrac_id, set_cislo: set, pole: z.pole, hodnota: r[z.pole] };
   });
   return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(out) });
 });
@@ -106,7 +107,9 @@ await page.route('**/rest/v1/**', async route => {
   if (req.method() === 'DELETE') {
     const q = new URL(req.url()).search;
     const z = /zapas_id=eq\.(\d+)/.exec(q), h = /hrac_id=eq\.(\d+)/.exec(q);
-    if (table === 'vb_statistiky' && z && h) db.delete(`${z[1]}_${h[1]}`);
+    if (table === 'vb_statistiky' && z && h) {
+      [...db.keys()].filter(k => k.startsWith(`${z[1]}_${h[1]}_`)).forEach(k => db.delete(k));
+    }
   }
   return route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
 });
@@ -123,6 +126,7 @@ const ok = (n, c) => (console.log(`${c ? '  OK  ' : ' FAIL '} ${n}`), !!c);
 let pass = true;
 const cnt = sel => page.textContent(sel).then(t => parseInt(t.trim()));
 const JMENO = JMENO_S_HTML, TYM = TYM_S_XSS;
+const klikSet = n => page.click(`.set-prepinac button:nth-of-type(${n})`);
 const longPress = async sel => { await page.hover(sel); await page.mouse.down(); await page.waitForTimeout(700); await page.mouse.up(); };
 
 // ── #24: bez přihlášení se nic nezapíše ────────────────────────────────────
@@ -316,10 +320,12 @@ await page.click('.nav-tab:nth-child(4)');
 await page.waitForSelector('#cnt-11-servis_plus');
 
 // hráčka BEZ zaznamenaných akcí — prostý dotaz, bez nabídky mazat statistiky
-db.delete('100_11');
+db.delete('100_11_1');
 await page.evaluate(() => {
-  delete dirtyStats['100_11'];
-  delete pendingDeltas['100_11'];
+  for (let set = 1; set <= SETU; set++) {
+    delete dirtyStats[`100_11_${set}`];
+    delete pendingDeltas[`100_11_${set}`];
+  }
   state.statistiky = state.statistiky.filter(s => !(s.zapas_id === 100 && s.hrac_id === 11));
   renderLiveTable(100);
 });
@@ -339,7 +345,7 @@ pass &= ok('T16c zrušení dialogu nic nesmaže (#30)',
 
 // hráčka SE zaznamenanými akcemi — dialog to musí říct naplno
 Object.assign(radek(100, 11), { servis_plus: 5, utok_plus: 2 });
-await page.evaluate(() => { delete dirtyStats['100_11']; refreshLiveStats(); });
+await page.evaluate(() => { delete dirtyStats['100_11_1']; refreshLiveStats(); });
 await page.waitForTimeout(300);
 await page.click('tr:has(#cnt-11-servis_plus) .live-card-remove');
 await page.waitForTimeout(150);
@@ -357,7 +363,7 @@ await page.waitForTimeout(300);
 pass &= ok('T16g „jen odebrat" smaže sestavu, ne statistiky (#30)',
   otherWrites.some(w => w.table === 'vb_zapas_hraci' && w.method === 'DELETE') &&
   !otherWrites.some(w => w.table === 'vb_statistiky') &&
-  db.has('100_11'));
+  db.has('100_11_1'));
 
 // a teď varianta i se statistikami
 await page.evaluate(() => addDoSestava(100, 11));
@@ -370,7 +376,7 @@ await page.waitForTimeout(300);
 pass &= ok('T16h „i se statistikami" smaže obojí (#30)',
   otherWrites.some(w => w.table === 'vb_statistiky' && w.method === 'DELETE') &&
   otherWrites.some(w => w.table === 'vb_zapas_hraci' && w.method === 'DELETE') &&
-  !db.has('100_11'));
+  !db.has('100_11_1'));
 
 // ── #39: karta hráčky vypadá stejně na všech třech místech ─────────────────
 // Historicky se mapování pozice na CSS třídu opisovalo zvlášť v každé kopii,
@@ -476,6 +482,79 @@ const csvSoucet = csv[csv.length - 1];
 const tabSoucet = await page.$$eval('.stats-table tfoot td', tds => tds.map(td => td.textContent.trim()));
 pass &= ok('T14h poslední řádek je součet a sedí na patičku tabulky (#34)',
   csvSoucet[1] === 'Σ Celkem' && csvSoucet[14] === tabSoucet[tabSoucet.length - 1]);
+
+// ── #32: statistiky po setech ──────────────────────────────────────────────
+await page.selectOption('#season-select', '1');
+await page.waitForTimeout(200);
+await page.click('.nav-tab:nth-child(4)');
+await page.waitForSelector('#cnt-10-servis_plus');
+
+pass &= ok('T20a Live má přepínač setů (#32)',
+  (await page.$$eval('.set-btn', els => els.length)) === 5);
+pass &= ok('T20b ve výchozím stavu je aktivní první set (#32)',
+  (await page.textContent('.set-btn.aktivni')).trim() === '1');
+
+// zápis do 1. setu
+rpcCalls = [];
+await page.click('#cnt-10-utok_plus');
+await page.waitForTimeout(600);
+pass &= ok('T20c zápis nese číslo setu (#32)', rpcCalls[0][0].set_cislo === 1);
+const poPrvnim = await cnt('#cnt-10-utok_plus');
+
+// přepnutí na 2. set
+await klikSet(2);
+await page.waitForTimeout(300);
+pass &= ok('T20d přepnutí setu přepne aktivní tlačítko (#32)',
+  (await page.textContent('.set-btn.aktivni')).trim() === '2');
+pass &= ok('T20e druhý set začíná od nuly, nemíchá se s prvním (#32)',
+  await cnt('#cnt-10-utok_plus') === 0);
+
+rpcCalls = [];
+await page.click('#cnt-10-utok_plus');
+await page.click('#cnt-10-utok_plus');
+await page.waitForTimeout(600);
+pass &= ok('T20f zápis ve 2. setu jde do 2. setu (#32)',
+  rpcCalls[0][0].set_cislo === 2 && rpcCalls[0][0].delta === 2);
+pass &= ok('T20g sety jsou v databázi samostatné řádky (#32)',
+  db.get('100_10_1').utok_plus === poPrvnim && db.get('100_10_2').utok_plus === 2);
+
+// návrat do 1. setu ukáže původní čísla
+await klikSet(1);
+await page.waitForTimeout(300);
+pass &= ok('T20h návrat do 1. setu ukáže jeho čísla (#32)',
+  await cnt('#cnt-10-utok_plus') === poPrvnim);
+
+// rozepsané se uloží do setu, ve kterém vznikly
+rpcCalls = [];
+await page.click('#cnt-10-blok_plus');
+await klikSet(3);                                 // hned přepnout na 3. set
+await page.waitForTimeout(400);
+pass &= ok('T20i přepnutí setu nejdřív uloží rozepsané do starého setu (#32)',
+  rpcCalls.length === 1 && rpcCalls[0][0].set_cislo === 1 && rpcCalls[0][0].pole === 'blok_plus');
+
+// statistiky sčítají přes sety a počítají zápasy, ne řádky
+await page.click('.nav-tab:nth-child(5)');
+await page.waitForTimeout(300);
+const radekAlfa = await page.$$eval('.stats-table tbody tr', trs => {
+  const tr = trs.find(t => t.textContent.includes('Alfa'));
+  return tr ? [...tr.children].map(td => td.textContent.trim()) : null;
+});
+pass &= ok('T20j součet přes sety v tabulce statistik (#32)',
+  radekAlfa && Number(radekAlfa[8]) === poPrvnim + 2);
+pass &= ok('T20k hráčka se třemi sety má pořád jeden zápas, ne tři (#32)',
+  radekAlfa && radekAlfa[2] === '1');
+
+// rozpad po setech
+pass &= ok('T20l Statistiky mají filtr na set (#32)', await page.isVisible('#stats-set-sel'));
+await page.selectOption('#stats-set-sel', '2');
+await page.waitForTimeout(300);
+const jenSet2 = await page.$$eval('.stats-table tbody tr', trs => {
+  const tr = trs.find(t => t.textContent.includes('Alfa'));
+  return tr ? [...tr.children].map(td => td.textContent.trim()) : null;
+});
+pass &= ok('T20m filtr na set ukáže jen ten set (#32)', jenSet2 && Number(jenSet2[8]) === 2);
+await page.selectOption('#stats-set-sel', '');
+await page.waitForTimeout(200);
 
 // ── #36: profil hráčky ─────────────────────────────────────────────────────
 // druhý zápas hráčce 13, ať je z čeho kreslit vývoj
@@ -584,7 +663,8 @@ pass &= ok('T15c každá stránka si řekne o svůj rozsah (#28)',
   dotazyNaStatistiky.slice(0, 3).every((g, i) => g.range === `${i * 1000}-${i * 1000 + 999}`));
 pass &= ok('T15d řazení je jednoznačné, ať se řádky nepřeskočí (#28)',
   await page.evaluate(() => {
-    const ids = state.statistiky.map(s => `${s.zapas_id}_${s.hrac_id}`);
+    // po #32 je jeden řádek na set, takže klíč nese i set
+    const ids = state.statistiky.map(s => `${s.zapas_id}_${s.hrac_id}_${s.set_cislo || 1}`);
     return new Set(ids).size === ids.length;
   }));
 

@@ -208,3 +208,12 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 .profil-prazdno{color:var(--muted);font-size:13px;padding:16px 0}
 .profil-usp{font-size:10px;color:var(--muted);font-weight:600;margin-top:1px}
 .profil-legenda{font-size:11px;color:var(--muted);margin-top:8px}
+
+/* přepínač setu v Live */
+.set-prepinac{display:flex;align-items:center;gap:6px;padding:6px 10px;background:var(--surface2);border-bottom:1px solid var(--border)}
+.set-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin-right:2px}
+.set-btn{min-width:34px;height:30px;border:1px solid var(--border);background:var(--surface);color:var(--muted);
+  border-radius:6px;font-family:'Oswald',sans-serif;font-size:14px;font-weight:700;cursor:pointer;position:relative}
+.set-btn.zapsany::after{content:'';position:absolute;top:3px;right:3px;width:5px;height:5px;border-radius:50%;background:var(--muted)}
+.set-btn.aktivni{background:var(--accent);border-color:var(--accent);color:#fff}
+.set-btn.aktivni.zapsany::after{background:rgba(255,255,255,.7)}
