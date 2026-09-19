@@ -562,32 +562,34 @@ function renderLiveTable(zapasId){
       return `<button class="set-btn${n===set?' aktivni':''}${zapsano?' zapsany':''}" onclick="prepniSet(${n})">${n}</button>`;
     }).join('')}
   </div>`;
-  const t=souhrnTymu(zapasId,hraci,souhrnCelyZapas?null:set);
-  const souhrn=hraci.length?`<div class="tym-souhrn" title="Úspěšnost = (výborné − chyby) / pokusy">
-    <button class="souhrn-prepinac" onclick="prepniSouhrn()" title="Přepnout mezi setem a celým zápasem">${souhrnCelyZapas?'Zápas':set+'. set'} ⇄</button>
-    <span class="souhrn-pol"><b style="color:var(--green)">${t.body}</b> body</span>
-    <span class="souhrn-pol"><b style="color:var(--red)">${t.chyby}</b> chyb</span>
-    <span class="souhrn-pol">útok <b>${sZnamenkem(t.utok)}</b></span>
-    <span class="souhrn-pol">příjem <b>${sZnamenkem(t.prijem)}</b></span>
-  </div>`:'';
-  el.innerHTML=prepinac+souhrn+`<table class="live-table"><thead>${thead}</thead><tbody>${rows}${addRow}</tbody></table>`;
+  // Souhrn jako první řádek tabulky, ne samostatný pruh: čísla sedí pod svými
+  // sloupci, takže je nejde splést s něčím jiným. Volný řádek ukazoval
+  // úspěšnost v procentech bez jednotky a vypadala jako počet úderů.
+  const tymRow=hraci.length?`<tr class="live-tym-row">
+    <td class="live-col-hrac live-tym-cell">
+      <span class="live-tym-nazev">Tým</span>
+      <button class="live-tym-prepinac" onclick="prepniSouhrn()" title="Přepnout mezi zapisovaným setem a celým zápasem">${souhrnCelyZapas?'zápas':set+'. set'} ⇄</button>
+    </td>
+    ${ACTIONS.map(a=>{
+      const variants=a.varianty?VARIANTS.filter(v=>a.varianty.includes(v.suf)):VARIANTS;
+      return variants.map((v,vi)=>{
+        const field=`${a.key}_${v.suf}`;
+        const border=vi===0?`border-left:3px solid ${a.color};`:'';
+        return `<td class="live-tym-num ${v.cls}" style="${border}" id="tym-${field}">${tymSoucet(zapasId,hraci,field)}</td>`;
+      }).join('');
+    }).join('')}
+  </tr>`:'';
+  el.innerHTML=prepinac+`<table class="live-table"><thead>${thead}</thead><tbody>${tymRow}${rows}${addRow}</tbody></table>`;
   if(hraci.length)napovedaZpet();
 }
 
-// Souhrn týmu v Live (#56). Místa je málo — tabulka vyplňuje výšku obrazovky
-// — takže jeden řádek, ne panel.
-function souhrnTymu(zapasId,hraci,set){
-  const secti=pole=>hraci.reduce((a,h)=>a+(set
+// Součet jednoho pole za celou sestavu — buď za zapisovaný set, nebo za
+// celý zápas. Bere i rozepsané kliky, aby řádek odpovídal tomu, co je vidět.
+function tymSoucet(zapasId,hraci,pole){
+  const set=souhrnCelyZapas?null:state.liveSet;
+  return hraci.reduce((a,h)=>a+(set
     ?getStatVal(zapasId,h.id,pole,set)
     :statSoucetZive(zapasId,h.id,pole)),0);
-  const sp=secti('servis_plus'),sm=secti('servis_minus');
-  const pp=secti('prijem_plus'),pm=secti('prijem_minus'),pn=secti('prijem_neutral');
-  const up=secti('utok_plus'),um=secti('utok_minus'),un=secti('utok_neutral');
-  const bp=secti('blok_plus'),cm=secti('chyba_minus');
-  // U obojího úspěšnost, ne jednou úspěšnost a jednou % výborných — dvě různé
-  // veličiny vedle sebe by vypadaly zaměnitelně.
-  return {body:sp+up+bp, chyby:sm+pm+um+cm,
-          utok:uspesnost(up,um,un), prijem:uspesnost(pp,pm,pn)};
 }
 
 // Součet přes sety, ale z toho, co je právě na obrazovce — tedy včetně
@@ -750,22 +752,18 @@ function bump(hracId,zapasId,field,delta=1){
   prekresliSouhrn();
 }
 
-// Souhrn se mění s každým klikem, ale překreslovat kvůli tomu celou tabulku
-// by bylo znát — proto jen ten jeden řádek.
+// Řádek se mění s každým klikem, ale překreslovat kvůli tomu celou tabulku
+// by bylo při zapisování znát — proto jen ty buňky.
 function prekresliSouhrn(){
-  const el=document.querySelector('.tym-souhrn');
   const zapasId=state.liveZapasId;
-  if(!el||!zapasId)return;
+  if(!zapasId||!document.querySelector('.live-tym-row'))return;
   const lineup=state.zapasHraci.filter(zh=>zh.zapas_id===zapasId).map(zh=>zh.hrac_id);
   const hraci=state.hraci.filter(h=>lineup.includes(h.id));
-  const t=souhrnTymu(zapasId,hraci,souhrnCelyZapas?null:state.liveSet);
-  const pol=el.querySelectorAll('.souhrn-pol');
-  if(pol.length===4){
-    pol[0].innerHTML=`<b style="color:var(--green)">${t.body}</b> body`;
-    pol[1].innerHTML=`<b style="color:var(--red)">${t.chyby}</b> chyb`;
-    pol[2].innerHTML=`útok <b>${sZnamenkem(t.utok)}</b>`;
-    pol[3].innerHTML=`příjem <b>${sZnamenkem(t.prijem)}</b>`;
-  }
+  ACTIONS.forEach(a=>VARIANTS.forEach(v=>{
+    const field=`${a.key}_${v.suf}`;
+    const el=document.getElementById(`tym-${field}`);
+    if(el)el.textContent=tymSoucet(zapasId,hraci,field);
+  }));
 }
 
 // Vzetí zpět (#29): dlouhý stisk nebo pravé tlačítko na počítadle.
