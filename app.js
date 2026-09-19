@@ -14,7 +14,20 @@ const VARIANTS=[
   {suf:'minus',sym:'−',cls:'minus'},
 ];
 
-const state={sezony:[],activeSeason:null,hraci:[],hraciSezony:[],zapasy:[],statistiky:[],tymy:[],hraciTymy:[],souteze:[],zapasHraci:[],liveZapasId:null};
+const state={sezony:[],activeSeason:null,hraci:[],hraciSezony:[],zapasy:[],statistiky:[],tymy:[],hraciTymy:[],souteze:[],zapasHraci:[],liveZapasId:null,liveSet:1};
+
+// Rozepsaný set si pamatujeme podle zápasu: po reloadu uprostřed třetího setu
+// by skok zpátky na první znamenal zapisovat do špatného setu.
+function nactiSet(zapasId){
+  try{
+    const v=parseInt(localStorage.getItem('vb_set_'+zapasId));
+    return (v>=1&&v<=SETU)?v:1;
+  }catch(e){return 1;}
+}
+function ulozSet(zapasId,set){
+  try{localStorage.setItem('vb_set_'+zapasId,String(set));}catch(e){}
+}
+function statKey(zapasId,hracId,set){return `${zapasId}_${hracId}_${set}`;}
 const debounceMap={};
 const dirtyStats={};
 // dirtyStats drží zobrazenou hodnotu řádku pro každou vykreslenou hráčku (viz
@@ -23,7 +36,8 @@ const dirtyStats={};
 //
 // Posílají se změny (±1), ne absolutní hodnoty: při dvou zapisovatelích
 // u jednoho zápasu by upsert celého řádku přebil kliky toho druhého (#27).
-const pendingDeltas={};          // `${zapasId}_${hracId}` -> { pole: delta }
+const pendingDeltas={};          // `${zapasId}_${hracId}_${set}` -> { pole: delta }
+const SETU=5;
 const STAT_FLUSH_MS=300;
 const LIVE_REFRESH_MS=10000;     // dorovnání s druhým zařízením
 let liveRefreshTimer=null;
@@ -411,6 +425,7 @@ function renderLiveSelect(){
   if(sel.value){
     const id=parseInt(sel.value);
     state.liveZapasId=id;
+    state.liveSet=nactiSet(id);
     const z=state.zapasy.find(z=>z.id===id);
     document.getElementById('btn-start-zapas').style.display=z?.stav==='planovany'?'':'none';
     document.getElementById('btn-end-zapas').style.display=z?.stav==='probihajici'?'':'none';
@@ -437,6 +452,7 @@ function onLiveZapasChange(){
   }
   const id=parseInt(v);
   state.liveZapasId=id;
+  state.liveSet=nactiSet(id);
   const z=state.zapasy.find(z=>z.id===id);
   document.getElementById('btn-start-zapas').style.display=z?.stav==='planovany'?'':'none';
   document.getElementById('btn-end-zapas').style.display=z?.stav==='probihajici'?'':'none';
@@ -485,7 +501,8 @@ function renderLiveTable(zapasId){
 
   const lineup=state.zapasHraci.filter(zh=>zh.zapas_id===zapasId).map(zh=>zh.hrac_id);
   const hraci=vsichniHraci.filter(h=>lineup.includes(h.id));
-  hraci.forEach(h=>ensureStat(zapasId,h.id));
+  const set=state.liveSet;
+  hraci.forEach(h=>ensureStat(zapasId,h.id,set));
 
   // header
   let thead=`<tr><th class="live-col-hrac"></th>`;
@@ -506,7 +523,7 @@ function renderLiveTable(zapasId){
       const variants=a.varianty?VARIANTS.filter(v=>a.varianty.includes(v.suf)):VARIANTS;
       variants.forEach((v,vi)=>{
         const field=`${a.key}_${v.suf}`;
-        const val=getStatVal(zapasId,h.id,field);
+        const val=getStatVal(zapasId,h.id,field,set);
         const border=vi===0?`border-left:3px solid ${a.color};`:'';
         cells+=`<td style="padding:0;${border}"><button class="live-act-btn ${v.cls}" title="Klepnutím přidáš, dlouhým stiskem nebo pravým tlačítkem vezmeš zpět" onpointerdown="pressStart(event,${h.id},${zapasId},'${field}')" onpointerup="pressEnd(event,${h.id},${zapasId},'${field}')" onpointerleave="clearTimeout(this._pressTimer)" oncontextmenu="event.preventDefault();clearTimeout(this._pressTimer);this.dataset.dlouhy='0';bumpDown(${h.id},${zapasId},'${field}');return false"><span class="live-act-sym ${v.cls}">${v.sym}</span><span class="live-act-cnt" id="cnt-${h.id}-${field}">${val}</span></button></td>`;
       });
@@ -522,8 +539,23 @@ function renderLiveTable(zapasId){
     </button>
   </td></tr>`;
 
-  el.innerHTML=`<table class="live-table"><thead>${thead}</thead><tbody>${rows}${addRow}</tbody></table>`;
+  const prepinac=`<div class="set-prepinac">
+    <span class="set-label">Set</span>
+    ${Array.from({length:SETU},(_,i)=>i+1).map(n=>{
+      const zapsano=hraci.some(h=>ACTIONS.some(a=>VARIANTS.some(v=>getStatVal(zapasId,h.id,`${a.key}_${v.suf}`,n))));
+      return `<button class="set-btn${n===set?' aktivni':''}${zapsano?' zapsany':''}" onclick="prepniSet(${n})">${n}</button>`;
+    }).join('')}
+  </div>`;
+  el.innerHTML=prepinac+`<table class="live-table"><thead>${thead}</thead><tbody>${rows}${addRow}</tbody></table>`;
   if(hraci.length)napovedaZpet();
+}
+
+function prepniSet(n){
+  if(n===state.liveSet)return;
+  flushAllStats();                 // rozepsané patří do setu, ve kterém vznikly
+  state.liveSet=n;
+  if(state.liveZapasId)ulozSet(state.liveZapasId,n);
+  renderLiveTable(state.liveZapasId);
 }
 
 function openHracPicker(zapasId){
@@ -562,11 +594,15 @@ async function addDoSestava(zapasId,hracId){
 // Kolik akcí má hráčka v zápase zaznamenaných. Bereme i to, co ještě čeká
 // na odeslání, jinak by dialog tvrdil nulu hned po kliknutí.
 function pocetAkci(zapasId,hracId){
-  const key=`${zapasId}_${hracId}`;
-  const zdroj=dirtyStats[key]||state.statistiky.find(s=>s.zapas_id===zapasId&&s.hrac_id===hracId);
-  if(!zdroj)return 0;
   let n=0;
-  ACTIONS.forEach(a=>VARIANTS.forEach(v=>{n+=zdroj[`${a.key}_${v.suf}`]||0;}));
+  for(let set=1;set<=SETU;set++){
+    // rozepsaná hodnota je čerstvější než uložená, jinak by dialog hned
+    // po kliknutí tvrdil nulu
+    const zdroj=dirtyStats[statKey(zapasId,hracId,set)]
+      ||state.statistiky.find(s=>s.zapas_id===zapasId&&s.hrac_id===hracId&&(s.set_cislo||1)===set);
+    if(!zdroj)continue;
+    ACTIONS.forEach(a=>VARIANTS.forEach(v=>{n+=zdroj[`${a.key}_${v.suf}`]||0;}));
+  }
   return n;
 }
 
@@ -591,15 +627,17 @@ function removeZeSestava(zapasId,hracId){
 async function potvrdOdebrani(iStatistiky){
   const zapasId=parseInt(document.getElementById('odebrat-zapas-id').value);
   const hracId=parseInt(document.getElementById('odebrat-hrac-id').value);
-  const key=`${zapasId}_${hracId}`;
   try{
     if(iStatistiky){
       // nejdřív zahodit rozepsané, ať je flush znovu nezaloží
-      delete pendingDeltas[key];
-      clearTimeout(debounceMap[key]);
+      for(let set=1;set<=SETU;set++){
+        const k=statKey(zapasId,hracId,set);
+        delete pendingDeltas[k];
+        clearTimeout(debounceMap[k]);
+        delete dirtyStats[k];
+      }
       await apiDelete('vb_statistiky',`zapas_id=eq.${zapasId}&hrac_id=eq.${hracId}`);
       state.statistiky=state.statistiky.filter(s=>!(s.zapas_id===zapasId&&s.hrac_id===hracId));
-      delete dirtyStats[key];
     }
     await apiDelete('vb_zapas_hraci',`zapas_id=eq.${zapasId}&hrac_id=eq.${hracId}`);
     state.zapasHraci=state.zapasHraci.filter(zh=>!(zh.zapas_id===zapasId&&zh.hrac_id===hracId));
@@ -610,32 +648,41 @@ async function potvrdOdebrani(iStatistiky){
   }catch(e){toast('Chyba: '+e.message,'error');}
 }
 
-function ensureStat(zapasId,hracId){
-  const key=`${zapasId}_${hracId}`;
+function ensureStat(zapasId,hracId,set){
+  const key=statKey(zapasId,hracId,set);
   if(!dirtyStats[key]){
-    const existing=state.statistiky.find(s=>s.zapas_id===zapasId&&s.hrac_id===hracId);
-    dirtyStats[key]=existing?{...existing}:makeEmptyStat(zapasId,hracId);
+    const existing=state.statistiky.find(s=>s.zapas_id===zapasId&&s.hrac_id===hracId&&(s.set_cislo||1)===set);
+    dirtyStats[key]=existing?{...existing}:makeEmptyStat(zapasId,hracId,set);
   }
 }
 
-function makeEmptyStat(zapasId,hracId){
-  const o={zapas_id:zapasId,hrac_id:hracId};
+function makeEmptyStat(zapasId,hracId,set){
+  const o={zapas_id:zapasId,hrac_id:hracId,set_cislo:set};
   ACTIONS.forEach(a=>VARIANTS.forEach(v=>{o[`${a.key}_${v.suf}`]=0;}));
   return o;
 }
 
-function getStatVal(zapasId,hracId,field){
-  const key=`${zapasId}_${hracId}`;
+function getStatVal(zapasId,hracId,field,set){
+  const key=statKey(zapasId,hracId,set);
   if(dirtyStats[key])return dirtyStats[key][field]||0;
-  const s=state.statistiky.find(s=>s.zapas_id===zapasId&&s.hrac_id===hracId);
+  const s=state.statistiky.find(s=>s.zapas_id===zapasId&&s.hrac_id===hracId&&(s.set_cislo||1)===set);
   return s?s[field]||0:0;
+}
+
+// Součet přes všechny sety zápasu — pro dialogy a přehledy, kde nejde o to,
+// ve kterém setu se akce stala.
+function statSoucet(zapasId,hracId,field){
+  return state.statistiky
+    .filter(s=>s.zapas_id===zapasId&&s.hrac_id===hracId)
+    .reduce((a,s)=>a+(s[field]||0),0);
 }
 
 function bump(hracId,zapasId,field,delta=1){
   // bez tohohle by počítadlo naskočilo a teprve pak přišla chyba ze serveru
   if(!isLoggedIn()){toast('Na zapisování se přihlas (🔒 nahoře)','error');return;}
-  ensureStat(zapasId,hracId);
-  const key=`${zapasId}_${hracId}`;
+  const set=state.liveSet;
+  ensureStat(zapasId,hracId,set);
+  const key=statKey(zapasId,hracId,set);
   const puvodni=dirtyStats[key][field]||0;
   const nova=Math.max(0,puvodni+delta);
   if(nova===puvodni)return;                    // odečítat pod nulu nedává smysl
@@ -682,16 +729,16 @@ async function flushStat(key,opts={}){
   if(!hasPending(key))return;
   clearTimeout(debounceMap[key]);
   delete debounceMap[key];
-  const [zapasId,hracId]=key.split('_').map(Number);
+  const [zapasId,hracId,set]=key.split('_').map(Number);
   const odeslane=pendingDeltas[key];
   pendingDeltas[key]={};
-  const zmeny=Object.entries(odeslane).map(([pole,delta])=>({zapas_id:zapasId,hrac_id:hracId,pole,delta}));
+  const zmeny=Object.entries(odeslane).map(([pole,delta])=>({zapas_id:zapasId,hrac_id:hracId,set_cislo:set,pole,delta}));
   if(!zmeny.length)return;
   try{
     const res=await apiRpc('vb_zapis_akce',{p_zmeny:zmeny},opts);
     // server vrací výslednou hodnotu po přičtení, včetně toho, co mezitím
     // zapsalo druhé zařízení — bereme ji jako pravdu
-    if(Array.isArray(res))res.forEach(r=>prijmiHodnotu(r.zapas_id,r.hrac_id,r.pole,r.hodnota));
+    if(Array.isArray(res))res.forEach(r=>prijmiHodnotu(r.zapas_id,r.hrac_id,r.set_cislo||1,r.pole,r.hodnota));
   }catch(e){
     // vrátit zpět do fronty, ať se to neztratí
     Object.entries(odeslane).forEach(([pole,delta])=>{
@@ -701,15 +748,18 @@ async function flushStat(key,opts={}){
   }
 }
 
-function prijmiHodnotu(zapasId,hracId,pole,hodnota){
-  const key=`${zapasId}_${hracId}`;
-  ensureStat(zapasId,hracId);
+function prijmiHodnotu(zapasId,hracId,set,pole,hodnota){
+  const key=statKey(zapasId,hracId,set);
+  ensureStat(zapasId,hracId,set);
   dirtyStats[key][pole]=hodnota;
-  let s=state.statistiky.find(s=>s.zapas_id===zapasId&&s.hrac_id===hracId);
-  if(!s){s={zapas_id:zapasId,hrac_id:hracId};state.statistiky.push(s);}
+  let s=state.statistiky.find(s=>s.zapas_id===zapasId&&s.hrac_id===hracId&&(s.set_cislo||1)===set);
+  if(!s){s={zapas_id:zapasId,hrac_id:hracId,set_cislo:set};state.statistiky.push(s);}
   s[pole]=hodnota;
-  const el=document.getElementById(`cnt-${hracId}-${pole}`);
-  if(el)el.textContent=hodnota;
+  // počítadlo ukazuje právě zapisovaný set, cizí set do něj nepatří
+  if(set===state.liveSet){
+    const el=document.getElementById(`cnt-${hracId}-${pole}`);
+    if(el)el.textContent=hodnota;
+  }
 }
 
 function flushAllStats(opts={}){
@@ -725,16 +775,18 @@ async function refreshLiveStats(){
   try{
     const rows=await api('GET',`vb_statistiky?zapas_id=eq.${zapasId}`);
     (rows||[]).forEach(row=>{
-      const key=`${row.zapas_id}_${row.hrac_id}`;
+      const set=row.set_cislo||1;
+      const key=statKey(row.zapas_id,row.hrac_id,set);
       const ceka=pendingDeltas[key]||{};
-      const idx=state.statistiky.findIndex(s=>s.zapas_id===row.zapas_id&&s.hrac_id===row.hrac_id);
+      const idx=state.statistiky.findIndex(s=>s.zapas_id===row.zapas_id&&s.hrac_id===row.hrac_id&&(s.set_cislo||1)===set);
       if(idx>=0)state.statistiky[idx]=row;else state.statistiky.push(row);
       if(!dirtyStats[key])return;
       Object.keys(row).forEach(pole=>{
         if(pole in ceka)return;                      // tohle si drží uživatel
-        if(typeof row[pole]!=='number')return;
+        if(typeof row[pole]!=='number'||pole==='set_cislo'||pole==='id')return;
         if(dirtyStats[key][pole]===row[pole])return;
         dirtyStats[key][pole]=row[pole];
+        if(set!==state.liveSet)return;               // jiný set počítadlo nepřekresluje
         const el=document.getElementById(`cnt-${row.hrac_id}-${pole}`);
         if(el)el.textContent=row[pole];
       });
@@ -771,6 +823,7 @@ function spocitejStatistiky(){
   const selSoutez=parseInt(document.getElementById('stats-soutez-sel')?.value)||0;
   const selZapas=parseInt(document.getElementById('stats-zapas-sel')?.value)||0;
   const selHrac=parseInt(document.getElementById('stats-hrac-sel')?.value)||0;
+  const selSet=parseInt(document.getElementById('stats-set-sel')?.value)||0;
 
   let hraci=vsechnyHraci;
   if(selTym){const ids=state.hraciTymy.filter(ht=>ht.tym_id===selTym).map(ht=>ht.hrac_id);hraci=hraci.filter(h=>ids.includes(h.id));}
@@ -781,14 +834,17 @@ function spocitejStatistiky(){
   const seasonSouteze=state.souteze.filter(s=>!s.sezona_id||s.sezona_id===sid);
 
   const rows=hraci.map(h=>{
-    const stats=state.statistiky.filter(s=>s.hrac_id===h.id&&zapasIds.includes(s.zapas_id));
+    const stats=state.statistiky.filter(s=>s.hrac_id===h.id&&zapasIds.includes(s.zapas_id)
+      &&(!selSet||(s.set_cislo||1)===selSet));
     const sum=(f)=>stats.reduce((acc,s)=>acc+(s[f]||0),0);
     const sp=sum('servis_plus'),sm=sum('servis_minus');
     const pp=sum('prijem_plus'),pm=sum('prijem_minus'),pn=sum('prijem_neutral');
     const up=sum('utok_plus'),um=sum('utok_minus'),un=sum('utok_neutral');
     const bp=sum('blok_plus');
     const cm=sum('chyba_minus');
-    return {h,sp,sm,pp,pm,pn,up,um,un,bp,cm,total:sp+up+bp-sm-pm-um-cm,zapasy:stats.length};
+    // jeden řádek na set, takže počet zápasů je počet různých zapas_id
+    const zapasy=new Set(stats.map(s=>s.zapas_id)).size;
+    return {h,sp,sm,pp,pm,pn,up,um,un,bp,cm,total:sp+up+bp-sm-pm-um-cm,zapasy};
   }).filter(r=>r.zapasy>0).sort((a,b)=>b.total-a.total);
 
   const tot=rows.reduce((acc,r)=>({
@@ -799,7 +855,7 @@ function spocitejStatistiky(){
   }),{zapasy:0,sp:0,sm:0,pp:0,pm:0,pn:0,up:0,um:0,un:0,bp:0,cm:0,total:0});
 
   return {stav:'ok',sid,vsechnyHraci,zapasyPoCsoutezi,seasonSouteze,rows,tot,zapasIds,
-          selTym,selSoutez,selZapas,selHrac};
+          selTym,selSoutez,selZapas,selHrac,selSet};
 }
 
 // podíl výborných ze všech pokusů; null = nebyl žádný pokus
@@ -884,7 +940,7 @@ function renderStatistiky(){
   if(d.stav==='zadne-zapasy')return prazdne('Žádné zápasy se statistikami');
 
   const {vsechnyHraci,zapasyPoCsoutezi,seasonSouteze,rows,tot,
-         selTym,selSoutez,selZapas,selHrac}=d;
+         selTym,selSoutez,selZapas,selHrac,selSet}=d;
 
   let html=`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
     <select id="stats-tym-sel" class="form-input" style="min-width:130px;flex:1" onchange="renderStatistiky()">
@@ -902,6 +958,10 @@ function renderStatistiky(){
     <select id="stats-hrac-sel" class="form-input" style="min-width:130px;flex:1" onchange="renderStatistiky()">
       <option value="">— všechny hráčky —</option>
       ${vsechnyHraci.map(h=>`<option value="${h.id}"${h.id===selHrac?' selected':''}>${esc(h.jmeno)}</option>`).join('')}
+    </select>
+    <select id="stats-set-sel" class="form-input" style="min-width:110px;flex:1" onchange="renderStatistiky()">
+      <option value="">— všechny sety —</option>
+      ${Array.from({length:SETU},(_,i)=>i+1).map(n=>`<option value="${n}"${n===selSet?' selected':''}>${n}. set</option>`).join('')}
     </select>
     <button class="btn btn-secondary" id="btn-export-csv" onclick="exportStatsCsv()"
             title="Stáhne to, co je právě podle filtrů v tabulce">⬇️ Export CSV</button>
@@ -980,9 +1040,11 @@ function profilHracky(hracId){
     .filter(z=>state.statistiky.some(s=>s.zapas_id===z.id&&s.hrac_id===hracId))
     .sort((a,b)=>(a.datum||'').localeCompare(b.datum||'')||a.id-b.id);
   const radky=zapasy.map(z=>{
-    const s=state.statistiky.find(s=>s.zapas_id===z.id&&s.hrac_id===hracId)||{};
-    const v=f=>s[f]||0;
+    // jeden řádek na set — v profilu je zápas jako celek, takže se sety sečtou
+    const castiSetu=state.statistiky.filter(s=>s.zapas_id===z.id&&s.hrac_id===hracId);
+    const v=f=>castiSetu.reduce((a,s)=>a+(s[f]||0),0);
     return {z,
+      sety:new Set(castiSetu.map(s=>s.set_cislo||1)).size,
       sp:v('servis_plus'),sm:v('servis_minus'),
       pp:v('prijem_plus'),pm:v('prijem_minus'),pn:v('prijem_neutral'),
       up:v('utok_plus'),um:v('utok_minus'),un:v('utok_neutral'),
