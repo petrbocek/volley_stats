@@ -210,7 +210,8 @@
 <!-- Nový zápas -->
 <div class="modal-overlay hidden" id="modal-zapas">
   <div class="modal">
-    <div class="modal-title">🏐 Nový zápas</div>
+    <div class="modal-title" id="zapas-modal-title">🏐 Nový zápas</div>
+    <input type="hidden" id="in-zapas-id" />
     <div class="form-row">
       <div class="form-group">
         <label class="form-label">Datum *</label>
@@ -253,7 +254,7 @@
     </div>
     <div class="modal-footer">
       <button class="btn btn-secondary" onclick="closeModal('modal-zapas')">Zrušit</button>
-      <button class="btn btn-primary" onclick="saveZapas()">Vytvořit zápas</button>
+      <button class="btn btn-primary" id="btn-save-zapas" onclick="saveZapas()">Vytvořit zápas</button>
     </div>
   </div>
 </div>

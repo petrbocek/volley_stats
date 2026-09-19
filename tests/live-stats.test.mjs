@@ -978,6 +978,58 @@ pass &= ok('T26l po smazání nezůstanou v paměti jeho řádky (#64)', await p
   !Object.keys(pendingDeltas).some(k => k.startsWith('102_')) &&
   !Object.keys(dirtyStats).some(k => k.startsWith('102_'))));
 
+// ── #66: zápas jde upravit, ne jen smazat a založit znovu ──────────────────
+await page.click('.nav-tab:nth-child(2)');
+await page.waitForSelector('#zapasy-list .match-item');
+pass &= ok('T27a každý zápas má tlačítko na úpravu detailu (#66)', await page.evaluate(() => {
+  const zapasy = state.zapasy.filter(z => z.sezona_id === currentSeasonId());
+  return zapasy.length > 0 && zapasy.every(z =>
+    document.querySelector('#zapasy-list').innerHTML.includes(`editZapas(${z.id})`));
+}));
+
+await page.evaluate(() => editZapas(100));
+await page.waitForTimeout(250);
+pass &= ok('T27b modal se otevře v režimu úpravy, ne zakládání (#66)',
+  /Upravit/.test(await page.textContent('#zapas-modal-title')) &&
+  /Uložit/.test(await page.textContent('#btn-save-zapas')));
+pass &= ok('T27c pole jsou předvyplněná hodnotami zápasu (#66)', await page.evaluate(() => {
+  const z = state.zapasy.find(z => z.id === 100);
+  const v = id => document.getElementById(id).value;
+  return v('in-zapas-id') === '100' && v('in-zapas-soupet') === z.soupet &&
+         v('in-zapas-datum') === z.datum && v('in-zapas-misto') === z.misto &&
+         v('in-zapas-soutez') === String(z.soutez_id);
+}));
+
+// změna soutěže se uloží PATCHem, ne novým zápasem
+otherWrites = [];
+await page.selectOption('#in-zapas-soutez', '');
+await page.fill('#in-zapas-soupet', 'Soupeř A (opraveno)');
+await page.click('#btn-save-zapas');
+await page.waitForTimeout(400);
+const patchZapas = otherWrites.find(w => w.table === 'vb_zapasy' && w.method === 'PATCH');
+pass &= ok('T27d uložení pošle PATCH, ne nový zápas (#66)',
+  !!patchZapas && /id=eq\.100/.test(patchZapas.url) &&
+  !otherWrites.some(w => w.table === 'vb_zapasy' && w.method === 'POST'));
+pass &= ok('T27e odebraná soutěž se opravdu odešle jako prázdná (#66)',
+  patchZapas && patchZapas.body.soutez_id === null);
+pass &= ok('T27f úprava nesahá na stav ani na skóre (#66)',
+  patchZapas && !('stav' in patchZapas.body) && !('sety_my' in patchZapas.body) && !('sezona_id' in patchZapas.body));
+pass &= ok('T27g změna je hned vidět v seznamu (#66)',
+  await page.evaluate(() => state.zapasy.find(z => z.id === 100).soupet === 'Soupeř A (opraveno)') &&
+  (await page.textContent('#zapasy-list')).includes('Soupeř A (opraveno)'));
+
+// a založení nového zápasu režim úpravy nezdědí
+await page.click('#tab-zapasy button:has-text("Nový zápas")');
+await page.waitForTimeout(250);
+pass &= ok('T27h „Nový zápas\" se neotevře s daty toho upravovaného (#66)', await page.evaluate(() => {
+  const v = id => document.getElementById(id).value;
+  return v('in-zapas-id') === '' && v('in-zapas-soupet') === '' &&
+         v('in-zapas-soutez') === '' && v('in-zapas-tym') === '' &&
+         document.getElementById('zapas-modal-title').textContent.includes('Nový');
+}));
+await page.click('#modal-zapas .modal-footer .btn-secondary');
+await page.evaluate(() => { state.zapasy.find(z => z.id === 100).soupet = 'Soupeř A'; });
+
 // ── přihlášení přežije reload ──────────────────────────────────────────────
 await page.reload();
 await nactenoOK();
