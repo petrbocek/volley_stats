@@ -333,6 +333,12 @@ function hraciVSezoně(sid){
   const ids=state.hraciSezony.filter(hs=>hs.sezona_id===sid).map(hs=>hs.hrac_id);
   return state.hraci.filter(h=>ids.includes(h.id));
 }
+// Archivovaná hráčka zmizí ze soupisky, sestavy i správy týmů, ale její
+// odehrané statistiky zůstávají — proto archiv místo mazání.
+function jeArchivovana(h){return h.aktivni===false;}
+function zivehraci(){return state.hraci.filter(h=>!jeArchivovana(h));}
+function maStatistiky(hracId){return state.statistiky.some(s=>s.hrac_id===hracId);}
+
 function isHracInSezona(hracId,sid){
   return state.hraciSezony.some(hs=>hs.hrac_id===hracId&&hs.sezona_id===sid);
 }
@@ -344,14 +350,23 @@ function renderTym(){
   if(sid){note.textContent='Přepínačem aktivujete/deaktivujete hráčku pro vybranou sezónu.';}
   else{note.textContent='Zobrazeni všichni hráči. Vyberte sezónu pro správu soupisky.';}
   if(!state.hraci.length){el.innerHTML='<div class="empty"><span class="empty-icon">👥</span><div class="empty-text">Žádné hráčky</div></div>';return;}
-  const active=sid?hraciVSezoně(sid):state.hraci;
-  const inactive=sid?state.hraci.filter(h=>!active.includes(h)):[];
+  const zive=zivehraci();
+  const archiv=state.hraci.filter(jeArchivovana);
+  const active=(sid?hraciVSezoně(sid):zive).filter(h=>!jeArchivovana(h));
+  const inactive=sid?zive.filter(h=>!active.includes(h)):[];
   let html='';
   if(sid){html+='<div class="section-title">V soupisce ('+active.length+')</div>';}
   html+=active.map(h=>playerCardHtml(h,sid,true)).join('');
   if(sid&&inactive.length){
     html+='<div class="section-title" style="margin-top:20px">Mimo soupisku</div>';
     html+=inactive.map(h=>playerCardHtml(h,sid,false)).join('');
+  }
+  if(archiv.length){
+    html+='<div class="section-title" style="margin-top:20px">Archiv ('+archiv.length+')</div>';
+    html+=archiv.map(h=>playerCard(h,{
+      tridy:'inactive',
+      ovladani:`<button class="btn btn-sm btn-green" style="flex-shrink:0" onclick="obnovitHracku(${h.id})">Obnovit</button>`
+    })).join('');
   }
   el.innerHTML=html||'<div class="empty"><span class="empty-icon">👥</span><div class="empty-text">Žádné hráčky</div></div>';
   renderTymy();
@@ -562,7 +577,7 @@ function openHracPicker(zapasId){
   document.getElementById('picker-zapas-id').value=zapasId;
   const z=state.zapasy.find(z=>z.id===zapasId);
   const sid=currentSeasonId()||z?.sezona_id||0;
-  let vsichni=hraciVSezoně(sid);
+  let vsichni=hraciVSezoně(sid).filter(h=>!jeArchivovana(h));
   // filtrovat podle týmu zápasu
   if(z?.tym_id){
     const tymIds=state.hraciTymy.filter(ht=>ht.tym_id===z.tym_id).map(ht=>ht.hrac_id);
@@ -1190,7 +1205,7 @@ function renderTymManage(tymId){
   const inTym=state.hraciTymy.filter(ht=>ht.tym_id===tymId).map(ht=>ht.hrac_id);
   const el=document.getElementById('tym-manage-content');
   if(!state.hraci.length){el.innerHTML='<div class="empty"><span class="empty-icon">👥</span><div class="empty-text">Žádné hráčky</div></div>';return;}
-  el.innerHTML=state.hraci.map(h=>{
+  el.innerHTML=zivehraci().map(h=>{
     const isIn=inTym.includes(h.id);
     return playerCard(h,{
       tridy:isIn?'':'inactive',
@@ -1382,6 +1397,7 @@ function openAddHracModal(){
   document.getElementById('in-hrac-pozice').value='smečař';
   document.getElementById('hrac-modal-title').textContent='👤 Přidat hráčku';
   document.getElementById('btn-save-hrac').textContent='Přidat';
+  document.getElementById('hrac-nebezpecne').style.display='none';
   openModal('modal-hrac');
 }
 
@@ -1393,7 +1409,56 @@ function editHrac(id){
   document.getElementById('in-hrac-pozice').value=h.pozice||'smečař';
   document.getElementById('hrac-modal-title').textContent='✏️ Upravit hráčku';
   document.getElementById('btn-save-hrac').textContent='Uložit';
+
+  // Smazání hráčky kaskádou smaže i její statistiky (FK ON DELETE CASCADE),
+  // takže se nabízí jen dokud žádné nemá. Pak už jedině archivace.
+  const maStat=maStatistiky(id);
+  document.getElementById('hrac-nebezpecne').style.display='';
+  document.getElementById('btn-smazat-hrac').style.display=maStat?'none':'';
+  document.getElementById('btn-archiv-hrac').style.display=maStat?'':'none';
+  document.getElementById('hrac-nebezpecne-text').textContent=maStat
+    ? 'Hráčka má odehrané zápasy, smazat proto nejde — smazalo by to i její statistiky. Archivace ji schová ze soupisky a sestav, čísla zůstanou.'
+    : 'Hráčka nemá žádné zaznamenané akce, takže ji jde smazat úplně.';
   openModal('modal-hrac');
+}
+
+async function smazatHracku(){
+  const id=parseInt(document.getElementById('in-hrac-id').value);
+  const h=state.hraci.find(h=>h.id===id);if(!h)return;
+  if(maStatistiky(id)){toast('Hráčka má statistiky, smazat nejde','error');return;}
+  if(!confirm(`Opravdu smazat ${h.jmeno}? Nejde vzít zpět.`))return;
+  try{
+    await apiDelete('vb_hraci',`id=eq.${id}`);
+    state.hraci=state.hraci.filter(x=>x.id!==id);
+    state.hraciSezony=state.hraciSezony.filter(x=>x.hrac_id!==id);
+    state.hraciTymy=state.hraciTymy.filter(x=>x.hrac_id!==id);
+    state.zapasHraci=state.zapasHraci.filter(x=>x.hrac_id!==id);
+    closeModal('modal-hrac');
+    renderTym();renderPrehled();renderLiveSelect();renderStatistiky();
+    toast('Hráčka smazána','success');
+  }catch(e){toast('Chyba: '+e.message,'error');}
+}
+
+async function archivovatHracku(){
+  const id=parseInt(document.getElementById('in-hrac-id').value);
+  const h=state.hraci.find(h=>h.id===id);if(!h)return;
+  if(!confirm(`Archivovat ${h.jmeno}? Zmizí ze soupisky a sestav, statistiky zůstanou.`))return;
+  await nastavAktivni(id,false,'Hráčka archivována');
+}
+
+async function obnovitHracku(id){
+  await nastavAktivni(id,true,'Hráčka obnovena');
+}
+
+async function nastavAktivni(id,aktivni,hlaska){
+  try{
+    await apiPatch('vb_hraci',id,{aktivni});
+    const h=state.hraci.find(x=>x.id===id);
+    if(h)h.aktivni=aktivni;
+    closeModal('modal-hrac');
+    renderTym();renderPrehled();renderLiveSelect();renderStatistiky();
+    toast(hlaska,'success');
+  }catch(e){toast('Chyba: '+e.message,'error');}
 }
 
 async function saveHrac(){

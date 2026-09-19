@@ -60,6 +60,13 @@ Zapisovat může víc lidí najednou; posílají se přírůstky, ne celé řád
 se zápisy nepřebíjejí. Čísla z druhého zařízení se dorovnají zhruba do deseti
 sekund.
 
+## Soupiska
+
+Hráčku jde smazat jen dokud nemá zaznamenané akce — cizí klíč ve
+`vb_statistiky` má `ON DELETE CASCADE`, takže smazání by vzalo i její čísla.
+Jakmile něco odehraje, nabízí se místo toho **archivace**: zmizí ze soupisky,
+sestav i správy týmů, ale statistiky zůstanou a v Archivu jde kdykoli obnovit.
+
 ## Testy
 
 Testy jedou v Chromiu přes Playwright a Supabase mají odchycené, takže

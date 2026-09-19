@@ -104,6 +104,15 @@ await page.route('**/rest/v1/**', async route => {
     });
   }
   otherWrites.push({ table, method: req.method(), url: req.url() });
+  if (req.method() === 'PATCH' && table === 'vb_hraci') {
+    const m = /id=eq\.(\d+)/.exec(new URL(req.url()).search);
+    const h = m && FIX.vb_hraci.find(x => x.id === +m[1]);
+    if (h) Object.assign(h, req.postDataJSON());
+  }
+  if (req.method() === 'DELETE' && table === 'vb_hraci') {
+    const m = /id=eq\.(\d+)/.exec(new URL(req.url()).search);
+    if (m) FIX.vb_hraci = FIX.vb_hraci.filter(x => x.id !== +m[1]);
+  }
   if (req.method() === 'DELETE') {
     const q = new URL(req.url()).search;
     const z = /zapas_id=eq\.(\d+)/.exec(q), h = /hrac_id=eq\.(\d+)/.exec(q);
@@ -641,6 +650,66 @@ pass &= ok('T18i profil kreslí jen zápasy podle aktivního filtru (#36)', poFi
 await page.click('#modal-profil .btn-secondary');
 await page.selectOption('#stats-zapas-sel', '');
 await page.waitForTimeout(200);
+
+// ── #41: mazání a archivace hráček ─────────────────────────────────────────
+// hráčka bez jediné akce — tu jde smazat úplně
+FIX.vb_hraci.push({ id: 20, jmeno: 'Překlep', cislo: 99, pozice: 'smečař', aktivni: true });
+FIX.vb_hraci_sezony.push({ hrac_id: 20, sezona_id: 1 });
+await page.reload();
+await nactenoOK();
+await page.click('.nav-tab:nth-child(3)');
+await page.waitForSelector('#hraci-list .player-card');
+
+await page.evaluate(() => editHrac(20));
+await page.waitForTimeout(150);
+pass &= ok('T21a hráčka bez akcí jde smazat (#41)',
+  await page.isVisible('#btn-smazat-hrac') && !(await page.isVisible('#btn-archiv-hrac')));
+
+page.once('dialog', d => d.accept());
+otherWrites = [];
+await page.click('#btn-smazat-hrac');
+await page.waitForTimeout(400);
+pass &= ok('T21b smazání se ptá a pak pošle DELETE (#41)',
+  otherWrites.some(w => w.table === 'vb_hraci' && w.method === 'DELETE'));
+pass &= ok('T21c smazaná hráčka zmizí ze soupisky (#41)',
+  !(await page.textContent('#hraci-list')).includes('Překlep'));
+
+// hráčka SE statistikami — mazání se nenabízí, protože by vzalo i její čísla
+await page.evaluate(() => editHrac(10));
+await page.waitForTimeout(150);
+pass &= ok('T21d hráčka se statistikami jde jen archivovat (#41)',
+  !(await page.isVisible('#btn-smazat-hrac')) && await page.isVisible('#btn-archiv-hrac'));
+pass &= ok('T21e vysvětlí proč, ne jen zakáže (#41)',
+  /smazalo by to i její statistiky/.test(await page.textContent('#hrac-nebezpecne-text')));
+
+page.once('dialog', d => d.accept());
+otherWrites = [];
+await page.click('#btn-archiv-hrac');
+await page.waitForTimeout(400);
+const patch = otherWrites.find(w => w.table === 'vb_hraci' && w.method === 'PATCH');
+pass &= ok('T21f archivace nastaví aktivni=false (#41)', !!patch);
+pass &= ok('T21g archivovaná je v sekci Archiv, ne v soupisce (#41)',
+  (await page.textContent('#hraci-list')).includes('Archiv'));
+
+// archivovaná se nesmí nabízet do sestavy
+await page.click('.nav-tab:nth-child(4)');
+await page.waitForTimeout(200);
+await page.evaluate(() => { state.zapasHraci = state.zapasHraci.filter(z => !(z.zapas_id === 100 && z.hrac_id === 10)); renderLiveTable(100); });
+await page.evaluate(() => openHracPicker(100));
+await page.waitForTimeout(200);
+pass &= ok('T21h archivovaná se nenabízí do sestavy (#41)',
+  !(await page.textContent('#hrac-picker-list')).includes('Alfa'));
+await page.click('#modal-hrac-picker .btn-secondary');
+
+// obnovení
+await page.click('.nav-tab:nth-child(3)');
+await page.waitForTimeout(200);
+otherWrites = [];
+await page.click('#hraci-list .btn-green');
+await page.waitForTimeout(400);
+pass &= ok('T21i obnovení vrátí hráčku zpět (#41)',
+  otherWrites.some(w => w.table === 'vb_hraci' && w.method === 'PATCH') &&
+  !(await page.textContent('#hraci-list')).includes('Archiv'));
 
 // ── přihlášení přežije reload ──────────────────────────────────────────────
 await page.reload();
