@@ -29,8 +29,9 @@ const FIX = {
                     { hrac_id: 10, sezona_id: 2 }],
   vb_zapasy: [{ id: 100, sezona_id: 1, soutez_id: 7, datum: '2026-09-10', soupet: 'Soupeř A', misto: 'doma', stav: 'probihajici' },
               { id: 200, sezona_id: 2, datum: '2025-03-01', soupet: 'Soupeř B', misto: 'venku', stav: 'dokonceny', sety_my: 3, sety_oni: 1 }],
-  vb_tymy: [{ id: 5, nazev: TYM_S_XSS }],
-  vb_hraci_tymy: [{ hrac_id: 12, tym_id: 5 }],
+  vb_tymy: [{ id: 5, nazev: TYM_S_XSS, sezona_id: 1 },
+            { id: 6, nazev: 'Loňský tým', sezona_id: 2 }],
+  vb_hraci_tymy: [{ hrac_id: 12, tym_id: 5 }, { hrac_id: 10, tym_id: 6 }],
   vb_souteze: [{ id: 7, sezona_id: 1, nazev: SOUTEZ_S_XSS }],
   vb_zapas_hraci: [{ zapas_id: 100, hrac_id: 10 }, { zapas_id: 100, hrac_id: 11 },
                    { zapas_id: 100, hrac_id: 12 }, { zapas_id: 100, hrac_id: 13 },
@@ -103,7 +104,12 @@ await page.route('**/rest/v1/**', async route => {
       body: JSON.stringify(cast),
     });
   }
-  otherWrites.push({ table, method: req.method(), url: req.url() });
+  otherWrites.push({ table, method: req.method(), url: req.url(), body: req.postDataJSON?.() });
+  if (req.method() === 'POST' && table === 'vb_tymy') {
+    const t = { id: 99, ...req.postDataJSON() };
+    FIX.vb_tymy.push(t);
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([t]) });
+  }
   if (req.method() === 'PATCH' && table === 'vb_hraci') {
     const m = /id=eq\.(\d+)/.exec(new URL(req.url()).search);
     const h = m && FIX.vb_hraci.find(x => x.id === +m[1]);
@@ -809,6 +815,61 @@ pass &= ok('T23b ani na nízké obrazovce (regrese)', (await tlacitkoUseknuto())
 await page.setViewportSize({ width: 1100, height: 800 });
 await page.waitForTimeout(300);
 pass &= ok('T23c ani na desktopu (regrese)', (await tlacitkoUseknuto()) <= 0);
+
+// ── #62: tým platí jen ve své sezóně ───────────────────────────────────────
+await page.selectOption('#season-select', '1');
+await page.waitForTimeout(200);
+await page.click('.nav-tab:nth-child(3)');                  // Tým
+await page.waitForTimeout(300);
+
+const tymyVSeznamu = () => page.$$eval('#tymy-list .tym-card-title', els => els.map(e => e.textContent));
+pass &= ok('T25a v sezóně vidím jen její týmy (#62)', await page.evaluate(() => {
+  const nazvy = [...document.querySelectorAll('#tymy-list .tym-card-title')].map(e => e.textContent);
+  return nazvy.length === 1 && !nazvy.includes('Loňský tým');
+}));
+
+await page.selectOption('#season-select', '2');
+await page.waitForTimeout(300);
+pass &= ok('T25b po přepnutí sezóny vidím tým té druhé (#62)',
+  (await tymyVSeznamu()).includes('Loňský tým'));
+
+// nový tým se zakládá do zvolené sezóny
+otherWrites = [];
+await page.click('#tab-tym button:has-text("Nový tým")');
+await page.fill('#in-tym-nazev', 'Nováček');
+await page.click('#modal-tym .btn-primary');
+await page.waitForTimeout(400);
+const post = otherWrites.find(w => w.table === 'vb_tymy' && w.method === 'POST');
+pass &= ok('T25c nový tým dostane sezónu, ve které vznikl (#62)',
+  post && post.body.sezona_id === 2 && post.body.nazev === 'Nováček');
+
+// výběr týmu u zápasu nabízí jen týmy sezóny
+await page.click('.nav-tab:nth-child(2)');
+await page.waitForTimeout(200);
+await page.click('#tab-zapasy button:has-text("Nový zápas")');
+await page.waitForTimeout(300);
+const volbyTymu = await page.$$eval('#in-zapas-tym option', els => els.map(e => e.textContent));
+pass &= ok('T25d výběr týmu u zápasu nabízí jen týmy té sezóny (#62)',
+  volbyTymu.includes('Loňský tým') && !volbyTymu.some(v => v.includes('<img')));
+await page.click('#modal-zapas .modal-footer .btn-secondary');
+
+// správa týmu nabízí jen hráčky ze soupisky jeho sezóny
+await page.selectOption('#season-select', '1');
+await page.waitForTimeout(200);
+await page.click('.nav-tab:nth-child(3)');
+await page.waitForTimeout(300);
+await page.evaluate(() => openTymManage(5));
+await page.waitForTimeout(300);
+pass &= ok('T25e hlavička správy týmu nese sezónu (#62)',
+  /2025\/26|2023|—/.test(await page.textContent('#tym-manage-title')) ||
+  (await page.textContent('#tym-manage-title')).includes('·'));
+pass &= ok('T25f správa nabízí jen hráčky ze soupisky té sezóny (#62)',
+  await page.evaluate(() => {
+    const vSoupisce = state.hraciSezony.filter(hs => hs.sezona_id === 1).map(hs => hs.hrac_id);
+    const zive = state.hraci.filter(h => h.aktivni !== false && vSoupisce.includes(h.id));
+    return document.querySelectorAll('#tym-manage-content .player-card').length === zive.length;
+  }));
+await page.click('#modal-tym-manage .btn-secondary');
 
 // ── přihlášení přežije reload ──────────────────────────────────────────────
 await page.reload();
