@@ -565,6 +565,75 @@ pass &= ok('T20m filtr na set ukáže jen ten set (#32)', jenSet2 && Number(jenS
 await page.selectOption('#stats-set-sel', '');
 await page.waitForTimeout(200);
 
+// ── #56: souhrn týmu v Live ────────────────────────────────────────────────
+// Měří se relativně (o kolik se číslo změnilo), ne proti čistému stavu —
+// mazání stubu by shodilo fixtures, na kterých stojí pozdější testy.
+await page.selectOption('#season-select', '1');
+await page.waitForTimeout(200);
+await page.click('.nav-tab:nth-child(4)');
+await page.waitForSelector('.tym-souhrn');
+
+const souhrn = async () => {
+  const t = (await page.textContent('.tym-souhrn')).replace(/\s+/g, ' ');
+  return {
+    popis: t.split('⇄')[0].trim(),
+    body: Number(/(\d+) body/.exec(t)?.[1] ?? NaN),
+    chyby: Number(/(\d+) chyb/.exec(t)?.[1] ?? NaN),
+  };
+};
+
+pass &= ok('T22a Live má souhrn týmu (#56)', await page.isVisible('.tym-souhrn'));
+const aktivniSet = await page.evaluate(() => state.liveSet);
+pass &= ok('T22b souhrn se ve výchozím stavu týká zapisovaného setu (#56)',
+  (await souhrn()).popis === `${aktivniSet}. set`);
+
+const souhrnPred = await souhrn();
+await page.click('#cnt-10-utok_plus');
+await page.waitForTimeout(100);
+const hned = await souhrn();
+pass &= ok('T22c souhrn naskočí hned po kliknutí, ne až po uložení (#56)',
+  hned.body === souhrnPred.body + 1);
+
+await page.click('#cnt-10-chyba_minus');
+await page.waitForTimeout(700);
+const poChybe = await souhrn();
+pass &= ok('T22d chyby se počítají zvlášť od bodů (#56)',
+  poChybe.chyby === souhrnPred.chyby + 1 && poChybe.body === souhrnPred.body + 1);
+
+// jiný set má vlastní čísla
+const jinySet = aktivniSet === 5 ? 4 : aktivniSet + 1;
+await klikSet(jinySet);
+await page.waitForTimeout(300);
+const vJinemSetu = await souhrn();
+pass &= ok('T22e souhrn ukazuje čísla zvoleného setu, ne cizího (#56)',
+  vJinemSetu.popis === `${jinySet}. set` && vJinemSetu.body !== poChybe.body);
+
+const predVJinem = vJinemSetu.body;
+await page.click('#cnt-10-utok_plus');
+await page.waitForTimeout(700);
+
+await page.click('.souhrn-prepinac');
+await page.waitForTimeout(300);
+const celyZapas = await souhrn();
+// nezávislý součet přes všechny sety a hráčky rovnou z dat aplikace
+const ocekavaneBody = await page.evaluate(() => {
+  const lineup = state.zapasHraci.filter(z => z.zapas_id === 100).map(z => z.hrac_id);
+  let n = 0;
+  for (const h of lineup)
+    for (let set = 1; set <= SETU; set++)
+      n += getStatVal(100, h, 'servis_plus', set)
+         + getStatVal(100, h, 'utok_plus', set)
+         + getStatVal(100, h, 'blok_plus', set);
+  return n;
+});
+pass &= ok('T22f přepnutí na Zápas sečte všechny sety (#56)',
+  celyZapas.popis === 'Zápas' && celyZapas.body === ocekavaneBody);
+pass &= ok('T22g součet za zápas je víc než jeden set (#56)',
+  celyZapas.body > vJinemSetu.body);
+
+await page.click('.souhrn-prepinac');   // zpět na set, ať další testy vidí výchozí stav
+await page.waitForTimeout(200);
+
 // ── #36: profil hráčky ─────────────────────────────────────────────────────
 // druhý zápas hráčce 13, ať je z čeho kreslit vývoj
 FIX.vb_zapasy.push({ id: 101, sezona_id: 1, datum: '2026-09-17', soupet: 'Soupeř C', misto: 'venku', stav: 'dokonceny', sety_my: 3, sety_oni: 0 });

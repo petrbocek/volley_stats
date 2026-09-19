@@ -40,6 +40,7 @@ const pendingDeltas={};          // `${zapasId}_${hracId}_${set}` -> { pole: del
 const SETU=5;
 const STAT_FLUSH_MS=300;
 const LIVE_REFRESH_MS=10000;     // dorovnání s druhým zařízením
+let souhrnCelyZapas=false;       // souhrn v Live: aktuální set vs celý zápas
 let liveRefreshTimer=null;
 
 function hasPending(key){
@@ -561,8 +562,45 @@ function renderLiveTable(zapasId){
       return `<button class="set-btn${n===set?' aktivni':''}${zapsano?' zapsany':''}" onclick="prepniSet(${n})">${n}</button>`;
     }).join('')}
   </div>`;
-  el.innerHTML=prepinac+`<table class="live-table"><thead>${thead}</thead><tbody>${rows}${addRow}</tbody></table>`;
+  const t=souhrnTymu(zapasId,hraci,souhrnCelyZapas?null:set);
+  const souhrn=hraci.length?`<div class="tym-souhrn" title="Úspěšnost = (výborné − chyby) / pokusy">
+    <button class="souhrn-prepinac" onclick="prepniSouhrn()" title="Přepnout mezi setem a celým zápasem">${souhrnCelyZapas?'Zápas':set+'. set'} ⇄</button>
+    <span class="souhrn-pol"><b style="color:var(--green)">${t.body}</b> body</span>
+    <span class="souhrn-pol"><b style="color:var(--red)">${t.chyby}</b> chyb</span>
+    <span class="souhrn-pol">útok <b>${sZnamenkem(t.utok)}</b></span>
+    <span class="souhrn-pol">příjem <b>${sZnamenkem(t.prijem)}</b></span>
+  </div>`:'';
+  el.innerHTML=prepinac+souhrn+`<table class="live-table"><thead>${thead}</thead><tbody>${rows}${addRow}</tbody></table>`;
   if(hraci.length)napovedaZpet();
+}
+
+// Souhrn týmu v Live (#56). Místa je málo — tabulka vyplňuje výšku obrazovky
+// — takže jeden řádek, ne panel.
+function souhrnTymu(zapasId,hraci,set){
+  const secti=pole=>hraci.reduce((a,h)=>a+(set
+    ?getStatVal(zapasId,h.id,pole,set)
+    :statSoucetZive(zapasId,h.id,pole)),0);
+  const sp=secti('servis_plus'),sm=secti('servis_minus');
+  const pp=secti('prijem_plus'),pm=secti('prijem_minus'),pn=secti('prijem_neutral');
+  const up=secti('utok_plus'),um=secti('utok_minus'),un=secti('utok_neutral');
+  const bp=secti('blok_plus'),cm=secti('chyba_minus');
+  // U obojího úspěšnost, ne jednou úspěšnost a jednou % výborných — dvě různé
+  // veličiny vedle sebe by vypadaly zaměnitelně.
+  return {body:sp+up+bp, chyby:sm+pm+um+cm,
+          utok:uspesnost(up,um,un), prijem:uspesnost(pp,pm,pn)};
+}
+
+// Součet přes sety, ale z toho, co je právě na obrazovce — tedy včetně
+// rozepsaných kliků, které ještě nedoletěly na server.
+function statSoucetZive(zapasId,hracId,pole){
+  let n=0;
+  for(let set=1;set<=SETU;set++)n+=getStatVal(zapasId,hracId,pole,set);
+  return n;
+}
+
+function prepniSouhrn(){
+  souhrnCelyZapas=!souhrnCelyZapas;
+  renderLiveTable(state.liveZapasId);
 }
 
 function prepniSet(n){
@@ -709,6 +747,25 @@ function bump(hracId,zapasId,field,delta=1){
   if(pendingDeltas[key][field]===0)delete pendingDeltas[key][field];
   clearTimeout(debounceMap[key]);
   debounceMap[key]=setTimeout(()=>flushStat(key),STAT_FLUSH_MS);
+  prekresliSouhrn();
+}
+
+// Souhrn se mění s každým klikem, ale překreslovat kvůli tomu celou tabulku
+// by bylo znát — proto jen ten jeden řádek.
+function prekresliSouhrn(){
+  const el=document.querySelector('.tym-souhrn');
+  const zapasId=state.liveZapasId;
+  if(!el||!zapasId)return;
+  const lineup=state.zapasHraci.filter(zh=>zh.zapas_id===zapasId).map(zh=>zh.hrac_id);
+  const hraci=state.hraci.filter(h=>lineup.includes(h.id));
+  const t=souhrnTymu(zapasId,hraci,souhrnCelyZapas?null:state.liveSet);
+  const pol=el.querySelectorAll('.souhrn-pol');
+  if(pol.length===4){
+    pol[0].innerHTML=`<b style="color:var(--green)">${t.body}</b> body`;
+    pol[1].innerHTML=`<b style="color:var(--red)">${t.chyby}</b> chyb`;
+    pol[2].innerHTML=`útok <b>${sZnamenkem(t.utok)}</b>`;
+    pol[3].innerHTML=`příjem <b>${sZnamenkem(t.prijem)}</b>`;
+  }
 }
 
 // Vzetí zpět (#29): dlouhý stisk nebo pravé tlačítko na počítadle.
@@ -753,7 +810,10 @@ async function flushStat(key,opts={}){
     const res=await apiRpc('vb_zapis_akce',{p_zmeny:zmeny},opts);
     // server vrací výslednou hodnotu po přičtení, včetně toho, co mezitím
     // zapsalo druhé zařízení — bereme ji jako pravdu
-    if(Array.isArray(res))res.forEach(r=>prijmiHodnotu(r.zapas_id,r.hrac_id,r.set_cislo||1,r.pole,r.hodnota));
+    if(Array.isArray(res)){
+      res.forEach(r=>prijmiHodnotu(r.zapas_id,r.hrac_id,r.set_cislo||1,r.pole,r.hodnota));
+      prekresliSouhrn();
+    }
   }catch(e){
     // vrátit zpět do fronty, ať se to neztratí
     Object.entries(odeslane).forEach(([pole,delta])=>{

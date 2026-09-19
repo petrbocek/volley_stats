@@ -52,6 +52,9 @@ tečka u čísla znamená, že v tom setu už něco zapsaného je. Vybraný set 
 appka pamatuje pro každý zápas zvlášť, takže reload uprostřed třetího setu
 neshodí zápis zpátky do prvního.
 
+Pod přepínačem je **souhrn týmu** — body, chyby a úspěšnost útoku a příjmu.
+Tlačítko vlevo přepíná mezi právě zapisovaným setem a celým zápasem.
+
 Ve Statistikách se sety sčítají. Filtrem „set" se dají rozpadnout zpátky.
 Pozor: zápasy z doby před zavedením setů (#32) mají všechno pod 1. setem,
 takže u nich rozpad nic neřekne.
