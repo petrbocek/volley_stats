@@ -217,3 +217,12 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 .set-btn.zapsany::after{content:'';position:absolute;top:3px;right:3px;width:5px;height:5px;border-radius:50%;background:var(--muted)}
 .set-btn.aktivni{background:var(--accent);border-color:var(--accent);color:#fff}
 .set-btn.aktivni.zapsany::after{background:rgba(255,255,255,.7)}
+
+/* souhrn týmu v Live (#56) */
+.tym-souhrn{display:flex;align-items:center;gap:10px;flex-wrap:nowrap;overflow-x:auto;
+  padding:5px 10px;background:var(--surface);border-bottom:1px solid var(--border);
+  font-size:12px;color:var(--muted);white-space:nowrap}
+.tym-souhrn b{font-family:'Oswald',sans-serif;font-size:14px;color:var(--text);font-weight:700}
+.souhrn-prepinac{background:var(--surface2);border:1px solid var(--border);color:var(--text);
+  border-radius:6px;padding:2px 8px;font-size:11px;font-weight:600;cursor:pointer;flex-shrink:0}
+.souhrn-pol{flex-shrink:0}
