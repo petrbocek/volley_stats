@@ -513,8 +513,43 @@ const radkyTab = await page.$$eval('.profil-tabulka tbody tr', trs =>
   trs.map(tr => [...tr.children].map(td => td.textContent.trim())));
 pass &= ok('T18g tabulka má řádek na zápas, vzestupně podle data (#36)',
   radkyTab.length === 2 && radkyTab[0][0].includes('10.09') && radkyTab[1][0].includes('17.09'));
+// buňka nese i úspěšnost (#37), procenta jsou první textový uzel
+const procentaUtok = await page.$$eval('.profil-tabulka tbody tr',
+  trs => trs.map(tr => tr.children[3].childNodes[0].textContent.trim()));
 pass &= ok('T18h procenta v tabulce sedí na data (#36)',
-  radkyTab[0][3] === '60' && radkyTab[1][3] === '20');
+  procentaUtok[0] === '60' && procentaUtok[1] === '20');
+
+// ── #37: úspěšnost vedle procenta výborných ────────────────────────────────
+// Zápas 100: útok 6 výb. / 2 chyby / 2 neutrál = 10 pokusů
+//   % výborných 60, úspěšnost (6-2)/10 = +40
+// Zápas 101: útok 2 / 6 / 2 = 10 pokusů
+//   % výborných 20, úspěšnost (2-6)/10 = -40  ← stejné pokusy, opačný výkon
+const vzorec = await page.evaluate(() => ({
+  a: uspesnost(6, 2, 2), b: uspesnost(2, 6, 2),
+  bezPokusu: uspesnost(0, 0, 0), same: uspesnost(3, 3, 4),
+}));
+pass &= ok('T19a úspěšnost = (výborné − chyby) / pokusy (#37)',
+  vzorec.a === 40 && vzorec.b === -40 && vzorec.same === 0);
+pass &= ok('T19b bez pokusu není nula, ale nic (#37)', vzorec.bezPokusu === null);
+
+// modal je otevřený už z T18, znovu ho neotvíráme
+const kostky = await page.$$eval('#profil-obsah .profil-kostka', els => els.map(e => ({
+  lbl: e.querySelector('.profil-kostka-lbl').textContent,
+  val: e.querySelector('.profil-kostka-val').textContent,
+})));
+pass &= ok('T19c souhrn ukazuje úspěšnost vedle % výborných (#37)',
+  kostky.some(k => k.lbl === 'Útok % výb.') && kostky.some(k => k.lbl === 'Útok úsp.') &&
+  kostky.some(k => k.lbl === 'Příjem úsp.'));
+
+const uspTab = await page.$$eval('.profil-tabulka tbody tr', trs => trs.map(tr => ({
+  utok: tr.children[3].childNodes[0].textContent.trim(),
+  utokUsp: tr.children[3].querySelector('.profil-usp')?.textContent,
+})));
+pass &= ok('T19d dva zápasy se stejným % pokusů se už nepletou (#37)',
+  uspTab[0].utok === '60' && uspTab[0].utokUsp === '+40' &&
+  uspTab[1].utok === '20' && uspTab[1].utokUsp === '-40');
+pass &= ok('T19e pod tabulkou je vysvětleno, co to druhé číslo je (#37)',
+  /výborné − chyby/.test(await page.textContent('.profil-legenda')));
 
 // profil respektuje filtr na zápas
 await page.click('#modal-profil .btn-secondary');

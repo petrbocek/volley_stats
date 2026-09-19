@@ -206,3 +206,5 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
   .profil-tabulka td:first-child{max-width:78px}
 }
 .profil-prazdno{color:var(--muted);font-size:13px;padding:16px 0}
+.profil-usp{font-size:10px;color:var(--muted);font-weight:600;margin-top:1px}
+.profil-legenda{font-size:11px;color:var(--muted);margin-top:8px}
