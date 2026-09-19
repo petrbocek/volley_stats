@@ -1030,6 +1030,51 @@ pass &= ok('T27h „Nový zápas\" se neotevře s daty toho upravovaného (#66)'
 await page.click('#modal-zapas .modal-footer .btn-secondary');
 await page.evaluate(() => { state.zapasy.find(z => z.id === 100).soupet = 'Soupeř A'; });
 
+// ── #68: Přehled ukáže celý turnajový den, ne jen jeden plánovaný zápas ────
+await page.evaluate(() => {
+  state.zapasy = state.zapasy.filter(z => ![301, 302, 303].includes(z.id));
+  state.zapasy.push(
+    { id: 301, sezona_id: 1, datum: '2026-10-05', cas: '10:30:00', soupet: 'Turnaj ráno', misto: 'neutral', stav: 'planovany' },
+    { id: 302, sezona_id: 1, datum: '2026-10-05', cas: '09:00:00', soupet: 'Turnaj dřív', misto: 'neutral', stav: 'planovany' },
+    { id: 303, sezona_id: 1, datum: '2026-11-20', cas: '18:00:00', soupet: 'Až za měsíc', misto: 'doma', stav: 'planovany' });
+  renderPrehled();
+});
+await page.waitForTimeout(250);
+const prehled = () => page.$$eval('#prehled-content .match-item', els =>
+  els.map(e => e.textContent.replace(/\s+/g, ' ').trim()));
+
+let radky = await prehled();
+pass &= ok('T28a Přehled ukáže všechny plánované zápasy téhož dne (#68)',
+  radky.some(t => /Turnaj ráno/.test(t)) && radky.some(t => /Turnaj dřív/.test(t)));
+pass &= ok('T28b pozdější termín Přehled nezahltí (#68)',
+  !radky.some(t => /Až za měsíc/.test(t)));
+pass &= ok('T28c zápasy dne jdou po sobě podle času (#68)',
+  radky.findIndex(t => /Turnaj dřív/.test(t)) < radky.findIndex(t => /Turnaj ráno/.test(t)));
+pass &= ok('T28d probíhající zápas je pořád první (#68)', /Probíhá/.test(radky[0]));
+
+// turnaj o mnoha zápasech se neodřízne stropem, jen ubere dokončené
+await page.evaluate(() => {
+  for (let i = 0; i < 8; i++) {
+    state.zapasy.push({ id: 400 + i, sezona_id: 1, datum: '2026-10-05',
+      cas: `1${i}:00:00`, soupet: `Turnajový ${i}`, misto: 'neutral', stav: 'planovany' });
+  }
+  renderPrehled();
+});
+await page.waitForTimeout(250);
+radky = await prehled();
+pass &= ok('T28e desetizápasový turnaj se vejde celý (#68)',
+  [...Array(8).keys()].every(i => radky.some(t => new RegExp(`Turnajový ${i}\\b`).test(t))));
+pass &= ok('T28f dokončené zápasy stropu ustoupí, ne naopak (#68)',
+  !radky.some(t => /Dokončený/.test(t)));
+
+await page.evaluate(() => {
+  state.zapasy = state.zapasy.filter(z => z.id < 300);
+  renderPrehled();
+});
+await page.waitForTimeout(200);
+radky = await prehled();
+pass &= ok('T28g bez turnaje zůstává Přehled krátký (#68)', radky.length <= 6);
+
 // ── přihlášení přežije reload ──────────────────────────────────────────────
 await page.reload();
 await nactenoOK();
