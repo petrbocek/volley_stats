@@ -322,9 +322,14 @@ function matchHtml(z,withActions=false,klikDoLive=false){
   const tym=state.tymy.find(t=>t.id===z.tym_id);
   let actions='';
   if(withActions){
-    if(z.stav==='planovany')actions=`<button class="btn btn-sm btn-primary" onclick="goLive(${z.id})">⚡ Live</button><button class="btn btn-sm btn-secondary" onclick="editVysledek(${z.id})">📝 Výsledek</button><button class="btn btn-sm btn-red" onclick="deleteZapas(${z.id})">🗑️</button>`;
-    else if(z.stav==='probihajici')actions=`<button class="btn btn-sm btn-primary" onclick="goLive(${z.id})">⚡ Live</button><button class="btn btn-sm btn-green" onclick="editVysledek(${z.id})">✓ Ukončit</button><button class="btn btn-sm btn-red" onclick="deleteZapas(${z.id})">🗑️</button>`;
-    else actions=`<button class="btn btn-sm btn-secondary" onclick="editVysledek(${z.id})">✏️ Upravit</button><button class="btn btn-sm btn-red" onclick="deleteZapas(${z.id})">🗑️</button>`;
+    // ✏️ = detail zápasu (soupeř, datum, soutěž, tým), 📝 = skóre. Dokončený
+    // zápas měl doteď „✏️ Upravit", které ale otevíralo výsledek — dvě různé
+    // úpravy pod jedním jménem se pletly, tak je odděluje ikona i popisek.
+    const upravit=`<button class="btn btn-sm btn-secondary" onclick="editZapas(${z.id})" title="Upravit soupeře, datum, soutěž a tým">✏️</button>`;
+    const smazat=`<button class="btn btn-sm btn-red" onclick="deleteZapas(${z.id})" title="Smazat zápas">🗑️</button>`;
+    if(z.stav==='planovany')actions=`<button class="btn btn-sm btn-primary" onclick="goLive(${z.id})">⚡ Live</button>${upravit}<button class="btn btn-sm btn-secondary" onclick="editVysledek(${z.id})">📝 Výsledek</button>${smazat}`;
+    else if(z.stav==='probihajici')actions=`<button class="btn btn-sm btn-primary" onclick="goLive(${z.id})">⚡ Live</button>${upravit}<button class="btn btn-sm btn-green" onclick="editVysledek(${z.id})">✓ Ukončit</button>${smazat}`;
+    else actions=`${upravit}<button class="btn btn-sm btn-secondary" onclick="editVysledek(${z.id})">📝 Výsledek</button>${smazat}`;
   }
   const klik=klikDoLive
     ?` class="match-item match-klik" role="button" tabindex="0" title="Otevřít v Live"
@@ -1347,11 +1352,54 @@ async function deleteTym(){
 
 /* ─── SOUTĚŽE ─── */
 function openZapasModal(){
+  zapasModalReset();
+  document.getElementById('in-zapas-id').value='';
+  document.getElementById('zapas-modal-title').textContent='🏐 Nový zápas';
+  document.getElementById('btn-save-zapas').textContent='Vytvořit zápas';
+  document.getElementById('in-zapas-datum').valueAsDate=new Date();
+  document.getElementById('in-zapas-cas').value='';
+  document.getElementById('in-zapas-soupet').value='';
+  document.getElementById('in-zapas-misto').value='doma';
+  document.getElementById('in-zapas-soutez').value='';
+  document.getElementById('in-zapas-tym').value='';
+  openModal('modal-zapas');
+}
+
+function zapasModalReset(){
   document.getElementById('nova-soutez-inline').style.display='none';
   document.getElementById('in-nova-soutez-nazev').value='';
   refreshSoutezSelect();
   refreshTymZapasSelect();
+}
+
+// Soutěž, tým i datum šlo doteď zadat jen při zakládání — překlep nebo špatně
+// vybraná soutěž se pak dal spravit jedině smazáním celého zápasu (#66).
+function editZapas(id){
+  const z=state.zapasy.find(z=>z.id===id);if(!z)return;
+  zapasModalReset();
+  document.getElementById('in-zapas-id').value=z.id;
+  document.getElementById('zapas-modal-title').textContent='✏️ Upravit zápas';
+  document.getElementById('btn-save-zapas').textContent='Uložit změny';
+  document.getElementById('in-zapas-datum').value=z.datum||'';
+  document.getElementById('in-zapas-cas').value=z.cas?z.cas.slice(0,5):'';
+  document.getElementById('in-zapas-soupet').value=z.soupet||'';
+  document.getElementById('in-zapas-misto').value=z.misto||'doma';
+  // Soutěž ani tým z cizí sezóny v nabídce nejsou; kdyby tam zápas odkazoval,
+  // prázdná hodnota by je při uložení tiše zahodila, tak je tam doplníme.
+  doplnChybejiciVolbu('in-zapas-soutez',z.soutez_id,state.souteze);
+  doplnChybejiciVolbu('in-zapas-tym',z.tym_id,state.tymy);
   openModal('modal-zapas');
+}
+
+function doplnChybejiciVolbu(selId,hodnota,zdroj){
+  const sel=document.getElementById(selId);
+  if(hodnota&&!sel.querySelector(`option[value="${hodnota}"]`)){
+    const item=zdroj.find(x=>x.id===hodnota);
+    const o=document.createElement('option');
+    o.value=hodnota;o.textContent=(item?item.nazev:'#'+hodnota)+' (jiná sezóna)';
+    sel.appendChild(o);
+  }
+  sel.value=hodnota||'';
 }
 
 function refreshTymZapasSelect(){
@@ -1448,21 +1496,36 @@ async function saveZapas(){
   const datum=document.getElementById('in-zapas-datum').value;
   const soupet=document.getElementById('in-zapas-soupet').value.trim();
   if(!datum||!soupet){toast('Zadej datum a soupeře','error');return;}
+  const id=parseInt(document.getElementById('in-zapas-id').value)||null;
   const sid=currentSeasonId();
+  // Při úpravě se posílá i prázdná soutěž/tým, ať jde volba odebrat; při
+  // zakládání by null jen zbytečně přepisoval default.
+  const body={datum,soupet,cas:document.getElementById('in-zapas-cas').value||null,misto:document.getElementById('in-zapas-misto').value};
   const soutezId=parseInt(document.getElementById('in-zapas-soutez').value)||null;
   const tymId=parseInt(document.getElementById('in-zapas-tym').value)||null;
-  const body={datum,soupet,cas:document.getElementById('in-zapas-cas').value||null,misto:document.getElementById('in-zapas-misto').value,stav:'planovany'};
-  if(sid)body.sezona_id=sid;
-  if(soutezId)body.soutez_id=soutezId;
-  if(tymId)body.tym_id=tymId;
+  if(id){
+    body.soutez_id=soutezId;
+    body.tym_id=tymId;
+  }else{
+    body.stav='planovany';
+    if(sid)body.sezona_id=sid;
+    if(soutezId)body.soutez_id=soutezId;
+    if(tymId)body.tym_id=tymId;
+  }
   try{
-    const res=await api('POST','vb_zapasy',body);
-    state.zapasy.unshift(res[0]);
+    if(id){
+      // Stav ani skóre sem nepatří, ty má na starosti „Výsledek" — jinak by
+      // úprava soutěže u rozehraného zápasu shodila zápis.
+      const res=await apiPatch('vb_zapasy',id,body);
+      const idx=state.zapasy.findIndex(z=>z.id===id);
+      if(idx>=0)state.zapasy[idx]={...state.zapasy[idx],...(res&&res[0]?res[0]:body)};
+    }else{
+      const res=await api('POST','vb_zapasy',body);
+      state.zapasy.unshift(res[0]);
+    }
     closeModal('modal-zapas');
-    document.getElementById('in-zapas-datum').value='';
-    document.getElementById('in-zapas-soupet').value='';
-    renderZapasy();renderPrehled();renderLiveSelect();
-    toast('Zápas přidán','success');
+    renderZapasy();renderPrehled();renderLiveSelect();renderStatistiky();
+    toast(id?'Zápas upraven':'Zápas přidán','success');
   }catch(e){toast('Chyba: '+e.message,'error');}
 }
 
