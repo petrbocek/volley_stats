@@ -237,3 +237,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 .live-tym-num.plus{color:var(--green)}
 .live-tym-num.minus{color:var(--red)}
 .live-tym-num.neutral{color:var(--yellow)}
+
+/* proklik ze seznamu zápasů na Přehledu do Live */
+.match-klik{cursor:pointer;transition:border-color .15s,background .15s}
+.match-klik:hover,.match-klik:focus-visible{border-color:var(--accent);background:var(--surface2);outline:none}
