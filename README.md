@@ -69,6 +69,12 @@ Zapisovat může víc lidí najednou; posílají se přírůstky, ne celé řád
 se zápisy nepřebíjejí. Čísla z druhého zařízení se dorovnají zhruba do deseti
 sekund.
 
+## Týmy
+
+Tým patří sezóně, ve které vznikl, a v jiné se nenabízí. Členství hráček je
+tím pádem vázané na sezónu taky — ve správě týmu se nabízejí jen hráčky ze
+soupisky té sezóny. Do nové sezóny se tým nepřenáší, založí se znovu.
+
 ## Soupiska
 
 Hráčku jde smazat jen dokud nemá zaznamenané akce — cizí klíč ve

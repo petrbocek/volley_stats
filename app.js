@@ -354,6 +354,12 @@ function jeArchivovana(h){return h.aktivni===false;}
 function zivehraci(){return state.hraci.filter(h=>!jeArchivovana(h));}
 function maStatistiky(hracId){return state.statistiky.some(s=>s.hrac_id===hracId);}
 
+// Tým patří jedné sezóně (#62). Členství hráček je tím pádem vázané na
+// sezónu taky, protože tým sám v jiné sezóně neexistuje.
+function tymySezony(sid){
+  return state.tymy.filter(t=>t.sezona_id===sid);
+}
+
 function isHracInSezona(hracId,sid){
   return state.hraciSezony.some(hs=>hs.hrac_id===hracId&&hs.sezona_id===sid);
 }
@@ -1032,7 +1038,7 @@ function renderStatistiky(){
   let html=`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
     <select id="stats-tym-sel" class="form-input" style="min-width:130px;flex:1" onchange="renderStatistiky()">
       <option value="">— všechny týmy —</option>
-      ${state.tymy.map(t=>`<option value="${t.id}"${t.id===selTym?' selected':''}>${esc(t.nazev)}</option>`).join('')}
+      ${tymySezony(d.sid).map(t=>`<option value="${t.id}"${t.id===selTym?' selected':''}>${esc(t.nazev)}</option>`).join('')}
     </select>
     <select id="stats-soutez-sel" class="form-input" style="min-width:130px;flex:1" onchange="renderStatistiky()">
       <option value="">— všechny soutěže —</option>
@@ -1245,11 +1251,12 @@ function otevriProfil(hracId){
 /* ─── TÝMY ─── */
 function renderTymy(){
   const el=document.getElementById('tymy-list');
-  if(!state.tymy.length){
-    el.innerHTML='<div class="empty" style="padding:24px"><span class="empty-icon" style="font-size:28px">🏐</span><div class="empty-text" style="font-size:14px">Žádné týmy</div></div>';
+  const tymy=tymySezony(currentSeasonId());
+  if(!tymy.length){
+    el.innerHTML=`<div class="empty" style="padding:24px"><span class="empty-icon" style="font-size:28px">🏐</span><div class="empty-text" style="font-size:14px">${currentSeasonId()?'V této sezóně zatím žádný tým':'Vyberte sezónu'}</div></div>`;
     return;
   }
-  el.innerHTML=`<div class="tymy-grid">${state.tymy.map(t=>{
+  el.innerHTML=`<div class="tymy-grid">${tymy.map(t=>{
     const members=state.hraciTymy.filter(ht=>ht.tym_id===t.id);
     const playerChips=members.map(ht=>{
       const h=state.hraci.find(h=>h.id===ht.hrac_id);
@@ -1268,7 +1275,9 @@ function renderTymy(){
 function openTymManage(tymId){
   const tym=state.tymy.find(t=>t.id===tymId);if(!tym)return;
   document.getElementById('tym-manage-id').value=tymId;
-  document.getElementById('tym-manage-title').textContent=`👥 ${tym.nazev}`;
+  const sez=state.sezony.find(s=>s.id===tym.sezona_id);
+  document.getElementById('tym-manage-title').textContent=
+    `👥 ${tym.nazev}${sez?' · '+sez.nazev:''}`;
   renderTymManage(tymId);
   openModal('modal-tym-manage');
 }
@@ -1276,8 +1285,14 @@ function openTymManage(tymId){
 function renderTymManage(tymId){
   const inTym=state.hraciTymy.filter(ht=>ht.tym_id===tymId).map(ht=>ht.hrac_id);
   const el=document.getElementById('tym-manage-content');
-  if(!state.hraci.length){el.innerHTML='<div class="empty"><span class="empty-icon">👥</span><div class="empty-text">Žádné hráčky</div></div>';return;}
-  el.innerHTML=zivehraci().map(h=>{
+  const tym=state.tymy.find(t=>t.id===tymId);
+  // jen hráčky ze soupisky té sezóny, do které tým patří
+  const nabidka=zivehraci().filter(h=>isHracInSezona(h.id,tym?.sezona_id));
+  if(!nabidka.length){
+    el.innerHTML='<div class="empty"><span class="empty-icon">👥</span><div class="empty-text">V soupisce té sezóny nejsou žádné hráčky</div></div>';
+    return;
+  }
+  el.innerHTML=nabidka.map(h=>{
     const isIn=inTym.includes(h.id);
     return playerCard(h,{
       tridy:isIn?'':'inactive',
@@ -1304,8 +1319,10 @@ async function toggleHracTym(hracId,tymId,inTym){
 async function saveTym(){
   const nazev=document.getElementById('in-tym-nazev').value.trim();
   if(!nazev){toast('Zadej název týmu','error');return;}
+  const sid=currentSeasonId();
+  if(!sid){toast('Nejdřív nahoře vyber sezónu — tým patří do sezóny','error');return;}
   try{
-    const res=await api('POST','vb_tymy',{nazev});
+    const res=await api('POST','vb_tymy',{nazev,sezona_id:sid});
     state.tymy.push(res[0]);
     state.tymy.sort((a,b)=>a.nazev.localeCompare(b.nazev));
     closeModal('modal-tym');
@@ -1340,7 +1357,7 @@ function openZapasModal(){
 function refreshTymZapasSelect(){
   const sel=document.getElementById('in-zapas-tym');
   sel.innerHTML='<option value="">— žádný tým —</option>';
-  state.tymy.forEach(t=>{
+  tymySezony(currentSeasonId()).forEach(t=>{
     const o=document.createElement('option');
     o.value=t.id;o.textContent=t.nazev;
     sel.appendChild(o);
