@@ -910,6 +910,74 @@ await page.waitForTimeout(400);
 pass &= ok('T24e jde otevřít i klávesou Enter',
   await page.evaluate(() => state.liveZapasId) === 102);
 
+// ── #64: mazání zápasu i s tím, co k němu patří ────────────────────────────
+await page.click('.nav-tab:nth-child(2)');                 // Zápasy
+await page.waitForSelector('#zapasy-list .match-item');
+
+const kosU = st => page.evaluate(stav => {
+  const z = state.zapasy.find(z => z.stav === stav && z.sezona_id === currentSeasonId());
+  const el = [...document.querySelectorAll('#zapasy-list .match-item')]
+    .find(e => e.innerHTML.includes(`deleteZapas(${z.id})`));
+  return !!el;
+}, st);
+pass &= ok('T26a probíhající zápas jde smazat, ne jen ukončený (#64)', await kosU('probihajici'));
+pass &= ok('T26b koš zůstal i u plánovaného (#64)', await kosU('planovany'));
+
+// dialog u zápasu, ve kterém se něco zapsalo
+const dialogPri = async (zapasId) => {
+  let text = '';
+  page.once('dialog', d => { text = d.message(); d.dismiss(); });
+  await page.evaluate(id => deleteZapas(id), zapasId);
+  await page.waitForTimeout(250);
+  return text;
+};
+otherWrites = [];
+const textPlny = await dialogPri(100);
+pass &= ok('T26c dialog pojmenuje zápas, ne jen „opravdu?\" (#64)',
+  /Soupeř A/.test(textPlny) && /10\.09\.2026|10\.9\.2026/.test(textPlny));
+const ocekAkci = await page.evaluate(() => pocetAkciZapasu(100));
+const ocekHracek = await page.evaluate(() => state.zapasHraci.filter(zh => zh.zapas_id === 100).length);
+pass &= ok('T26d dialog řekne číslem, kolik akcí a hráček zmizí s ním (#64)',
+  new RegExp(`${ocekAkci} (zapsan\\S+ )?akc`).test(textPlny) &&
+  new RegExp(`${ocekHracek} hráč`).test(textPlny));
+pass &= ok('T26e počty v dialogu sedí na data (#64)', await page.evaluate(() => {
+  const rucne = state.statistiky.filter(s => s.zapas_id === 100).reduce((n, s) =>
+    n + ACTIONS.reduce((m, a) => m + VARIANTS.reduce((k, v) => k + (s[`${a.key}_${v.suf}`] || 0), 0), 0), 0);
+  return pocetAkciZapasu(100) === rucne && rucne > 0;
+}));
+pass &= ok('T26f dialog říká, že to nejde vzít zpět (#64)', /[Nn]ejde vzít zpět/.test(textPlny));
+pass &= ok('T26g zamítnutý dialog nic nesmaže (#64)',
+  !otherWrites.some(w => w.table === 'vb_zapasy' && w.method === 'DELETE') &&
+  await page.evaluate(() => !!state.zapasy.find(z => z.id === 100)));
+
+// zápas otevřený v Live na to upozorní zvlášť
+await page.evaluate(() => { state.liveZapasId = 100; });
+const textLive = await dialogPri(100);
+pass &= ok('T26h u zápasu otevřeného v Live dialog upozorní (#64)', /Live/.test(textLive));
+
+// prázdný zápas dialog nestraší čísly, která nejsou
+const textPrazdny = await dialogPri(102);
+pass &= ok('T26i u prázdného zápasu dialog řekne, že není co ztratit (#64)',
+  /jedinou akci/.test(textPrazdny) && !/Smaže se i/.test(textPrazdny));
+
+// a potvrzení ho opravdu smaže
+otherWrites = [];
+page.once('dialog', d => d.accept());
+await page.evaluate(() => deleteZapas(102));
+await page.waitForTimeout(400);
+pass &= ok('T26j potvrzení pošle jediný DELETE na vb_zapasy (#64)',
+  otherWrites.filter(w => w.method === 'DELETE').length === 1 &&
+  otherWrites.some(w => w.table === 'vb_zapasy' && w.method === 'DELETE' &&
+                        /id=eq\.102/.test(w.url)));
+pass &= ok('T26k smazaný zápas zmizí ze seznamu i z výběru v Live (#64)',
+  await page.evaluate(() => !state.zapasy.find(z => z.id === 102)) &&
+  !(await page.$$eval('#live-zapas-select option', els => els.map(e => e.value))).includes('102'));
+pass &= ok('T26l po smazání nezůstanou v paměti jeho řádky (#64)', await page.evaluate(() =>
+  !state.statistiky.some(s => s.zapas_id === 102) &&
+  !state.zapasHraci.some(zh => zh.zapas_id === 102) &&
+  !Object.keys(pendingDeltas).some(k => k.startsWith('102_')) &&
+  !Object.keys(dirtyStats).some(k => k.startsWith('102_'))));
+
 // ── přihlášení přežije reload ──────────────────────────────────────────────
 await page.reload();
 await nactenoOK();
