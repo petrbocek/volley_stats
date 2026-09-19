@@ -565,73 +565,75 @@ pass &= ok('T20m filtr na set ukáže jen ten set (#32)', jenSet2 && Number(jenS
 await page.selectOption('#stats-set-sel', '');
 await page.waitForTimeout(200);
 
-// ── #56: souhrn týmu v Live ────────────────────────────────────────────────
+// ── #56: souhrn týmu jako první řádek gridu ────────────────────────────────
 // Měří se relativně (o kolik se číslo změnilo), ne proti čistému stavu —
 // mazání stubu by shodilo fixtures, na kterých stojí pozdější testy.
 await page.selectOption('#season-select', '1');
 await page.waitForTimeout(200);
 await page.click('.nav-tab:nth-child(4)');
-await page.waitForSelector('.tym-souhrn');
+await page.waitForSelector('.live-tym-row');
 
-const souhrn = async () => {
-  const t = (await page.textContent('.tym-souhrn')).replace(/\s+/g, ' ');
-  return {
-    popis: t.split('⇄')[0].trim(),
-    body: Number(/(\d+) body/.exec(t)?.[1] ?? NaN),
-    chyby: Number(/(\d+) chyb/.exec(t)?.[1] ?? NaN),
-  };
-};
+const tymCislo = pole => page.textContent(`#tym-${pole}`).then(t => Number(t.trim()));
+const tymPopis = () => page.textContent('.live-tym-prepinac');
 
-pass &= ok('T22a Live má souhrn týmu (#56)', await page.isVisible('.tym-souhrn'));
+pass &= ok('T22a souhrn je první řádek tabulky, ne samostatný pruh (#56)',
+  await page.evaluate(() => {
+    const prvni = document.querySelector('.live-table tbody tr');
+    return prvni?.classList.contains('live-tym-row');
+  }));
+pass &= ok('T22b čísla sedí pod sloupci akcí, stejný počet jako u hráčky (#56)',
+  await page.evaluate(() => {
+    const tym = document.querySelectorAll('.live-tym-row .live-tym-num').length;
+    const hrac = document.querySelectorAll('.live-table tbody tr:nth-child(2) .live-act-btn').length;
+    return tym === hrac && tym > 0;
+  }));
+
 const aktivniSet = await page.evaluate(() => state.liveSet);
-pass &= ok('T22b souhrn se ve výchozím stavu týká zapisovaného setu (#56)',
-  (await souhrn()).popis === `${aktivniSet}. set`);
+pass &= ok('T22c ve výchozím stavu ukazuje zapisovaný set (#56)',
+  (await tymPopis()).trim().startsWith(`${aktivniSet}. set`));
 
-const souhrnPred = await souhrn();
+// součet za tým musí sedět na součet sloupce u hráček
+const predUtok = await tymCislo('utok_plus');
 await page.click('#cnt-10-utok_plus');
 await page.waitForTimeout(100);
-const hned = await souhrn();
-pass &= ok('T22c souhrn naskočí hned po kliknutí, ne až po uložení (#56)',
-  hned.body === souhrnPred.body + 1);
+pass &= ok('T22d řádek naskočí hned po kliknutí, ne až po uložení (#56)',
+  await tymCislo('utok_plus') === predUtok + 1);
 
-await page.click('#cnt-10-chyba_minus');
-await page.waitForTimeout(700);
-const poChybe = await souhrn();
-pass &= ok('T22d chyby se počítají zvlášť od bodů (#56)',
-  poChybe.chyby === souhrnPred.chyby + 1 && poChybe.body === souhrnPred.body + 1);
+pass &= ok('T22e součet týmu sedí na součet sloupce u hráček (#56)',
+  await page.evaluate(() => {
+    const tym = Number(document.getElementById('tym-utok_plus').textContent);
+    let soucet = 0;
+    document.querySelectorAll('.live-table tbody tr').forEach(tr => {
+      if (tr.classList.contains('live-tym-row')) return;
+      const el = tr.querySelector('.live-act-cnt[id$="-utok_plus"]');
+      if (el) soucet += Number(el.textContent) || 0;
+    });
+    return tym === soucet;
+  }));
 
-// jiný set má vlastní čísla
+// jiný set má vlastní čísla, přepnutí na zápas je sečte
 const jinySet = aktivniSet === 5 ? 4 : aktivniSet + 1;
 await klikSet(jinySet);
 await page.waitForTimeout(300);
-const vJinemSetu = await souhrn();
-pass &= ok('T22e souhrn ukazuje čísla zvoleného setu, ne cizího (#56)',
-  vJinemSetu.popis === `${jinySet}. set` && vJinemSetu.body !== poChybe.body);
+const vJinemSetu = await tymCislo('utok_plus');
+pass &= ok('T22f řádek ukazuje čísla zvoleného setu, ne cizího (#56)',
+  (await tymPopis()).trim().startsWith(`${jinySet}. set`) && vJinemSetu !== predUtok + 1);
 
-const predVJinem = vJinemSetu.body;
-await page.click('#cnt-10-utok_plus');
-await page.waitForTimeout(700);
-
-await page.click('.souhrn-prepinac');
+await page.click('.live-tym-prepinac');
 await page.waitForTimeout(300);
-const celyZapas = await souhrn();
-// nezávislý součet přes všechny sety a hráčky rovnou z dat aplikace
-const ocekavaneBody = await page.evaluate(() => {
+const ocekavano = await page.evaluate(() => {
   const lineup = state.zapasHraci.filter(z => z.zapas_id === 100).map(z => z.hrac_id);
   let n = 0;
   for (const h of lineup)
-    for (let set = 1; set <= SETU; set++)
-      n += getStatVal(100, h, 'servis_plus', set)
-         + getStatVal(100, h, 'utok_plus', set)
-         + getStatVal(100, h, 'blok_plus', set);
+    for (let set = 1; set <= SETU; set++) n += getStatVal(100, h, 'utok_plus', set);
   return n;
 });
-pass &= ok('T22f přepnutí na Zápas sečte všechny sety (#56)',
-  celyZapas.popis === 'Zápas' && celyZapas.body === ocekavaneBody);
-pass &= ok('T22g součet za zápas je víc než jeden set (#56)',
-  celyZapas.body > vJinemSetu.body);
+pass &= ok('T22g přepnutí na zápas sečte všechny sety (#56)',
+  (await tymPopis()).trim().startsWith('zápas') && await tymCislo('utok_plus') === ocekavano);
+pass &= ok('T22h součet za zápas je víc než jeden set (#56)',
+  await tymCislo('utok_plus') > vJinemSetu);
 
-await page.click('.souhrn-prepinac');   // zpět na set, ať další testy vidí výchozí stav
+await page.click('.live-tym-prepinac');   // zpět na set, ať další testy vidí výchozí stav
 await page.waitForTimeout(200);
 
 // ── #36: profil hráčky ─────────────────────────────────────────────────────
