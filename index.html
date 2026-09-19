@@ -283,6 +283,11 @@
         </select>
       </div>
     </div>
+    <div id="hrac-nebezpecne" style="display:none;border-top:1px solid var(--border);margin-top:4px;padding-top:12px">
+      <div id="hrac-nebezpecne-text" style="font-size:12px;color:var(--muted);margin-bottom:8px"></div>
+      <button class="btn btn-sm btn-red" id="btn-smazat-hrac" onclick="smazatHracku()">🗑️ Smazat hráčku</button>
+      <button class="btn btn-sm btn-secondary" id="btn-archiv-hrac" onclick="archivovatHracku()">📦 Archivovat</button>
+    </div>
     <div class="modal-footer">
       <button class="btn btn-secondary" onclick="closeModal('modal-hrac')">Zrušit</button>
       <button class="btn btn-primary" id="btn-save-hrac" onclick="saveHrac()">Přidat</button>
