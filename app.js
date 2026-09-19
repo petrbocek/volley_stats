@@ -808,6 +808,18 @@ function pctCislo(plus,minus,neutral){
   return t>0?Math.round(plus/t*100):null;
 }
 
+// Úspěšnost (výborné − chyby) / pokusy, jak se běžně vykazuje ve volejbalové
+// statistice. Samotné % výborných je jen půlka obrázku: 30 % výborných s 5 %
+// chyb a 30 % s 25 % chyb vypadají stejně, a přitom to je úplně jiný výkon.
+function uspesnost(plus,minus,neutral){
+  const t=plus+minus+neutral;
+  return t>0?Math.round((plus-minus)/t*100):null;
+}
+function sZnamenkem(v){
+  if(v===null||v===undefined)return '—';
+  return v>0?'+'+v:String(v);
+}
+
 /* ─── EXPORT CSV ─── */
 const CSV_HLAVICKA=['Poř.','Hráčka','Číslo','Záp.','Servis Es','Servis chyby',
   'Příjem výb.','Příjem chyby','Příjem % výb.','Útok výb.','Útok chyby','Útok % výb.',
@@ -1041,7 +1053,9 @@ function otevriProfil(hracId){
     ${kostka(souhrn.total,'Celkem','var(--accent)')}
     ${kostka(souhrn.sp,'Esa','var(--green)')}
     ${kostka(pctCislo(souhrn.up,souhrn.um,souhrn.un)??'—','Útok % výb.')}
+    ${kostka(sZnamenkem(uspesnost(souhrn.up,souhrn.um,souhrn.un)),'Útok úsp.')}
     ${kostka(pctCislo(souhrn.pp,souhrn.pm,souhrn.pn)??'—','Příjem % výb.')}
+    ${kostka(sZnamenkem(uspesnost(souhrn.pp,souhrn.pm,souhrn.pn)),'Příjem úsp.')}
     ${kostka(souhrn.cm,'Chyb','var(--red)')}
   </div>`:'';
 
@@ -1066,12 +1080,14 @@ function otevriProfil(hracId){
     <tbody>${radky.map(r=>`<tr>
       <td><div class="profil-zapas-datum">${fmtDate(r.z.datum).slice(0,6)}</div><div class="profil-zapas-soupet">${esc(r.z.soupet)}</div></td>
       <td>${r.sp}</td>
-      <td>${pctCislo(r.pp,r.pm,r.pn)??'—'}</td>
-      <td>${pctCislo(r.up,r.um,r.un)??'—'}</td>
+      <td>${pctCislo(r.pp,r.pm,r.pn)??'—'}<div class="profil-usp">${sZnamenkem(uspesnost(r.pp,r.pm,r.pn))}</div></td>
+      <td>${pctCislo(r.up,r.um,r.un)??'—'}<div class="profil-usp">${sZnamenkem(uspesnost(r.up,r.um,r.un))}</div></td>
       <td>${r.bp}</td>
       <td>${r.cm}</td>
       <td style="color:var(--accent);font-weight:700">${r.total}</td>
-    </tr>`).join('')}</tbody></table></div>`:'';
+    </tr>`).join('')}</tbody></table>
+    <div class="profil-legenda">Druhé číslo je úspěšnost: (výborné − chyby) / pokusy.</div>
+    </div>`:'';
 
   document.getElementById('profil-obsah').innerHTML=souhrnHtml+grafy+tabulka;
   openModal('modal-profil');
