@@ -91,7 +91,14 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 .player-toggle{cursor:pointer;font-size:18px;flex-shrink:0;border:none;background:none;padding:4px}
 
 /* LIVE TABLE */
-#live-table-wrap{height:calc(100dvh - 190px);min-height:240px;border-radius:12px;border:1px solid var(--border);overflow:hidden}
+/* Sloupec: přepínač setu nahoře, tabulka vyplní zbytek. Dřív byla tabulka
+   height:100% rámečku a přepínač nad ní, takže dohromady přerostly rámeček
+   s overflow:hidden a spodní řádek "+ Přidat hráčku" se usekl. */
+#live-table-wrap{height:calc(100dvh - 190px);min-height:240px;border-radius:12px;
+  border:1px solid var(--border);overflow:hidden;display:flex;flex-direction:column}
+#live-table-wrap>.empty{margin:auto}
+.set-prepinac{flex-shrink:0}
+.live-table-scroll{flex:1;min-height:0;overflow:auto}
 .live-table{width:100%;height:100%;border-collapse:collapse;table-layout:fixed}
 .live-table th,.live-table td{border:1px solid var(--border);padding:0;text-align:center;overflow:hidden}
 .live-table thead th{background:var(--surface2);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:var(--muted);height:28px;padding:0 2px}

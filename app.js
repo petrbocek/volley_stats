@@ -579,7 +579,7 @@ function renderLiveTable(zapasId){
       }).join('');
     }).join('')}
   </tr>`:'';
-  el.innerHTML=prepinac+`<table class="live-table"><thead>${thead}</thead><tbody>${tymRow}${rows}${addRow}</tbody></table>`;
+  el.innerHTML=prepinac+`<div class="live-table-scroll"><table class="live-table"><thead>${thead}</thead><tbody>${tymRow}${rows}${addRow}</tbody></table></div>`;
   if(hraci.length)napovedaZpet();
 }
 
