@@ -295,12 +295,20 @@ function renderPrehled(){
 
 // Na Přehledu je proklik do Live, takže seznam musí nabídnout i zápas, který
 // se zrovna hraje — jen dokončené by tu funkci minuly.
+const PREHLED_MAX=6;
 function prehledSeznam(zapasy){
   const probiha=zapasy.filter(z=>z.stav==='probihajici');
   const planovane=zapasy.filter(z=>z.stav==='planovany')
-    .sort((a,b)=>(a.datum||'').localeCompare(b.datum||''));
+    .sort((a,b)=>(a.datum||'').localeCompare(b.datum||'')||(a.cas||'').localeCompare(b.cas||''));
+  // Turnaj je několik zápasů v jeden den. Nejbližší plánovaný by ten zbytek dne
+  // schoval a proklik do Live by na ně nevedl, tak se bere celý ten den (#68).
+  const nejblizsiDen=planovane.length?planovane[0].datum:null;
+  const denniDavka=planovane.filter(z=>z.datum===nejblizsiDen);
   const done=zapasy.filter(z=>z.stav==='dokonceny');
-  return [...probiha,...planovane.slice(0,1),...done].slice(0,6);
+  // Strop je na dokončené, ať Přehled nenaroste přes celou sezónu. Rozehrané
+  // a dnešní zápasy se neodřezávají — přesně ty totiž člověk hledá.
+  const zaklad=[...probiha,...denniDavka];
+  return [...zaklad,...done.slice(0,Math.max(0,PREHLED_MAX-zaklad.length))];
 }
 
 /* ─── ZÁPASY ─── */
