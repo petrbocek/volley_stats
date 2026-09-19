@@ -42,6 +42,11 @@ v `supabase/README.md`.
 Bez přihlášení appka všechno ukáže, ale nepustí zapisovat — nahoře svítí lišta
 „jen pro čtení".
 
+## Přehled
+
+Seznam zápasů ukazuje probíhající zápas, nejbližší plánovaný a poslední
+dokončené. Klik na řádek (nebo Enter) otevře zápas rovnou v Live.
+
 ## Zápis zápasu
 
 V záložce **Live** se vybere zápas a přidají hráčky do sestavy. Klepnutí na
