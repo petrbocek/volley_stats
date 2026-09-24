@@ -157,7 +157,7 @@ const klikSet = n => page.click(`#live-table-wrap .set-prepinac button:nth-of-ty
 const longPress = async sel => { await page.hover(sel); await page.mouse.down(); await page.waitForTimeout(700); await page.mouse.up(); };
 
 // ── #24: bez přihlášení se nic nezapíše ────────────────────────────────────
-await page.click('.nav-tab:nth-child(4)');
+await page.click('.nav-tab:nth-child(5)');
 await page.waitForSelector('#cnt-10-servis_plus');
 rpcCalls = []; otherWrites = [];
 await page.click('#cnt-10-servis_plus');
@@ -312,7 +312,7 @@ for (const tab of [1, 2, 3, 5]) {          // Přehled, Zápasy, Tým, Statistik
   await page.click(`.nav-tab:nth-child(${tab})`);
   await page.waitForTimeout(150);
 }
-await page.click('.nav-tab:nth-child(4)');
+await page.click('.nav-tab:nth-child(5)');
 await page.waitForSelector('.live-player-name');
 await page.waitForTimeout(200);
 
@@ -328,14 +328,14 @@ const jmena = await page.$$eval('.live-player-name', els => els.map(e => e.textC
 const tucneVJmene = await page.$('.live-player-name b');
 pass &= ok('T13c jméno s HTML se v Live vypíše doslova (#35)',
   jmena.includes(JMENO) && tucneVJmene === null);
-await page.click('.nav-tab:nth-child(3)');
+await page.click('.nav-tab:nth-child(4)');                  // Týmy
 await page.waitForTimeout(200);
 const tymTitul = await page.textContent('.tym-card-title');
 pass &= ok('T13d název týmu se v kartě vypíše doslova (#35)', tymTitul === TYM);
 const clen = await page.textContent('.tym-member');
 pass &= ok('T13e jméno člena týmu se vypíše doslova (#35)', clen === JMENO);
 
-await page.click('.nav-tab:nth-child(6)');
+await page.click('.nav-tab:nth-child(7)');
 await page.waitForTimeout(200);
 const volby = await page.$$eval('#stats-hrac-sel option', els => els.map(e => e.textContent));
 pass &= ok('T13f jméno ve filtru statistik se vypíše doslova (#35)', volby.includes(JMENO));
@@ -343,7 +343,7 @@ pass &= ok('T13f jméno ve filtru statistik se vypíše doslova (#35)', volby.in
 // ── #30: odebrání ze sestavy se ptá a nemlčí o statistikách ────────────────
 await page.selectOption('#season-select', '1');
 await page.waitForTimeout(200);
-await page.click('.nav-tab:nth-child(4)');
+await page.click('.nav-tab:nth-child(5)');
 await page.waitForSelector('#cnt-11-servis_plus');
 
 // hráčka BEZ zaznamenaných akcí — prostý dotaz, bez nabídky mazat statistiky
@@ -415,7 +415,7 @@ const kartaPozice = async (sel) => page.$$eval(sel, els => els.map(e => ({
   maCislo: !!e.querySelector('.player-num'),
 })));
 
-await page.click('.nav-tab:nth-child(3)');                    // Tým
+await page.click('.nav-tab:nth-child(3)');                  // Hráčky
 await page.waitForSelector('#hraci-list .player-card');
 const soupiska = await kartaPozice('#hraci-list .player-card');
 const sBeta = soupiska.find(k => k.jmeno === 'Beta');
@@ -430,7 +430,7 @@ pass &= ok('T17b správa týmu: stejná karta, stejná třída (#39)',
   spBeta && spBeta.trida === sBeta.trida && spBeta.pozice === sBeta.pozice);
 await page.click('#modal-tym-manage .btn-secondary');
 
-await page.click('.nav-tab:nth-child(4)');                    // Live → picker
+await page.click('.nav-tab:nth-child(5)');                    // Live → picker
 await page.waitForTimeout(150);
 await page.evaluate(() => openHracPicker(100));
 await page.waitForTimeout(150);
@@ -470,11 +470,11 @@ function parseCsv(text) {
 Object.assign(radek(100, 13), { utok_plus: 6, utok_minus: 2, utok_neutral: 2, prijem_plus: 3, chyba_minus: 1 });
 await page.selectOption('#season-select', '1');
 await page.waitForTimeout(300);
-await page.click('.nav-tab:nth-child(4)');               // Live drží zápas 100
+await page.click('.nav-tab:nth-child(5)');               // Live drží zápas 100
 await page.waitForTimeout(200);
 await page.evaluate(() => refreshLiveStats());           // dotáhnout nová data
 await page.waitForTimeout(300);
-await page.click('.nav-tab:nth-child(6)');
+await page.click('.nav-tab:nth-child(7)');
 await page.waitForTimeout(300);
 
 pass &= ok('T14a tlačítko exportu je ve Statistikách (#34)', await page.isVisible('#btn-export-csv'));
@@ -513,7 +513,7 @@ pass &= ok('T14h poslední řádek je součet a sedí na patičku tabulky (#34)'
 // ── #32: statistiky po setech ──────────────────────────────────────────────
 await page.selectOption('#season-select', '1');
 await page.waitForTimeout(200);
-await page.click('.nav-tab:nth-child(4)');
+await page.click('.nav-tab:nth-child(5)');
 await page.waitForSelector('#cnt-10-servis_plus');
 
 pass &= ok('T20a Live má přepínač setů (#32)',
@@ -560,7 +560,7 @@ pass &= ok('T20i přepnutí setu nejdřív uloží rozepsané do starého setu (
   rpcCalls.length === 1 && rpcCalls[0][0].set_cislo === 1 && rpcCalls[0][0].pole === 'blok_plus');
 
 // statistiky sčítají přes sety a počítají zápasy, ne řádky
-await page.click('.nav-tab:nth-child(6)');
+await page.click('.nav-tab:nth-child(7)');
 await page.waitForTimeout(300);
 const radekAlfa = await page.$$eval('.stats-table tbody tr', trs => {
   const tr = trs.find(t => t.textContent.includes('Alfa'));
@@ -588,7 +588,7 @@ await page.waitForTimeout(200);
 // mazání stubu by shodilo fixtures, na kterých stojí pozdější testy.
 await page.selectOption('#season-select', '1');
 await page.waitForTimeout(200);
-await page.click('.nav-tab:nth-child(4)');
+await page.click('.nav-tab:nth-child(5)');
 await page.waitForSelector('.live-tym-row');
 
 const tymCislo = pole => page.textContent(`#tym-${pole}`).then(t => Number(t.trim()));
@@ -661,7 +661,7 @@ FIX.vb_zapas_hraci.push({ zapas_id: 101, hrac_id: 13 });
 Object.assign(radek(101, 13), { utok_plus: 2, utok_minus: 6, utok_neutral: 2, prijem_plus: 1, prijem_minus: 3, servis_plus: 1 });
 await page.reload();
 await nactenoOK();
-await page.click('.nav-tab:nth-child(6)');
+await page.click('.nav-tab:nth-child(7)');
 await page.waitForTimeout(300);
 
 await page.click(`.stats-table tbody tr:has-text("Delta") a`);
@@ -746,7 +746,7 @@ FIX.vb_hraci.push({ id: 20, jmeno: 'Překlep', cislo: 99, pozice: 'smečař', ak
 FIX.vb_hraci_sezony.push({ hrac_id: 20, sezona_id: 1 });
 await page.reload();
 await nactenoOK();
-await page.click('.nav-tab:nth-child(3)');
+await page.click('.nav-tab:nth-child(3)');                  // Hráčky
 await page.waitForSelector('#hraci-list .player-card');
 
 await page.evaluate(() => editHrac(20));
@@ -781,7 +781,7 @@ pass &= ok('T21g archivovaná je v sekci Archiv, ne v soupisce (#41)',
   (await page.textContent('#hraci-list')).includes('Archiv'));
 
 // archivovaná se nesmí nabízet do sestavy
-await page.click('.nav-tab:nth-child(4)');
+await page.click('.nav-tab:nth-child(5)');
 await page.waitForTimeout(200);
 await page.evaluate(() => { state.zapasHraci = state.zapasHraci.filter(z => !(z.zapas_id === 100 && z.hrac_id === 10)); renderLiveTable(100); });
 await page.evaluate(() => openHracPicker(100));
@@ -791,7 +791,7 @@ pass &= ok('T21h archivovaná se nenabízí do sestavy (#41)',
 await page.click('#modal-hrac-picker .btn-secondary');
 
 // obnovení
-await page.click('.nav-tab:nth-child(3)');
+await page.click('.nav-tab:nth-child(3)');                  // Hráčky
 await page.waitForTimeout(200);
 otherWrites = [];
 await page.click('#hraci-list .btn-green');
@@ -814,7 +814,7 @@ const tlacitkoUseknuto = () => page.evaluate(() => {
 });
 
 await page.setViewportSize({ width: 390, height: 844 });    // telefon
-await page.click('.nav-tab:nth-child(4)');
+await page.click('.nav-tab:nth-child(5)');
 await page.waitForSelector('.live-tym-row');
 await page.waitForTimeout(200);
 pass &= ok('T23a tlačítko „Přidat hráčku" se na telefonu nesekne (regrese)',
@@ -831,7 +831,7 @@ pass &= ok('T23c ani na desktopu (regrese)', (await tlacitkoUseknuto()) <= 0);
 // ── #62: tým platí jen ve své sezóně ───────────────────────────────────────
 await page.selectOption('#season-select', '1');
 await page.waitForTimeout(200);
-await page.click('.nav-tab:nth-child(3)');                  // Tým
+await page.click('.nav-tab:nth-child(4)');                  // Týmy
 await page.waitForTimeout(300);
 
 const tymyVSeznamu = () => page.$$eval('#tymy-list .tym-card-title', els => els.map(e => e.textContent));
@@ -847,7 +847,7 @@ pass &= ok('T25b po přepnutí sezóny vidím tým té druhé (#62)',
 
 // nový tým se zakládá do zvolené sezóny
 otherWrites = [];
-await page.click('#tab-tym button:has-text("Nový tým")');
+await page.click('#tab-tymy button:has-text("Nový tým")');
 await page.fill('#in-tym-nazev', 'Nováček');
 await page.click('#modal-tym .btn-primary');
 await page.waitForTimeout(400);
@@ -868,7 +868,7 @@ await page.click('#modal-zapas .modal-footer .btn-secondary');
 // správa týmu nabízí jen hráčky ze soupisky jeho sezóny
 await page.selectOption('#season-select', '1');
 await page.waitForTimeout(200);
-await page.click('.nav-tab:nth-child(3)');
+await page.click('.nav-tab:nth-child(4)');                  // Týmy
 await page.waitForTimeout(300);
 await page.evaluate(() => openTymManage(5));
 await page.waitForTimeout(300);
@@ -1087,7 +1087,7 @@ radky = await prehled();
 pass &= ok('T28g bez turnaje zůstává Přehled krátký (#68)', radky.length <= 6);
 
 // ── #72: tabulka statistik se dá řadit oběma směry ─────────────────────────
-await page.click('.nav-tab:nth-child(6)');                 // Statistiky
+await page.click('.nav-tab:nth-child(7)');                 // Statistiky
 await page.waitForSelector('.stats-table');
 await page.evaluate(() => {
   ['stats-tym-sel', 'stats-soutez-sel', 'stats-zapas-sel', 'stats-hrac-sel', 'stats-set-sel']
@@ -1191,7 +1191,7 @@ pass &= ok('T29k seřadit jde i klávesou Enter (#72)',
   await page.evaluate(() => statsSort.sloupec === 'zapasy'));
 
 // ── #75: Live řadí sestavu podle vložení, ne podle abecedy ─────────────────
-await page.click('.nav-tab:nth-child(4)');                 // Live
+await page.click('.nav-tab:nth-child(5)');                 // Live
 await page.waitForSelector('.live-player-name');
 const vLive = () => page.$$eval('.live-table .live-player-name', els => els.map(e => e.textContent));
 
@@ -1364,7 +1364,7 @@ await page.setViewportSize({ width: 1100, height: 900 });
 await page.waitForTimeout(300);
 
 // ── #76 část 2: záložka Live V2 ────────────────────────────────────────────
-await page.click('.nav-tab:nth-child(5)');                 // Live V2
+await page.click('.nav-tab:nth-child(6)');                 // Live V2
 await page.waitForSelector('#live2-wrap .v2-hrac');
 
 const v2Jmena = () => page.$$eval('#live2-wrap .v2-jmeno', els => els.map(e => e.textContent));
@@ -1430,11 +1430,11 @@ pass &= ok('T32i zápis z V2 je hned vidět i ve staré mřížce (#76)',
   await cnt('#cnt-11-utok_plus') === predV2 + 1);
 
 // a obráceně
-await page.click('.nav-tab:nth-child(4)');
+await page.click('.nav-tab:nth-child(5)');
 await page.waitForTimeout(200);
 await page.click('#cnt-11-utok_plus');
 await page.waitForTimeout(400);
-await page.click('.nav-tab:nth-child(5)');
+await page.click('.nav-tab:nth-child(6)');
 await page.waitForTimeout(300);
 pass &= ok('T32j zápis ze staré mřížky je hned vidět ve V2 (#76)',
   await page.evaluate(() => {
@@ -1502,18 +1502,88 @@ pass &= ok('T32s ani na nízké obrazovce (#76)',
   vg.pridatUseknuto <= 0 && vg.listaMimo <= 0 && vg.chybyMimo <= 0);
 
 // navigace se šesti položkami se musí na telefon vejít
-pass &= ok('T32t šest záložek se na 390px vejde bez přetečení (#76)',
+const navMiry = () => page.evaluate(() => {
+  const nav = document.querySelector('.nav-tabs');
+  const tab = document.querySelector('.nav-tab').getBoundingClientRect();
+  return { pocet: document.querySelectorAll('.nav-tab').length,
+           prescah: Math.round(nav.scrollWidth - nav.clientWidth),
+           strankaPrescah: Math.round(document.documentElement.scrollWidth - document.documentElement.clientWidth),
+           sirkaZalozky: Math.round(tab.width) };
+});
+let nm = await navMiry();
+pass &= ok('T32t záložky se na 390px vejdou bez přetečení (#76, #70)',
+  nm.pocet === 7 && nm.prescah <= 0 && nm.strankaPrescah <= 0);
+
+// 360px je běžná šířka telefonu a sedmá záložka je přesně to, co ji přetáhne
+await page.setViewportSize({ width: 360, height: 780 });
+await page.waitForTimeout(300);
+nm = await navMiry();
+pass &= ok('T32u a vejdou se i na užší 360px telefon (#70)',
+  nm.prescah <= 0 && nm.strankaPrescah <= 0);
+pass &= ok('T32v záložka přitom zůstane rozumně velký cíl (#70)', nm.sirkaZalozky >= 40);
+
+// ── #70: Hráčky a Týmy jsou dvě záložky ────────────────────────────────────
+await page.setViewportSize({ width: 1100, height: 900 });
+await page.waitForTimeout(300);
+await page.selectOption('#season-select', '1');
+await page.waitForTimeout(300);
+
+await page.click('.nav-tab:nth-child(3)');                  // Hráčky
+await page.waitForSelector('#hraci-list .player-card');
+pass &= ok('T34a Hráčky ukazují soupisku, ne týmy (#70)',
+  await page.isVisible('#hraci-list') && !(await page.isVisible('#tymy-list')));
+pass &= ok('T34b hlavička nabízí jen přidání hráčky (#70)', await page.evaluate(() => {
+  const t = document.getElementById('tab-hracky').textContent;
+  return t.includes('Přidat hráčku') && !t.includes('Nový tým');
+}));
+
+await page.click('.nav-tab:nth-child(4)');                  // Týmy
+await page.waitForSelector('#tymy-list');
+pass &= ok('T34c Týmy ukazují týmy, ne soupisku (#70)',
+  await page.isVisible('#tymy-list') && !(await page.isVisible('#hraci-list')));
+pass &= ok('T34d hlavička nabízí jen nový tým (#70)', await page.evaluate(() => {
+  const t = document.getElementById('tab-tymy').textContent;
+  return t.includes('Nový tým') && !t.includes('Přidat hráčku');
+}));
+pass &= ok('T34e záložka Týmy připomene, že tým patří do sezóny (#70)',
+  /sezón/i.test(await page.textContent('#tymy-season-note')));
+
+// obě se musí překreslit i když je zrovna vidět ta druhá
+await page.click('.nav-tab:nth-child(3)');
+await page.waitForTimeout(200);
+const predZalozenim = await page.evaluate(() => state.tymy.length);
+await page.evaluate(() => { state.tymy.push({ id: 777, nazev: 'Přidaný jinde', sezona_id: 1 }); renderTym(); renderTymy(); });
+await page.waitForTimeout(200);
+await page.click('.nav-tab:nth-child(4)');
+await page.waitForTimeout(200);
+pass &= ok('T34f změna týmů se projeví, i když jsem byl zrovna na Hráčkách (#70)',
+  (await page.textContent('#tymy-list')).includes('Přidaný jinde'));
+await page.evaluate(() => { state.tymy = state.tymy.filter(t => t.id !== 777); renderTymy(); });
+pass &= ok('T34g úklid fixture proběhl (#70)',
+  await page.evaluate(() => state.tymy.length) === predZalozenim);
+
+// stará jednotná záložka už neexistuje
+pass &= ok('T34h po rozdělení nezůstala stará společná záložka (#70)',
+  await page.evaluate(() => !document.getElementById('tab-tym')));
+
+// přepnutí sezóny musí srovnat obě
+await page.selectOption('#season-select', '2');
+await page.waitForTimeout(300);
+pass &= ok('T34i přepnutí sezóny překreslí týmy i soupisku (#70)',
   await page.evaluate(() => {
-    const nav = document.querySelector('.nav-tabs');
-    return document.querySelectorAll('.nav-tab').length === 6 &&
-           nav.scrollWidth - nav.clientWidth <= 0;
+    const vidim = [...document.querySelectorAll('#tymy-list .tym-card-title')].map(e => e.textContent);
+    const ocekavam = tymySezony(2).map(t => t.nazev);
+    return vidim.length === ocekavam.length && vidim.every(v => ocekavam.includes(v));
   }));
+await page.selectOption('#season-select', '1');
+await page.waitForTimeout(300);
+
 
 await page.setViewportSize({ width: 1100, height: 900 });
 await page.waitForTimeout(300);
 
 // ── #74: chyby soupeře ─────────────────────────────────────────────────────
-await page.click('.nav-tab:nth-child(5)');                 // Live V2
+await page.click('.nav-tab:nth-child(6)');                 // Live V2
 await page.waitForSelector('#v2-chyby-cislo');
 await page.click('#live2-wrap .set-prepinac button:nth-of-type(1)');
 await page.waitForTimeout(300);
@@ -1587,7 +1657,7 @@ await page.click('#live2-wrap .v2-tym-prepinac');
 await page.waitForTimeout(300);
 
 // číslo, které jde jen zapsat, by bylo k ničemu — musí být vidět i ve Statistikách
-await page.click('.nav-tab:nth-child(6)');
+await page.click('.nav-tab:nth-child(7)');
 await page.waitForSelector('.stats-chyby');
 pass &= ok('T33m chyby soupeře jsou vidět i ve Statistikách (#74)',
   /Body z chyb soupeře/.test(await page.textContent('.stats-chyby')));
@@ -1617,7 +1687,7 @@ await page.waitForTimeout(300);
 pass &= ok('T33p dialog mazání zápasu přizná i chyby soupeře (#74)',
   /chyb soupeře/.test(textMazani));
 
-await page.click('.nav-tab:nth-child(4)');
+await page.click('.nav-tab:nth-child(5)');
 await page.waitForTimeout(200);
 
 // ── přihlášení přežije reload ──────────────────────────────────────────────

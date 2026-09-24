@@ -21,7 +21,8 @@
   <div class="nav-tabs">
     <button class="nav-tab active" onclick="showTab('prehled')">📊 <span class="nav-label">Přehled</span></button>
     <button class="nav-tab" onclick="showTab('zapasy')">🏆 <span class="nav-label">Zápasy</span></button>
-    <button class="nav-tab" onclick="showTab('tym')">👥 <span class="nav-label">Tým</span></button>
+    <button class="nav-tab" onclick="showTab('hracky')">👤 <span class="nav-label">Hráčky</span></button>
+    <button class="nav-tab" onclick="showTab('tymy')">👥 <span class="nav-label">Týmy</span></button>
     <button class="nav-tab" onclick="showTab('live')">⚡ <span class="nav-label">Live</span></button>
     <button class="nav-tab" onclick="showTab('live2')">👆 <span class="nav-label">Live V2</span></button>
     <button class="nav-tab" onclick="showTab('statistiky')">📈 <span class="nav-label">Statistiky</span></button>
@@ -54,14 +55,20 @@
 </div>
 
 <!-- ═══════════════════════════════════ TÝM ═══════════════════════════════════ -->
-<div class="tab-content" id="tab-tym">
-  <div style="display:flex;justify-content:flex-end;margin-bottom:16px;gap:8px;flex-wrap:wrap">
+<div class="tab-content" id="tab-hracky">
+  <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
     <button class="btn btn-secondary" onclick="openAddHracModal()">+ Přidat hráčku</button>
-    <button class="btn btn-secondary" onclick="openModal('modal-tym')">+ Nový tým</button>
   </div>
   <div id="tym-season-note" style="margin-bottom:12px;font-size:13px;color:var(--muted)"></div>
   <div id="hraci-list"><div class="empty"><span class="empty-icon">👥</span><div class="empty-text">Žádné hráčky</div></div></div>
-  <div class="section-title" style="margin-top:24px">Týmy</div>
+</div>
+
+<!-- ═══════════════════════════════════ TÝMY ═══════════════════════════════════ -->
+<div class="tab-content" id="tab-tymy">
+  <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
+    <button class="btn btn-secondary" onclick="openModal('modal-tym')">+ Nový tým</button>
+  </div>
+  <div id="tymy-season-note" style="margin-bottom:12px;font-size:13px;color:var(--muted)"></div>
   <div id="tymy-list"><div class="empty" style="padding:24px"><span class="empty-icon" style="font-size:28px">🏐</span><div class="empty-text" style="font-size:14px">Žádné týmy</div></div></div>
 </div>
 
