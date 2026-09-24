@@ -1670,6 +1670,126 @@ pass &= ok('T35i výhra a prohra se od sebe poznají i jinak než barvou (#71)',
   }));
 await page.click('#modal-profil .btn-secondary');
 
+// ── #71 část 2: detail týmu ────────────────────────────────────────────────
+await page.click('.nav-tab:nth-child(4)');                  // Týmy
+await page.waitForSelector('#tymy-list .tym-card');
+pass &= ok('T36a karta týmu vede na detail, nejen na správu členství (#71)',
+  (await page.textContent('#tymy-list')).includes('Detail'));
+
+// Ve fixtures nemá žádný tým přiřazený zápas, takže by všechna tvrzení
+// o bilanci i statistikách prošla naprázdno. Přiřadíme je tady.
+await page.evaluate(() => {
+  state.zapasy.filter(z => z.sezona_id === currentSeasonId() &&
+      state.statistiky.some(s => s.zapas_id === z.id))
+    .forEach(z => { z.tym_id = 5; });
+});
+pass &= ok('T36b0 fixture má tým se zápasy i akcemi, jinak by se měřilo prázdno (#71)',
+  await page.evaluate(() => {
+    const p = detailTymu(5);
+    return p.zapasy.length > 0 && p.rows.length > 0 && p.tot.total !== 0;
+  }));
+
+await page.evaluate(() => otevriTymDetail(5));
+await page.waitForSelector('#modal-tym-detail:not(.hidden)');
+pass &= ok('T36b hlavička detailu nese tým i sezónu (#71)', await page.evaluate(() => {
+  const t = state.tymy.find(t => t.id === 5);
+  const sez = state.sezony.find(s => s.id === t.sezona_id);
+  const h = document.getElementById('tym-detail-title').textContent;
+  return h.includes(t.nazev) && h.includes(sez.nazev);
+}));
+
+pass &= ok('T36c bilance sedí na zápasy toho týmu (#71)', await page.evaluate(() => {
+  const p = detailTymu(5);
+  const zapasyTymu = state.zapasy.filter(z => z.tym_id === 5);
+  const done = zapasyTymu.filter(z => z.stav === 'dokonceny' && z.sety_my != null);
+  return p.zapasy.length === zapasyTymu.length &&
+         p.vyhry === done.filter(z => z.sety_my > z.sety_oni).length &&
+         p.prohry === done.filter(z => z.sety_my < z.sety_oni).length;
+}));
+
+pass &= ok('T36d statistiky se počítají přes spocitejStatistiky, ne zvlášť (#71)',
+  await page.evaluate(() => {
+    const p = detailTymu(5);
+    const ids = state.zapasy.filter(z => z.tym_id === 5).map(z => z.id);
+    const d = spocitejStatistiky({ zapasIds: ids });
+    return d.stav === 'ok' && p.tot.total === d.tot.total && p.tot.sp === d.tot.sp;
+  }));
+
+pass &= ok('T36e součet přes sety, ne jen první set (#71)', await page.evaluate(() => {
+  const ids = state.zapasy.filter(z => z.tym_id === 5).map(z => z.id);
+  const rucne = state.statistiky.filter(s => ids.includes(s.zapas_id))
+    .reduce((n, s) => n + (s.utok_plus || 0), 0);
+  return detailTymu(5).tot.up === rucne;
+}));
+
+pass &= ok('T36f do součtu patří i hráčka, co už v týmu není (#71)', await page.evaluate(() => {
+  const ids = state.zapasy.filter(z => z.tym_id === 5).map(z => z.id);
+  const vTymu = state.hraciTymy.filter(ht => ht.tym_id === 5).map(ht => ht.hrac_id);
+  const hrajiciMimoTym = [...new Set(state.statistiky
+    .filter(s => ids.includes(s.zapas_id)).map(s => s.hrac_id))]
+    .filter(id => !vTymu.includes(id));
+  const vRows = detailTymu(5).rows.map(r => r.h.id);
+  // buď takové hráčky nejsou, nebo musí být v součtu — ne tiše vypadnout
+  return hrajiciMimoTym.every(id => vRows.includes(id));
+}));
+
+pass &= ok('T36g detail ukazuje odehrané zápasy s proklikem do Live (#71)',
+  await page.evaluate(() => {
+    const zapasu = state.zapasy.filter(z => z.tym_id === 5).length;
+    const v = document.querySelectorAll('#tym-detail-obsah .match-item');
+    return v.length === zapasu && [...v].every(e => e.classList.contains('match-klik'));
+  }));
+
+pass &= ok('T36h chyby soupeře jsou v týmovém souhrnu taky (#71)',
+  /Chyb soupeře/.test(await page.textContent('#tym-detail-obsah')));
+
+pass &= ok('T36i procenta mají jednotku, ne holé číslo (#71)', await page.evaluate(() => {
+  const popisky = [...document.querySelectorAll('#tym-detail-obsah .profil-kostka')]
+    .filter(k => /% výb\./.test(k.querySelector('.profil-kostka-lbl').textContent));
+  return popisky.length === 2 && popisky.every(k => {
+    const v = k.querySelector('.profil-kostka-val').textContent.trim();
+    return v === '—' || v.endsWith('%');
+  });
+}));
+
+// nejlepší hráčky vedou do profilu
+const topRadky = await page.$$('#tym-detail-obsah .tym-top-radek');
+pass &= ok('T36j detail ukazuje nejlepší hráčky týmu (#71)', topRadky.length > 0);
+pass &= ok('T36k jsou seřazené od nejlepší (#71)', await page.evaluate(() => {
+  const c = [...document.querySelectorAll('#tym-detail-obsah .tym-top-total')]
+    .map(e => parseInt(e.textContent));
+  return c.length > 1 && c.every((v, i) => i === 0 || c[i - 1] >= v);
+}));
+// pořadí nesmí záviset na tom, co je zrovna naklikané v tabulce Statistik (#72)
+pass &= ok('T36k2 pořadí nedědí řazení z tabulky Statistik (#71)',
+  await page.evaluate(() => {
+    const puvodni = { ...statsSort };
+    statsSort.sloupec = 'cm'; statsSort.smer = 'asc';
+    const a = detailTymu(5).rows.map(r => r.h.id);
+    statsSort.sloupec = 'zapasy'; statsSort.smer = 'desc';
+    const b = detailTymu(5).rows.map(r => r.h.id);
+    Object.assign(statsSort, puvodni);
+    return a.join('|') === b.join('|');
+  }));
+await topRadky[0].click();
+await page.waitForSelector('#modal-profil:not(.hidden)');
+pass &= ok('T36l proklik na hráčku otevře její profil za celou sezónu (#71)',
+  /celá sezóna/i.test(await page.textContent('#profil-rozsah')) &&
+  await page.isHidden('#modal-tym-detail'));
+await page.click('#modal-profil .btn-secondary');
+
+// tým bez zápasů nesmí spadnout ani lhát
+await page.evaluate(() => { state.zapasy.forEach(z => { if (z.tym_id === 5) delete z.tym_id; }); });
+pass &= ok('T36m tým bez zápasů detail zvládne a řekne to (#71)', await page.evaluate(() => {
+  state.tymy.push({ id: 888, nazev: 'Prázdný tým', sezona_id: currentSeasonId() });
+  otevriTymDetail(888);
+  const t = document.getElementById('tym-detail-obsah').textContent;
+  const ok = /žádný zápas/i.test(t) && detailTymu(888).zapasy.length === 0;
+  closeModal('modal-tym-detail');
+  state.tymy = state.tymy.filter(t => t.id !== 888);
+  return ok;
+}));
+
 
 await page.setViewportSize({ width: 1100, height: 900 });
 await page.waitForTimeout(300);

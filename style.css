@@ -338,3 +338,17 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
   background:var(--surface2);color:var(--muted);margin-left:4px}
 .profil-vysl.win{color:var(--green)}
 .profil-vysl.lose{color:var(--red)}
+
+/* nejlepší hráčky v detailu týmu */
+.tym-top{display:flex;flex-direction:column;border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.tym-top-radek{display:flex;align-items:center;gap:10px;padding:10px 12px;background:none;border:none;
+  border-bottom:1px solid var(--border);cursor:pointer;color:var(--text);font-family:inherit;
+  text-align:left;font-size:13px;width:100%}
+.tym-top-radek:last-child{border-bottom:none}
+.tym-top-radek:hover{background:var(--surface2)}
+.tym-top-radek:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.tym-top-poradi{color:var(--muted);font-family:'Oswald',sans-serif;font-weight:700;min-width:20px}
+.tym-top-jmeno{flex:1;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tym-top-zapasy{color:var(--muted);font-size:12px;flex-shrink:0}
+.tym-top-total{font-family:'Oswald',sans-serif;font-size:16px;font-weight:700;color:var(--accent);
+  min-width:32px;text-align:right}
