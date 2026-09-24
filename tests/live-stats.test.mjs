@@ -142,7 +142,7 @@ const ok = (n, c) => (console.log(`${c ? '  OK  ' : ' FAIL '} ${n}`), !!c);
 let pass = true;
 const cnt = sel => page.textContent(sel).then(t => parseInt(t.trim()));
 const JMENO = JMENO_S_HTML, TYM = TYM_S_XSS;
-const klikSet = n => page.click(`.set-prepinac button:nth-of-type(${n})`);
+const klikSet = n => page.click(`#live-table-wrap .set-prepinac button:nth-of-type(${n})`);
 const longPress = async sel => { await page.hover(sel); await page.mouse.down(); await page.waitForTimeout(700); await page.mouse.up(); };
 
 // ── #24: bez přihlášení se nic nezapíše ────────────────────────────────────
@@ -324,7 +324,7 @@ pass &= ok('T13d název týmu se v kartě vypíše doslova (#35)', tymTitul === 
 const clen = await page.textContent('.tym-member');
 pass &= ok('T13e jméno člena týmu se vypíše doslova (#35)', clen === JMENO);
 
-await page.click('.nav-tab:nth-child(5)');
+await page.click('.nav-tab:nth-child(6)');
 await page.waitForTimeout(200);
 const volby = await page.$$eval('#stats-hrac-sel option', els => els.map(e => e.textContent));
 pass &= ok('T13f jméno ve filtru statistik se vypíše doslova (#35)', volby.includes(JMENO));
@@ -463,7 +463,7 @@ await page.click('.nav-tab:nth-child(4)');               // Live drží zápas 1
 await page.waitForTimeout(200);
 await page.evaluate(() => refreshLiveStats());           // dotáhnout nová data
 await page.waitForTimeout(300);
-await page.click('.nav-tab:nth-child(5)');
+await page.click('.nav-tab:nth-child(6)');
 await page.waitForTimeout(300);
 
 pass &= ok('T14a tlačítko exportu je ve Statistikách (#34)', await page.isVisible('#btn-export-csv'));
@@ -506,9 +506,9 @@ await page.click('.nav-tab:nth-child(4)');
 await page.waitForSelector('#cnt-10-servis_plus');
 
 pass &= ok('T20a Live má přepínač setů (#32)',
-  (await page.$$eval('.set-btn', els => els.length)) === 5);
+  (await page.$$eval('#live-table-wrap .set-btn', els => els.length)) === 5);
 pass &= ok('T20b ve výchozím stavu je aktivní první set (#32)',
-  (await page.textContent('.set-btn.aktivni')).trim() === '1');
+  (await page.textContent('#live-table-wrap .set-btn.aktivni')).trim() === '1');
 
 // zápis do 1. setu
 rpcCalls = [];
@@ -549,7 +549,7 @@ pass &= ok('T20i přepnutí setu nejdřív uloží rozepsané do starého setu (
   rpcCalls.length === 1 && rpcCalls[0][0].set_cislo === 1 && rpcCalls[0][0].pole === 'blok_plus');
 
 // statistiky sčítají přes sety a počítají zápasy, ne řádky
-await page.click('.nav-tab:nth-child(5)');
+await page.click('.nav-tab:nth-child(6)');
 await page.waitForTimeout(300);
 const radekAlfa = await page.$$eval('.stats-table tbody tr', trs => {
   const tr = trs.find(t => t.textContent.includes('Alfa'));
@@ -650,7 +650,7 @@ FIX.vb_zapas_hraci.push({ zapas_id: 101, hrac_id: 13 });
 Object.assign(radek(101, 13), { utok_plus: 2, utok_minus: 6, utok_neutral: 2, prijem_plus: 1, prijem_minus: 3, servis_plus: 1 });
 await page.reload();
 await nactenoOK();
-await page.click('.nav-tab:nth-child(5)');
+await page.click('.nav-tab:nth-child(6)');
 await page.waitForTimeout(300);
 
 await page.click(`.stats-table tbody tr:has-text("Delta") a`);
@@ -1076,7 +1076,7 @@ radky = await prehled();
 pass &= ok('T28g bez turnaje zůstává Přehled krátký (#68)', radky.length <= 6);
 
 // ── #72: tabulka statistik se dá řadit oběma směry ─────────────────────────
-await page.click('.nav-tab:nth-child(5)');                 // Statistiky
+await page.click('.nav-tab:nth-child(6)');                 // Statistiky
 await page.waitForSelector('.stats-table');
 await page.evaluate(() => {
   ['stats-tym-sel', 'stats-soutez-sel', 'stats-zapas-sel', 'stats-hrac-sel', 'stats-set-sel']
@@ -1262,7 +1262,7 @@ await page.evaluate(() => {
 
 // ── #76: lišta „vzít zpět" ─────────────────────────────────────────────────
 await page.waitForSelector('#btn-undo');
-const undoText = () => page.textContent('.undo-text');
+const undoText = () => page.textContent('#live-table-wrap .undo-text');
 const undoVypnuto = () => page.evaluate(() => document.getElementById('btn-undo').disabled);
 // předchozí sada nechala zapisovaný set jinde — blok se ukotví na první,
 // ať se tvrzení o setech nedrží na tom, co po sobě nechal někdo jiný
@@ -1351,6 +1351,153 @@ g = await undoGeometrie();
 pass &= ok('T31m ani na nízké obrazovce (#76)', g.useknuto <= 0 && g.listaMimo <= 0);
 await page.setViewportSize({ width: 1100, height: 900 });
 await page.waitForTimeout(300);
+
+// ── #76 část 2: záložka Live V2 ────────────────────────────────────────────
+await page.click('.nav-tab:nth-child(5)');                 // Live V2
+await page.waitForSelector('#live2-wrap .v2-hrac');
+
+const v2Jmena = () => page.$$eval('#live2-wrap .v2-jmeno', els => els.map(e => e.textContent));
+const gridJmena = () => page.$$eval('#live-table-wrap .live-player-name', els => els.map(e => e.textContent));
+
+pass &= ok('T32a V2 ukazuje stejnou sestavu a ve stejném pořadí jako mřížka (#76)',
+  (await v2Jmena()).join('|') === (await gridJmena()).join('|'));
+pass &= ok('T32b obě záložky drží týž zápas (#76)', await page.evaluate(() =>
+  document.getElementById('live-zapas-select').value ===
+  document.getElementById('live2-zapas-select').value));
+
+// hráčka je cíl přes celou šířku, ne 24px sloupec — to je celý smysl V2
+await page.setViewportSize({ width: 390, height: 844 });
+await page.waitForTimeout(300);
+const rozmery = await page.evaluate(() => {
+  const h = document.querySelector('#live2-wrap .v2-hrac').getBoundingClientRect();
+  return { sirka: Math.round(h.width), vyska: Math.round(h.height) };
+});
+pass &= ok('T32c řádek hráčky je přes celou šířku a aspoň 44px vysoký (#76)',
+  rozmery.sirka >= 300 && rozmery.vyska >= 44);
+
+// dvě klepnutí: hráčka → dlaždice
+await page.click('#live2-wrap .v2-hrac');
+await page.waitForSelector('#modal-v2-akce:not(.hidden)');
+pass &= ok('T32d panel akcí pojmenuje hráčku i zapisovaný set (#76)',
+  /Beta/.test(await page.textContent('#v2-akce-title')) &&
+  /set/.test(await page.textContent('#v2-akce-title')));
+const dlazdice = await page.evaluate(() => {
+  const d = document.querySelector('#modal-v2-akce .v2-dlazdice').getBoundingClientRect();
+  return { pocet: document.querySelectorAll('#modal-v2-akce .v2-dlazdice').length,
+           sirka: Math.round(d.width), vyska: Math.round(d.height) };
+});
+pass &= ok('T32e dlaždice pokrývají všechny akce mřížky (#76)', dlazdice.pocet === 11);
+pass &= ok('T32f dlaždice je násobně větší cíl než buňka v mřížce (#76)',
+  dlazdice.sirka >= 44 && dlazdice.vyska >= 44);
+// na nízké obrazovce se panel musí dát doscrollovat, ne uříznout
+await page.setViewportSize({ width: 390, height: 600 });
+await page.waitForTimeout(300);
+pass &= ok('T32f2 panel akcí je na nízké obrazovce celý dosažitelný (#76)',
+  await page.evaluate(() => {
+    const m = document.querySelector('#modal-v2-akce .modal');
+    const posledni = [...document.querySelectorAll('#modal-v2-akce .v2-dlazdice')].at(-1);
+    const r = m.getBoundingClientRect();
+    // buď se vejde, nebo modal scrolluje — uříznout se nesmí
+    return r.bottom <= document.documentElement.clientHeight + 1 &&
+           (m.scrollHeight <= m.clientHeight ||
+            posledni.offsetTop + posledni.offsetHeight <= m.scrollHeight);
+  }));
+await page.setViewportSize({ width: 390, height: 844 });
+await page.waitForTimeout(300);
+
+// zápis z V2 jde stejnou cestou a je vidět i ve staré mřížce
+rpcCalls = [];
+const predV2 = await page.evaluate(() => getStatVal(100, 11, 'utok_plus', state.liveSet));
+await page.click('#modal-v2-akce .v2-dlazdice[onclick*="utok_plus"]');
+await page.waitForTimeout(600);
+pass &= ok('T32g klepnutí na dlaždici zapíše a panel zavře (#76)',
+  await page.isHidden('#modal-v2-akce') &&
+  await page.evaluate(() => getStatVal(100, 11, 'utok_plus', state.liveSet)) === predV2 + 1);
+pass &= ok('T32h zápis jde stejným RPC jako ze staré mřížky (#76)',
+  rpcCalls.length === 1 && rpcCalls[0].some(z => z.pole === 'utok_plus' && z.delta === 1));
+pass &= ok('T32i zápis z V2 je hned vidět i ve staré mřížce (#76)',
+  await cnt('#cnt-11-utok_plus') === predV2 + 1);
+
+// a obráceně
+await page.click('.nav-tab:nth-child(4)');
+await page.waitForTimeout(200);
+await page.click('#cnt-11-utok_plus');
+await page.waitForTimeout(400);
+await page.click('.nav-tab:nth-child(5)');
+await page.waitForTimeout(300);
+pass &= ok('T32j zápis ze staré mřížky je hned vidět ve V2 (#76)',
+  await page.evaluate(() => {
+    const el = document.getElementById('v2plus-11');
+    const ocekavano = V2_VYBORNE.reduce((n, f) => n + getStatVal(100, 11, f, state.liveSet), 0);
+    return el.textContent === '+' + ocekavano;
+  }));
+
+// lišta zpět funguje i tady a je to jiný prvek než ta v mřížce
+pass &= ok('T32k V2 má vlastní lištu zpět, ne duplicitní id (#76)',
+  await page.evaluate(() => !!document.getElementById('btn-undo-v2') &&
+    document.querySelectorAll('#btn-undo').length === 1));
+const predZpet = await page.evaluate(() => getStatVal(100, 11, 'utok_plus', state.liveSet));
+await page.click('#btn-undo-v2');
+await page.waitForTimeout(400);
+pass &= ok('T32l zpět ve V2 opravdu odečte (#76)',
+  await page.evaluate(() => getStatVal(100, 11, 'utok_plus', state.liveSet)) === predZpet - 1);
+
+// přepínač setů a týmový souhrn má V2 taky
+pass &= ok('T32m V2 má vlastní přepínač setů (#76)',
+  (await page.$$eval('#live2-wrap .set-btn', els => els.length)) === 5);
+await page.click('#live2-wrap .set-prepinac button:nth-of-type(3)');
+await page.waitForTimeout(300);
+pass &= ok('T32n přepnutí setu ve V2 přepne i starou mřížku (#76)',
+  await page.evaluate(() => state.liveSet) === 3 &&
+  (await page.textContent('#live-table-wrap .set-btn.aktivni')).trim() === '3');
+await page.click('#live2-wrap .set-prepinac button:nth-of-type(1)');
+await page.waitForTimeout(300);
+pass &= ok('T32o V2 ukazuje týmový souhrn (#76)',
+  (await page.$$eval('#live2-wrap .v2-chip', els => els.length)) === 5);
+// tři holá čísla vedle sebe neřeknou, které je které — barva to sama neunese
+pass &= ok('T32o2 každé číslo v souhrnu si nese svůj symbol, ne jen barvu (#76)',
+  await page.evaluate(() => {
+    const cisla = [...document.querySelectorAll('#live2-wrap .v2-chip-num')];
+    return cisla.length === 11 && cisla.every(el => {
+      const sym = el.querySelector('.v2-chip-sym');
+      return sym && ['+', '/', '−'].includes(sym.textContent.trim());
+    });
+  }));
+
+// geometrie: nic se nesmí useknout, jako u #59
+const v2Geometrie = () => page.evaluate(() => {
+  const wrap = document.getElementById('live2-wrap');
+  const seznam = wrap.querySelector('.v2-seznam');
+  const bar = wrap.querySelector('.undo-bar');
+  const pridat = wrap.querySelector('.v2-pridat');
+  return {
+    pridatUseknuto: Math.round(pridat.getBoundingClientRect().bottom - seznam.getBoundingClientRect().bottom),
+    listaMimo: Math.round(bar.getBoundingClientRect().bottom - wrap.getBoundingClientRect().bottom),
+    prescahuje: Math.round(document.documentElement.scrollWidth - document.documentElement.clientWidth),
+  };
+});
+let vg = await v2Geometrie();
+pass &= ok('T32p „Přidat hráčku" se ve V2 nesekne o lištu (#76)', vg.pridatUseknuto <= 0);
+pass &= ok('T32q lišta se vejde do obalu V2 (#76)', vg.listaMimo <= 0);
+pass &= ok('T32r V2 nepřetéká stránku do šířky (#76)', vg.prescahuje === 0);
+
+await page.setViewportSize({ width: 390, height: 600 });
+await page.waitForTimeout(300);
+vg = await v2Geometrie();
+pass &= ok('T32s ani na nízké obrazovce (#76)', vg.pridatUseknuto <= 0 && vg.listaMimo <= 0);
+
+// navigace se šesti položkami se musí na telefon vejít
+pass &= ok('T32t šest záložek se na 390px vejde bez přetečení (#76)',
+  await page.evaluate(() => {
+    const nav = document.querySelector('.nav-tabs');
+    return document.querySelectorAll('.nav-tab').length === 6 &&
+           nav.scrollWidth - nav.clientWidth <= 0;
+  }));
+
+await page.setViewportSize({ width: 1100, height: 900 });
+await page.waitForTimeout(300);
+await page.click('.nav-tab:nth-child(4)');
+await page.waitForTimeout(200);
 
 // ── přihlášení přežije reload ──────────────────────────────────────────────
 await page.reload();

@@ -23,6 +23,7 @@
     <button class="nav-tab" onclick="showTab('zapasy')">🏆 <span class="nav-label">Zápasy</span></button>
     <button class="nav-tab" onclick="showTab('tym')">👥 <span class="nav-label">Tým</span></button>
     <button class="nav-tab" onclick="showTab('live')">⚡ <span class="nav-label">Live</span></button>
+    <button class="nav-tab" onclick="showTab('live2')">👆 <span class="nav-label">Live V2</span></button>
     <button class="nav-tab" onclick="showTab('statistiky')">📈 <span class="nav-label">Statistiky</span></button>
   </div>
 </nav>
@@ -67,13 +68,27 @@
 <!-- ═══════════════════════════════════ LIVE ═══════════════════════════════════ -->
 <div class="tab-content" id="tab-live">
   <div class="live-header">
-    <select class="live-select" id="live-zapas-select" onchange="onLiveZapasChange()">
+    <select class="live-select live-zapas-select" id="live-zapas-select" onchange="onLiveZapasChange(this)">
       <option value="">— vyberte zápas —</option>
     </select>
-    <button class="btn btn-sm btn-primary" id="btn-start-zapas" style="display:none" onclick="startZapas()">▶ Zahájit</button>
-    <button class="btn btn-sm btn-green" id="btn-end-zapas" style="display:none" onclick="openFinishModal()">✓ Ukončit</button>
+    <button class="btn btn-sm btn-primary js-btn-start" id="btn-start-zapas" style="display:none" onclick="startZapas()">▶ Zahájit</button>
+    <button class="btn btn-sm btn-green js-btn-end" id="btn-end-zapas" style="display:none" onclick="openFinishModal()">✓ Ukončit</button>
   </div>
   <div id="live-table-wrap">
+    <div class="empty"><span class="empty-icon">⚡</span><div class="empty-text">Vyberte sezónu a zápas nahoře</div></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════ LIVE V2 ═══════════════════════════════════ -->
+<div class="tab-content" id="tab-live2">
+  <div class="live-header">
+    <select class="live-select live-zapas-select" id="live2-zapas-select" onchange="onLiveZapasChange(this)">
+      <option value="">— vyberte zápas —</option>
+    </select>
+    <button class="btn btn-sm btn-primary js-btn-start" style="display:none" onclick="startZapas()">▶ Zahájit</button>
+    <button class="btn btn-sm btn-green js-btn-end" style="display:none" onclick="openFinishModal()">✓ Ukončit</button>
+  </div>
+  <div id="live2-wrap">
     <div class="empty"><span class="empty-icon">⚡</span><div class="empty-text">Vyberte sezónu a zápas nahoře</div></div>
   </div>
 </div>
@@ -84,6 +99,20 @@
 </div>
 
 <!-- ═══════ MODALS ═══════ -->
+
+<!-- Live V2: panel akcí -->
+<div class="modal-overlay hidden" id="modal-v2-akce">
+  <div class="modal v2-akce-modal">
+    <div class="modal-title" id="v2-akce-title">Akce</div>
+    <input type="hidden" id="v2-akce-zapas" />
+    <input type="hidden" id="v2-akce-hrac" />
+    <div id="v2-akce-obsah"></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('modal-v2-akce')">Zavřít</button>
+      <button class="btn btn-red" onclick="v2OdeberZeSestavy()">Odebrat ze sestavy</button>
+    </div>
+  </div>
+</div>
 
 <!-- Výběr hráčky do sestavy -->
 <div class="modal-overlay hidden" id="modal-hrac-picker">
