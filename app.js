@@ -473,6 +473,7 @@ function renderLiveSelect(){
   }
   if(sel.value){
     const id=parseInt(sel.value);
+    if(state.liveZapasId!==id)undoStack.length=0;   // zásobník patří k jednomu zápasu
     state.liveZapasId=id;
     state.liveSet=nactiSet(id);
     const z=state.zapasy.find(z=>z.id===id);
@@ -500,6 +501,7 @@ function onLiveZapasChange(){
     return;
   }
   const id=parseInt(v);
+  if(state.liveZapasId!==id)undoStack.length=0;
   state.liveZapasId=id;
   state.liveSet=nactiSet(id);
   const z=state.zapasy.find(z=>z.id===id);
@@ -611,7 +613,9 @@ function renderLiveTable(zapasId){
       }).join('');
     }).join('')}
   </tr>`:'';
-  el.innerHTML=prepinac+`<div class="live-table-scroll"><table class="live-table"><thead>${thead}</thead><tbody>${tymRow}${rows}${addRow}</tbody></table></div>`;
+  el.innerHTML=prepinac
+    +`<div class="live-table-scroll"><table class="live-table"><thead>${thead}</thead><tbody>${tymRow}${rows}${addRow}</tbody></table></div>`
+    +(hraci.length?undoBarHtml():'');
   if(hraci.length)napovedaZpet();
 }
 
@@ -795,17 +799,20 @@ function statSoucet(zapasId,hracId,field){
     .reduce((a,s)=>a+(s[field]||0),0);
 }
 
-function bump(hracId,zapasId,field,delta=1){
+function bump(hracId,zapasId,field,delta=1,opts={}){
   // bez tohohle by počítadlo naskočilo a teprve pak přišla chyba ze serveru
-  if(!isLoggedIn()){toast('Na zapisování se přihlas (🔒 nahoře)','error');return;}
-  const set=state.liveSet;
+  if(!isLoggedIn()){toast('Na zapisování se přihlas (🔒 nahoře)','error');return false;}
+  // Set se předává, ne bere z state: „zpět" musí trefit set, ve kterém akce
+  // vznikla, i když se mezitím přepnulo jinam.
+  const set=opts.set||state.liveSet;
   ensureStat(zapasId,hracId,set);
   const key=statKey(zapasId,hracId,set);
   const puvodni=dirtyStats[key][field]||0;
   const nova=Math.max(0,puvodni+delta);
-  if(nova===puvodni)return;                    // odečítat pod nulu nedává smysl
+  if(nova===puvodni)return false;              // odečítat pod nulu nedává smysl
   dirtyStats[key][field]=nova;
-  const el=document.getElementById(`cnt-${hracId}-${field}`);
+  // počítadlo v mřížce patří zapisovanému setu, cizí set do něj nepatří
+  const el=set===state.liveSet?document.getElementById(`cnt-${hracId}-${field}`):null;
   if(el)el.textContent=nova;
   pendingDeltas[key]=pendingDeltas[key]||{};
   pendingDeltas[key][field]=(pendingDeltas[key][field]||0)+(nova-puvodni);
@@ -813,6 +820,85 @@ function bump(hracId,zapasId,field,delta=1){
   clearTimeout(debounceMap[key]);
   debounceMap[key]=setTimeout(()=>flushStat(key),STAT_FLUSH_MS);
   prekresliSouhrn();
+  zaznamenejProZpet(hracId,zapasId,field,set,nova-puvodni,opts);
+  return true;
+}
+
+/* ─── VZÍT ZPĚT ───
+   Oprava překliku znamenala najít tu samou buňku a 500 ms na ní držet —
+   uprostřed rozehry na 24px sloupci dost špatný nápad. Lišta to dělá jedním
+   klepnutím a nezávisle na tom, kde ta buňka je (#76). */
+const undoStack=[];
+const UNDO_MAX=20;
+
+function zaznamenejProZpet(hracId,zapasId,field,set,delta,opts){
+  if(opts.bezUndo)return;
+  if(delta>0){
+    undoStack.push({hracId,zapasId,field,set});
+    if(undoStack.length>UNDO_MAX)undoStack.shift();
+  }else{
+    // Ruční odečet (dlouhý stisk) je sám o sobě „zpět" — kdyby zůstal
+    // v zásobníku, lišta by nabízela vrátit něco, co už vráceno je.
+    for(let i=undoStack.length-1;i>=0;i--){
+      const u=undoStack[i];
+      if(u.hracId===hracId&&u.zapasId===zapasId&&u.field===field&&u.set===set){
+        undoStack.splice(i,1);break;
+      }
+    }
+  }
+  prekresliUndo();
+}
+
+function popisAkce(field){
+  const [klic,suf]=field.split('_');
+  const a=ACTIONS.find(x=>x.key===klic);
+  const v=VARIANTS.find(x=>x.suf===suf);
+  return `${a?a.label:klic} ${v?v.sym:suf}`;
+}
+
+function undoPopisek(){
+  const u=undoStack[undoStack.length-1];
+  if(!u)return null;
+  const h=state.hraci.find(h=>h.id===u.hracId);
+  const jmeno=h?h.jmeno:'hráčka';
+  // set se připomene jen když se zapisuje jinde, ať lišta zbytečně nehlučí
+  const jinySet=u.set!==state.liveSet?` · ${u.set}. set`:'';
+  return `${jmeno} · ${popisAkce(u.field)}${jinySet}`;
+}
+
+function vratZpet(){
+  const u=undoStack[undoStack.length-1];
+  if(!u)return;
+  const popis=undoPopisek();
+  if(bump(u.hracId,u.zapasId,u.field,-1,{set:u.set,bezUndo:true})){
+    undoStack.pop();
+    toast('Vzato zpět: '+popis,'success');
+    // odečet v cizím setu se v mřížce neprojeví, tu je potřeba překreslit
+    if(u.set!==state.liveSet)renderLiveTable(state.liveZapasId);
+  }
+  prekresliUndo();
+}
+
+function undoBarHtml(){
+  const popis=undoPopisek();
+  return `<div class="undo-bar">
+    <button class="undo-btn" id="btn-undo" ${popis?'':'disabled'} onclick="vratZpet()"
+      title="${popis?'Vezme zpět poslední zápis':'Zatím není co vracet'}">
+      <span class="undo-sipka">↩</span>
+      <span class="undo-text">${popis?'Zpět: '+esc(popis):'Zatím není co vracet'}</span>
+    </button>
+  </div>`;
+}
+
+// Lišta se mění s každým klikem; překreslovat kvůli ní celou tabulku by bylo
+// při zapisování znát, stejně jako u týmového souhrnu.
+function prekresliUndo(){
+  const btn=document.getElementById('btn-undo');
+  if(!btn)return;
+  const popis=undoPopisek();
+  btn.disabled=!popis;
+  btn.title=popis?'Vezme zpět poslední zápis':'Zatím není co vracet';
+  btn.querySelector('.undo-text').textContent=popis?'Zpět: '+popis:'Zatím není co vracet';
 }
 
 // Řádek se mění s každým klikem, ale překreslovat kvůli tomu celou tabulku
