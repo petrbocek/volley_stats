@@ -355,6 +355,14 @@ function matchHtml(z,withActions=false,klikDoLive=false){
   </div>`;
 }
 
+// V profilu byly jen čísla — z „14.05." se nepozná, jestli to vyhrály.
+function vysledekZnacka(z){
+  if(z.stav!=='dokonceny'||z.sety_my==null||z.sety_oni==null)return '';
+  if(z.sety_my>z.sety_oni)return `<span class="profil-vysl win" title="Výhra ${z.sety_my}:${z.sety_oni}">V ${z.sety_my}:${z.sety_oni}</span>`;
+  if(z.sety_my<z.sety_oni)return `<span class="profil-vysl lose" title="Prohra ${z.sety_my}:${z.sety_oni}">P ${z.sety_my}:${z.sety_oni}</span>`;
+  return `<span class="profil-vysl">${z.sety_my}:${z.sety_oni}</span>`;
+}
+
 function stavLabel(s){return s==='planovany'?'Plánovaný':s==='probihajici'?'Probíhá':'Dokončený';}
 function fmtDate(d){if(!d)return'—';const p=d.split('-');return`${p[2]}.${p[1]}.${p[0]}`;}
 
@@ -435,10 +443,14 @@ function playerCard(h,{tridy='',atributy='',ovladani=''}={}){
 
 function playerCardHtml(h,sid,inSeason){
   const toggle=sid?`<button class="btn btn-sm ${inSeason?'btn-red':'btn-green'}" style="flex-shrink:0" onclick="toggleHracSezona(${h.id},${sid},${inSeason})">${inSeason?'Odebrat':'+ Přidat'}</button>`:'';
+  // Profil byl doteď schovaný za jménem v tabulce Statistik — jediný odkaz
+  // v celé appce. Ze soupisky se počítá za celou sezónu, tady žádný filtr
+  // nikdo nenastavoval (#71).
+  const profil=`<button class="btn btn-sm btn-secondary" style="flex-shrink:0" title="Profil a statistiky za celou sezónu" onclick="otevriProfil(${h.id},true)">📊</button>`;
   return playerCard(h,{
     tridy:sid&&!inSeason?'inactive':'',
     atributy:`id="pc-${h.id}"`,
-    ovladani:`<button class="btn btn-sm btn-secondary" style="flex-shrink:0" onclick="editHrac(${h.id})">✏️</button>${toggle}`
+    ovladani:`${profil}<button class="btn btn-sm btn-secondary" style="flex-shrink:0" onclick="editHrac(${h.id})">✏️</button>${toggle}`
   });
 }
 
@@ -1591,9 +1603,40 @@ function renderStatistiky(){
 /* ─── PROFIL HRÁČKY ─── */
 
 // Zápas po zápase, ve stejném filtru jaký je zrovna ve Statistikách.
-function profilHracky(hracId){
+// Profil se počítá buď podle filtru ve Statistikách (proklik z tabulky — tam
+// to člověk čeká), nebo za celou sezónu (otevřený ze soupisky, kde žádný filtr
+// nenastavoval). Z čeho to je, se vždycky napíše do hlavičky (#71).
+function rozsahProfilu(celaSezona){
   const d=spocitejStatistiky();
   if(d.stav!=='ok')return null;
+  if(!celaSezona)return d;
+  const sid=d.sid;
+  const zapasIds=state.zapasy
+    .filter(z=>z.sezona_id===sid&&(z.stav==='dokonceny'||z.stav==='probihajici'))
+    .map(z=>z.id);
+  return {...d,zapasIds,celaSezona:true,selSet:0};
+}
+
+function popisRozsahu(d){
+  if(d.celaSezona){
+    const sez=state.sezony.find(s=>s.id===d.sid);
+    return `celá sezóna ${sez?sez.nazev:''}`.trim();
+  }
+  const casti=[];
+  const t=state.tymy.find(t=>t.id===d.selTym);if(t)casti.push(t.nazev);
+  const so=state.souteze.find(x=>x.id===d.selSoutez);if(so)casti.push(so.nazev);
+  const z=state.zapasy.find(x=>x.id===d.selZapas);if(z)casti.push(`${fmtDate(z.datum)} — ${z.soupet}`);
+  if(d.selSet)casti.push(`${d.selSet}. set`);
+  if(!casti.length){
+    const sez=state.sezony.find(s=>s.id===d.sid);
+    return `celá sezóna ${sez?sez.nazev:''}`.trim();
+  }
+  return casti.join(' · ');
+}
+
+function profilHracky(hracId,celaSezona=false){
+  const d=rozsahProfilu(celaSezona);
+  if(!d)return null;
   const h=state.hraci.find(h=>h.id===hracId);
   if(!h)return null;
   const zapasy=state.zapasy
@@ -1602,7 +1645,8 @@ function profilHracky(hracId){
     .sort((a,b)=>(a.datum||'').localeCompare(b.datum||'')||a.id-b.id);
   const radky=zapasy.map(z=>{
     // jeden řádek na set — v profilu je zápas jako celek, takže se sety sečtou
-    const castiSetu=state.statistiky.filter(s=>s.zapas_id===z.id&&s.hrac_id===hracId);
+    const castiSetu=state.statistiky.filter(s=>s.zapas_id===z.id&&s.hrac_id===hracId
+      &&(!d.selSet||(s.set_cislo||1)===d.selSet));
     const v=f=>castiSetu.reduce((a,s)=>a+(s[f]||0),0);
     return {z,
       sety:new Set(castiSetu.map(s=>s.set_cislo||1)).size,
@@ -1613,7 +1657,18 @@ function profilHracky(hracId){
       total:v('servis_plus')+v('utok_plus')+v('blok_plus')
             -v('servis_minus')-v('prijem_minus')-v('utok_minus')-v('chyba_minus')};
   });
-  return {h,radky,souhrn:d.rows.find(r=>r.h.id===hracId)};
+  // souhrn v d.rows je počítaný podle filtru ve Statistikách, takže za celou
+  // sezónu se musí sečíst znovu — jinak by kostky nesouhlasily s tabulkou pod nimi
+  const souhrn=d.celaSezona?souhrnZRadku(h,radky):d.rows.find(r=>r.h.id===hracId);
+  return {h,radky,souhrn,rozsah:popisRozsahu(d)};
+}
+
+function souhrnZRadku(h,radky){
+  if(!radky.length)return null;
+  const v=f=>radky.reduce((a,r)=>a+r[f],0);
+  return {h,zapasy:radky.length,
+    sp:v('sp'),sm:v('sm'),pp:v('pp'),pm:v('pm'),pn:v('pn'),
+    up:v('up'),um:v('um'),un:v('un'),bp:v('bp'),cm:v('cm'),total:v('total')};
 }
 
 // Malý spojnicový graf, jedna série. Tři veličiny jsou schválně tři grafy:
@@ -1661,12 +1716,15 @@ function sparkline(body,{barva,popisky,jednotka=''}){
   <div class="graf-osa-x">${kraje}</div>`;
 }
 
-function otevriProfil(hracId){
-  const p=profilHracky(hracId);
+function otevriProfil(hracId,celaSezona=false){
+  const p=profilHracky(hracId,celaSezona);
   if(!p){toast('Profil se nepodařilo sestavit','error');return;}
-  const {h,radky,souhrn}=p;
+  const {h,radky,souhrn,rozsah}=p;
   document.getElementById('profil-title').textContent=
     `${h.jmeno}${h.cislo?' · #'+h.cislo:''}${h.pozice?' · '+h.pozice:''}`;
+  // Bez tohohle se nedá poznat, jestli se dívám na sezónu nebo na jeden set —
+  // a čísla vypadají stejně věrohodně v obou případech.
+  document.getElementById('profil-rozsah').textContent='Počítáno z: '+rozsah;
 
   const kostka=(val,lbl,barva)=>`<div class="profil-kostka">
     <div class="profil-kostka-val"${barva?` style="color:${barva}"`:''}>${val}</div>
@@ -1696,12 +1754,14 @@ function otevriProfil(hracId){
       radky.map(r=>bod(r,pctCislo(r.pp,r.pm,r.pn))),'var(--green)','%')}
     ${graf('Celkem','body mínus chyby v zápase',
       radky.map(r=>bod(r,r.total)),'var(--accent)','')}`
-    :'<div class="profil-prazdno">V tomhle filtru nemá hráčka žádný zápas se záznamem.</div>';
+    :`<div class="profil-prazdno">${celaSezona
+        ?'V této sezóně nemá hráčka žádný zápas se záznamem.'
+        :'V tomhle filtru nemá hráčka žádný zápas se záznamem.'}</div>`;
 
   const tabulka=radky.length?`<div style="overflow-x:auto"><table class="profil-tabulka">
     <thead><tr><th>Zápas</th><th>Es</th><th>Příj&nbsp;%</th><th>Útok&nbsp;%</th><th>Blok</th><th>Chyb</th><th>Celk.</th></tr></thead>
     <tbody>${radky.map(r=>`<tr>
-      <td><div class="profil-zapas-datum">${fmtDate(r.z.datum).slice(0,6)}</div><div class="profil-zapas-soupet">${esc(r.z.soupet)}</div></td>
+      <td><div class="profil-zapas-datum">${fmtDate(r.z.datum).slice(0,6)} ${vysledekZnacka(r.z)}</div><div class="profil-zapas-soupet">${esc(r.z.soupet)}</div></td>
       <td>${r.sp}</td>
       <td>${pctCislo(r.pp,r.pm,r.pn)??'—'}<div class="profil-usp">${sZnamenkem(uspesnost(r.pp,r.pm,r.pn))}</div></td>
       <td>${pctCislo(r.up,r.um,r.un)??'—'}<div class="profil-usp">${sZnamenkem(uspesnost(r.up,r.um,r.un))}</div></td>

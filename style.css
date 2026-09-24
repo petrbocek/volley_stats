@@ -330,3 +330,11 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 .v2-chyby-cislo{font-family:'Oswald',sans-serif;font-size:20px;font-weight:700;color:var(--accent2)}
 .stats-chyby{margin-top:12px;font-size:13px;color:var(--muted)}
 .stats-chyby strong{color:var(--accent2);font-family:'Oswald',sans-serif;font-size:16px}
+
+/* Z čeho je profil počítaný — bez toho vypadají čísla za jeden set stejně
+   věrohodně jako za celou sezónu. */
+.profil-rozsah{font-size:12px;color:var(--muted);margin:-14px 0 16px}
+.profil-vysl{font-size:10px;font-weight:700;padding:1px 4px;border-radius:4px;
+  background:var(--surface2);color:var(--muted);margin-left:4px}
+.profil-vysl.win{color:var(--green)}
+.profil-vysl.lose{color:var(--red)}
