@@ -202,7 +202,7 @@ async function init(){
       apiAll('vb_tymy?order=nazev.asc,id.asc'),
       apiAll('vb_hraci_tymy?order=hrac_id.asc,tym_id.asc'),
       apiAll('vb_souteze?order=nazev.asc,id.asc'),
-      apiAll('vb_zapas_hraci?order=zapas_id.asc,hrac_id.asc'),
+      apiAll('vb_zapas_hraci?order=zapas_id.asc,poradi.asc.nullsfirst,hrac_id.asc'),
     ]);
     state.sezony=sez||[];
     state.hraci=hr||[];
@@ -548,8 +548,7 @@ function renderLiveTable(zapasId){
   const vsichniHraci=hraciVSezoně(sezona_id);
   const el=document.getElementById('live-table-wrap');
 
-  const lineup=state.zapasHraci.filter(zh=>zh.zapas_id===zapasId).map(zh=>zh.hrac_id);
-  const hraci=vsichniHraci.filter(h=>lineup.includes(h.id));
+  const hraci=serazenaSestava(zapasId,vsichniHraci);
   const set=state.liveSet;
   hraci.forEach(h=>ensureStat(zapasId,h.id,set));
 
@@ -646,6 +645,36 @@ function prepniSet(n){
   renderLiveTable(state.liveZapasId);
 }
 
+// Sestava jde v pořadí, v jakém se hráčky přidávaly — během rozehry se hledají
+// podle toho, jak stojí na hřišti, ne podle abecedy (#75).
+//
+// U zápasů odehraných dřív pořadí nikdo nezapsal (tabulka neměla id ani
+// created_at), takže zůstávají abecedně jako doteď. Hráčka přidaná do takového
+// zápasu až teď se zařadí ZA ně, ne mezi ně — proto jdou prázdná pořadí první.
+function serazenaSestava(zapasId,vsichniHraci){
+  const poradi=new Map(state.zapasHraci
+    .filter(zh=>zh.zapas_id===zapasId).map(zh=>[zh.hrac_id,zh.poradi]));
+  // vsichniHraci přicházejí abecedně a Array#sort je stabilní, takže hráčky
+  // bez pořadí si abecedu mezi sebou udrží samy
+  return vsichniHraci.filter(h=>poradi.has(h.id)).sort((a,b)=>{
+    const pa=poradi.get(a.id),pb=poradi.get(b.id);
+    if(pa==null&&pb==null)return 0;
+    if(pa==null)return -1;
+    if(pb==null)return 1;
+    return pa-pb;
+  });
+}
+
+// Další volné pořadí. Bere maximum, ne počet řádků — po odebrání hráčky
+// zůstane v číslech díra a počet by se s existujícím pořadím srazil.
+// Počet je v tom taky, aby se první přidaná do staršího zápasu (samá prázdná
+// pořadí) zařadila za ně, ne před ně.
+function dalsiPoradi(zapasId){
+  const radky=state.zapasHraci.filter(zh=>zh.zapas_id===zapasId);
+  const max=radky.reduce((m,zh)=>Math.max(m,zh.poradi||0),0);
+  return Math.max(max,radky.length)+1;
+}
+
 function openHracPicker(zapasId){
   document.getElementById('picker-zapas-id').value=zapasId;
   const z=state.zapasy.find(z=>z.id===zapasId);
@@ -672,8 +701,9 @@ function openHracPicker(zapasId){
 
 async function addDoSestava(zapasId,hracId){
   try{
-    await apiUpsert('vb_zapas_hraci',{zapas_id:zapasId,hrac_id:hracId},'zapas_id,hrac_id');
-    if(!state.zapasHraci.some(zh=>zh.zapas_id===zapasId&&zh.hrac_id===hracId))state.zapasHraci.push({zapas_id:zapasId,hrac_id:hracId});
+    const poradi=dalsiPoradi(zapasId);
+    await apiUpsert('vb_zapas_hraci',{zapas_id:zapasId,hrac_id:hracId,poradi},'zapas_id,hrac_id');
+    if(!state.zapasHraci.some(zh=>zh.zapas_id===zapasId&&zh.hrac_id===hracId))state.zapasHraci.push({zapas_id:zapasId,hrac_id:hracId,poradi});
     closeModal('modal-hrac-picker');
     renderLiveTable(zapasId);
   }catch(e){toast('Chyba: '+e.message,'error');}

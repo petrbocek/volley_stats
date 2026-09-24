@@ -1179,6 +1179,87 @@ await page.waitForTimeout(200);
 pass &= ok('T29k seřadit jde i klávesou Enter (#72)',
   await page.evaluate(() => statsSort.sloupec === 'zapasy'));
 
+// ── #75: Live řadí sestavu podle vložení, ne podle abecedy ─────────────────
+await page.click('.nav-tab:nth-child(4)');                 // Live
+await page.waitForSelector('.live-player-name');
+const vLive = () => page.$$eval('.live-table .live-player-name', els => els.map(e => e.textContent));
+
+// zápas 100 je z doby před #75 — nikdo u něj pořadí nezapsal
+pass &= ok('T30a bez zapsaného pořadí drží Live pořadí soupisky (#75)',
+  await page.evaluate(() => {
+    const v = [...document.querySelectorAll('.live-table .live-player-name')].map(e => e.textContent);
+    const vSestave = state.zapasHraci.filter(zh => zh.zapas_id === 100);
+    // soupiska chodí ze serveru už seřazená (order=jmeno.asc), appka ji jen
+    // nesmí přeházet — proto se měří proti state.hraci, ne proti localeCompare
+    const podleSoupisky = state.hraci
+      .filter(h => vSestave.some(zh => zh.hrac_id === h.id)).map(h => h.jmeno);
+    return vSestave.every(zh => zh.poradi == null) && v.join('|') === podleSoupisky.join('|');
+  }));
+
+// přidání do sestavy pořadí zapíše
+otherWrites = [];
+const predPridanim = (await vLive()).length;
+await page.evaluate(() => { state.zapasHraci = state.zapasHraci.filter(zh => !(zh.zapas_id === 100 && zh.hrac_id === 11)); renderLiveTable(100); });
+await page.evaluate(() => addDoSestava(100, 11));
+await page.waitForTimeout(400);
+const zapisSestavy = otherWrites.find(w => w.table === 'vb_zapas_hraci' && w.method === 'POST');
+pass &= ok('T30b přidání do sestavy pošle i pořadí (#75)',
+  zapisSestavy && typeof zapisSestavy.body.poradi === 'number' && zapisSestavy.body.poradi > 0);
+pass &= ok('T30c hráčka přidaná do staršího zápasu jde dospod, ne mezi ně (#75)',
+  (await vLive()).at(-1) === 'Beta' && (await vLive()).length === predPridanim);
+
+// zápas se zapsaným pořadím se řadí podle něj
+await page.evaluate(() => {
+  const opak = { 10: 4, 11: 3, 12: 2, 13: 1 };
+  state.zapasHraci.filter(zh => zh.zapas_id === 100).forEach(zh => { zh.poradi = opak[zh.hrac_id]; });
+  renderLiveTable(100);
+});
+await page.waitForTimeout(200);
+pass &= ok('T30d se zapsaným pořadím se řadí podle něj, ne abecedně (#75)',
+  await page.evaluate(() => {
+    const v = [...document.querySelectorAll('.live-table .live-player-name')].map(e => e.textContent);
+    const podlePoradi = state.zapasHraci.filter(zh => zh.zapas_id === 100)
+      .sort((a, b) => a.poradi - b.poradi)
+      .map(zh => state.hraci.find(h => h.id === zh.hrac_id).jmeno);
+    return v.join('|') === podlePoradi.join('|') &&
+           v.join('|') !== [...v].sort((a, b) => a.localeCompare(b, 'cs')).join('|');
+  }));
+
+// smíšený případ: kdo pořadí nemá, drží se nahoře a mezi sebou abecedně
+await page.evaluate(() => {
+  state.zapasHraci.filter(zh => zh.zapas_id === 100 && (zh.hrac_id === 12 || zh.hrac_id === 13))
+    .forEach(zh => { zh.poradi = null; });
+  renderLiveTable(100);
+});
+await page.waitForTimeout(200);
+pass &= ok('T30e hráčky bez pořadí zůstávají nahoře a v pořadí soupisky (#75)',
+  await page.evaluate(() => {
+    const v = [...document.querySelectorAll('.live-table .live-player-name')].map(e => e.textContent);
+    const bezPoradi = state.zapasHraci.filter(zh => zh.zapas_id === 100 && zh.poradi == null);
+    const bez = state.hraci
+      .filter(h => bezPoradi.some(zh => zh.hrac_id === h.id)).map(h => h.jmeno);
+    return bez.length > 0 && v.slice(0, bez.length).join('|') === bez.join('|');
+  }));
+
+// díra po odebrané hráčce nesmí srazit pořadí té další
+pass &= ok('T30f po odebrání hráčky nedostane další přidaná kolidující pořadí (#75)',
+  await page.evaluate(() => {
+    state.zapasHraci = state.zapasHraci.filter(zh => zh.zapas_id !== 900);
+    state.zapasHraci.push({ zapas_id: 900, hrac_id: 10, poradi: 1 },
+                          { zapas_id: 900, hrac_id: 11, poradi: 2 },
+                          { zapas_id: 900, hrac_id: 12, poradi: 3 });
+    state.zapasHraci = state.zapasHraci.filter(zh => !(zh.zapas_id === 900 && zh.hrac_id === 11));
+    const dalsi = dalsiPoradi(900);
+    const obsazena = state.zapasHraci.filter(zh => zh.zapas_id === 900).map(zh => zh.poradi);
+    return !obsazena.includes(dalsi) && dalsi > Math.max(...obsazena);
+  }));
+
+await page.evaluate(() => {
+  state.zapasHraci = state.zapasHraci.filter(zh => zh.zapas_id !== 900);
+  state.zapasHraci.filter(zh => zh.zapas_id === 100).forEach(zh => { zh.poradi = null; });
+  renderLiveTable(100);
+});
+
 // ── přihlášení přežije reload ──────────────────────────────────────────────
 await page.reload();
 await nactenoOK();
