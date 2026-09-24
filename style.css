@@ -318,3 +318,15 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 .v2-chip-num.neutral{color:var(--yellow)}
 .v2-skore .plus{color:var(--green)}
 .v2-skore .minus{color:var(--red)}
+
+/* chyba soupeře — tlačítko s hodnotou, ne sloupec v mřížce */
+.v2-chyby{flex-shrink:0;width:100%;min-height:48px;display:flex;align-items:center;
+  justify-content:space-between;padding:0 14px;background:var(--surface2);
+  border:none;border-bottom:1px solid var(--border);cursor:pointer;color:var(--text);
+  font-family:inherit;text-align:left}
+.v2-chyby:active{background:var(--surface)}
+.v2-chyby:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.v2-chyby-nazev{font-size:14px;font-weight:600}
+.v2-chyby-cislo{font-family:'Oswald',sans-serif;font-size:20px;font-weight:700;color:var(--accent2)}
+.stats-chyby{margin-top:12px;font-size:13px;color:var(--muted)}
+.stats-chyby strong{color:var(--accent2);font-family:'Oswald',sans-serif;font-size:16px}

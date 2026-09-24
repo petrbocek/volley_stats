@@ -34,6 +34,7 @@ const FIX = {
             { id: 6, nazev: 'Loňský tým', sezona_id: 2 }],
   vb_hraci_tymy: [{ hrac_id: 12, tym_id: 5 }, { hrac_id: 10, tym_id: 6 }],
   vb_souteze: [{ id: 7, sezona_id: 1, nazev: SOUTEZ_S_XSS }],
+  vb_chyby_souperu: [{ zapas_id: 100, set_cislo: 1, pocet: 2 }],
   vb_zapas_hraci: [{ zapas_id: 100, hrac_id: 10 }, { zapas_id: 100, hrac_id: 11 },
                    { zapas_id: 100, hrac_id: 12 }, { zapas_id: 100, hrac_id: 13 },
                    { zapas_id: 200, hrac_id: 10 }],
@@ -84,6 +85,16 @@ await page.route('**/rest/v1/rpc/vb_zapis_akce', async route => {
     return { zapas_id: z.zapas_id, hrac_id: z.hrac_id, set_cislo: set, pole: z.pole, hodnota: r[z.pole] };
   });
   return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(out) });
+});
+
+let chybyRpc = [];
+await page.route('**/rest/v1/rpc/vb_zapis_chybu_souperu', async route => {
+  const { p_zapas, p_set, p_delta } = route.request().postDataJSON();
+  chybyRpc.push({ p_zapas, p_set, p_delta });
+  let r = FIX.vb_chyby_souperu.find(c => c.zapas_id === p_zapas && c.set_cislo === p_set);
+  if (!r) { r = { zapas_id: p_zapas, set_cislo: p_set, pocet: 0 }; FIX.vb_chyby_souperu.push(r); }
+  r.pocet = Math.max(0, r.pocet + p_delta);
+  return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(r.pocet) });
 });
 
 await page.route('**/rest/v1/**', async route => {
@@ -1470,9 +1481,12 @@ const v2Geometrie = () => page.evaluate(() => {
   const seznam = wrap.querySelector('.v2-seznam');
   const bar = wrap.querySelector('.undo-bar');
   const pridat = wrap.querySelector('.v2-pridat');
+  seznam.scrollTop = seznam.scrollHeight;
   return {
+    // po sjetí dolů musí být „Přidat hráčku" vidět celé — jinak je useknuté
     pridatUseknuto: Math.round(pridat.getBoundingClientRect().bottom - seznam.getBoundingClientRect().bottom),
     listaMimo: Math.round(bar.getBoundingClientRect().bottom - wrap.getBoundingClientRect().bottom),
+    chybyMimo: Math.round(wrap.querySelector('.v2-chyby').getBoundingClientRect().bottom - wrap.getBoundingClientRect().bottom),
     prescahuje: Math.round(document.documentElement.scrollWidth - document.documentElement.clientWidth),
   };
 });
@@ -1484,7 +1498,8 @@ pass &= ok('T32r V2 nepřetéká stránku do šířky (#76)', vg.prescahuje === 
 await page.setViewportSize({ width: 390, height: 600 });
 await page.waitForTimeout(300);
 vg = await v2Geometrie();
-pass &= ok('T32s ani na nízké obrazovce (#76)', vg.pridatUseknuto <= 0 && vg.listaMimo <= 0);
+pass &= ok('T32s ani na nízké obrazovce (#76)',
+  vg.pridatUseknuto <= 0 && vg.listaMimo <= 0 && vg.chybyMimo <= 0);
 
 // navigace se šesti položkami se musí na telefon vejít
 pass &= ok('T32t šest záložek se na 390px vejde bez přetečení (#76)',
@@ -1496,6 +1511,112 @@ pass &= ok('T32t šest záložek se na 390px vejde bez přetečení (#76)',
 
 await page.setViewportSize({ width: 1100, height: 900 });
 await page.waitForTimeout(300);
+
+// ── #74: chyby soupeře ─────────────────────────────────────────────────────
+await page.click('.nav-tab:nth-child(5)');                 // Live V2
+await page.waitForSelector('#v2-chyby-cislo');
+await page.click('#live2-wrap .set-prepinac button:nth-of-type(1)');
+await page.waitForTimeout(300);
+
+const chybyCislo = () => page.textContent('#v2-chyby-cislo').then(t => parseInt(t.trim()));
+// stub drží data v Node, ne ve stránce — tohle je most pro „zapsal někdo druhý"
+await page.exposeFunction('FIX_SET_CHYBY', (zapas, set, pocet) => {
+  let r = FIX.vb_chyby_souperu.find(c => c.zapas_id === zapas && c.set_cislo === set);
+  if (!r) { r = { zapas_id: zapas, set_cislo: set, pocet: 0 }; FIX.vb_chyby_souperu.push(r); }
+  r.pocet = pocet;
+});
+pass &= ok('T33a chyby soupeře jsou tlačítko s hodnotou, ne sloupec (#74)',
+  await page.evaluate(() => {
+    const b = document.querySelector('.v2-chyby');
+    const r = b.getBoundingClientRect();
+    // v mřížce nemá co dělat — dohodnuto v #74. Hledá se ovládání, ne slovo
+    // „chyba": mřížka má vlastní sloupec chyb NAŠICH hráček, to je něco jiného.
+    return !!b && r.height >= 44 &&
+           !document.querySelector('#live-table-wrap .v2-chyby') &&
+           !document.getElementById('live-table-wrap').innerHTML.includes('bumpChybaSouperu');
+  }));
+pass &= ok('T33b hodnota se načte z databáze (#74)', await chybyCislo() === 2);
+
+chybyRpc = [];
+const predChyby = await chybyCislo();
+await page.click('.v2-chyby');
+await page.waitForTimeout(600);
+pass &= ok('T33c klepnutí přičte a rovnou je to vidět (#74)',
+  await chybyCislo() === predChyby + 1);
+pass &= ok('T33d zapisuje se přírůstkem přes vlastní RPC, ne přepisem řádku (#74)',
+  chybyRpc.length === 1 && chybyRpc[0].p_delta === 1 && chybyRpc[0].p_set === 1);
+pass &= ok('T33e nejde to přes vb_zapis_akce ani přímým zápisem do tabulky (#74)',
+  !otherWrites.some(w => w.table === 'vb_chyby_souperu' && w.method !== 'GET'));
+
+// zpět umí i tohle
+pass &= ok('T33f lišta zpět nabídne vrátit chybu soupeře (#74)',
+  /[Cc]hyba soupeře/.test(await page.textContent('#live2-wrap .undo-text')));
+await page.click('#btn-undo-v2');
+await page.waitForTimeout(600);
+pass &= ok('T33g zpět chybu soupeře odečte (#74)', await chybyCislo() === predChyby);
+pass &= ok('T33h odečet jde taky přírůstkem (#74)',
+  chybyRpc.length === 2 && chybyRpc[1].p_delta === -1);
+
+// počítá se po setech
+await page.click('#live2-wrap .set-prepinac button:nth-of-type(2)');
+await page.waitForTimeout(400);
+pass &= ok('T33i druhý set má vlastní počítadlo (#74)', await chybyCislo() === 0);
+chybyRpc = [];
+await page.click('.v2-chyby');
+await page.waitForTimeout(600);
+pass &= ok('T33j zápis jde do zobrazeného setu (#74)',
+  chybyRpc.length === 1 && chybyRpc[0].p_set === 2);
+pass &= ok('T33k první set tím zůstal nedotčený (#74)',
+  await page.evaluate(() => chybySouperuHodnota(100, 1)) === predChyby);
+
+// přepnutí souhrnu na celý zápas sečte sety
+await page.click('#live2-wrap .v2-tym-prepinac');
+await page.waitForTimeout(300);
+// druhé zařízení: dorovnání musí chyby soupeře dotáhnout taky
+await page.evaluate(() => {
+  FIX_SET_CHYBY(100, 1, 42);          // „někdo druhý" zapsal
+});
+await page.evaluate(() => refreshLiveStats());
+await page.waitForTimeout(400);
+pass &= ok('T33l2 dorovnání dotáhne i zápis chyb z druhého zařízení (#74)',
+  await page.evaluate(() => chybySouperuHodnota(100, 1)) === 42);
+
+pass &= ok('T33l souhrn za celý zápas sečte sety (#74)',
+  await chybyCislo() === await page.evaluate(() => chybySouperuZapas(100)));
+await page.click('#live2-wrap .v2-tym-prepinac');
+await page.waitForTimeout(300);
+
+// číslo, které jde jen zapsat, by bylo k ničemu — musí být vidět i ve Statistikách
+await page.click('.nav-tab:nth-child(6)');
+await page.waitForSelector('.stats-chyby');
+pass &= ok('T33m chyby soupeře jsou vidět i ve Statistikách (#74)',
+  /Body z chyb soupeře/.test(await page.textContent('.stats-chyby')));
+pass &= ok('T33n číslo ve Statistikách sedí na data (#74)', await page.evaluate(() => {
+  const d = spocitejStatistiky();
+  const ocekavano = d.zapasIds.reduce((n, z) => n + chybySouperuZapas(z), 0);
+  return parseInt(document.querySelector('.stats-chyby strong').textContent) === ocekavano;
+}));
+await page.selectOption('#stats-set-sel', '1');
+await page.waitForTimeout(300);
+pass &= ok('T33o filtr na set platí i pro ně (#74)', await page.evaluate(() => {
+  const d = spocitejStatistiky();
+  const ocekavano = d.zapasIds.reduce((n, z) => n + chybySouperuHodnota(z, 1), 0);
+  return parseInt(document.querySelector('.stats-chyby strong').textContent) === ocekavano &&
+         /1\. set/.test(document.querySelector('.stats-chyby').textContent);
+}));
+await page.selectOption('#stats-set-sel', '');
+await page.waitForTimeout(300);
+
+// a mazání zápasu o nich musí říct
+await page.click('.nav-tab:nth-child(2)');
+await page.waitForSelector('#zapasy-list .match-item');
+let textMazani = '';
+page.once('dialog', d => { textMazani = d.message(); d.dismiss(); });
+await page.evaluate(() => deleteZapas(100));
+await page.waitForTimeout(300);
+pass &= ok('T33p dialog mazání zápasu přizná i chyby soupeře (#74)',
+  /chyb soupeře/.test(textMazani));
+
 await page.click('.nav-tab:nth-child(4)');
 await page.waitForTimeout(200);
 

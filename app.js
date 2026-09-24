@@ -14,7 +14,7 @@ const VARIANTS=[
   {suf:'minus',sym:'−',cls:'minus'},
 ];
 
-const state={sezony:[],activeSeason:null,hraci:[],hraciSezony:[],zapasy:[],statistiky:[],tymy:[],hraciTymy:[],souteze:[],zapasHraci:[],liveZapasId:null,liveSet:1};
+const state={sezony:[],activeSeason:null,hraci:[],hraciSezony:[],zapasy:[],statistiky:[],tymy:[],hraciTymy:[],souteze:[],zapasHraci:[],chybySouperu:[],liveZapasId:null,liveSet:1};
 
 // Rozepsaný set si pamatujeme podle zápasu: po reloadu uprostřed třetího setu
 // by skok zpátky na první znamenal zapisovat do špatného setu.
@@ -191,7 +191,7 @@ async function apiPatch(table,id,body){
 
 async function init(){
   try{
-    const [sez,hr,hs,zap,stat,tym,ht,sout,zh]=await Promise.all([
+    const [sez,hr,hs,zap,stat,tym,ht,sout,zh,chyby]=await Promise.all([
       // Řazení musí být jednoznačné, jinak může stránkování řádky přeskočit
       // nebo zopakovat — proto všude rozhodující sloupec navíc.
       apiAll('vb_sezony?order=id.desc'),
@@ -203,6 +203,7 @@ async function init(){
       apiAll('vb_hraci_tymy?order=hrac_id.asc,tym_id.asc'),
       apiAll('vb_souteze?order=nazev.asc,id.asc'),
       apiAll('vb_zapas_hraci?order=zapas_id.asc,poradi.asc.nullsfirst,hrac_id.asc'),
+      apiAll('vb_chyby_souperu?order=zapas_id.asc,set_cislo.asc'),
     ]);
     state.sezony=sez||[];
     state.hraci=hr||[];
@@ -213,6 +214,7 @@ async function init(){
     state.hraciTymy=ht||[];
     state.souteze=sout||[];
     state.zapasHraci=zh||[];
+    state.chybySouperu=chyby||[];
     state.activeSeason=(sez||[]).find(s=>s.aktivni)||null;
     renderSeasonSelect();
     renderAll();
@@ -238,7 +240,7 @@ function currentSeasonId(){
 }
 
 function onSeasonChange(){
-  flushAllStats();
+  flushVse();
   const id=currentSeasonId();
   state.activeSeason=state.sezony.find(s=>s.id===id)||null;
   // bez resetu by renderLiveSelect() sáhl po zápasu z předchozí sezóny
@@ -502,7 +504,7 @@ function renderLiveSelect(){
 }
 
 function onLiveZapasChange(zdroj){
-  flushAllStats();
+  flushVse();
   const v=(zdroj&&zdroj.value!==undefined?zdroj:document.getElementById('live-zapas-select')).value;
   liveSelecty().forEach(sel=>{sel.value=v;});   // obě záložky drží týž zápas
   if(!v){
@@ -627,6 +629,98 @@ function renderLiveTable(zapasId){
   if(hraci.length)napovedaZpet();
 }
 
+/* ─── CHYBY SOUPEŘE ───
+   Body z chyb soupeře nemají naši hráčku, takže mají vlastní tabulku a vlastní
+   RPC. Zapisuje se přírůstkově jako všechno ostatní, kvůli dvěma zapisovatelům
+   u jednoho zápasu (#74). */
+const chybyDirty={};          // `${zapasId}_${set}` -> zobrazená hodnota
+const chybyPending={};        // `${zapasId}_${set}` -> neodeslaná změna
+const chybyDebounce={};
+
+function chybyKey(zapasId,set){return `${zapasId}_${set}`;}
+
+function chybySouperuUlozene(zapasId,set){
+  const r=state.chybySouperu.find(c=>c.zapas_id===zapasId&&(c.set_cislo||1)===set);
+  return r?r.pocet||0:0;
+}
+
+// Zobrazená hodnota — tedy včetně toho, co ještě nedoletělo na server.
+function chybySouperuHodnota(zapasId,set){
+  const k=chybyKey(zapasId,set);
+  return k in chybyDirty?chybyDirty[k]:chybySouperuUlozene(zapasId,set);
+}
+
+function chybySouperuZapas(zapasId){
+  let n=0;
+  for(let set=1;set<=SETU;set++)n+=chybySouperuHodnota(zapasId,set);
+  return n;
+}
+
+function bumpChybaSouperu(zapasId,delta=1,opts={}){
+  if(!isLoggedIn()){toast('Na zapisování se přihlas (🔒 nahoře)','error');return false;}
+  const set=opts.set||state.liveSet;
+  const k=chybyKey(zapasId,set);
+  const puvodni=chybySouperuHodnota(zapasId,set);
+  const nova=Math.max(0,puvodni+delta);
+  if(nova===puvodni)return false;
+  chybyDirty[k]=nova;
+  chybyPending[k]=(chybyPending[k]||0)+(nova-puvodni);
+  if(chybyPending[k]===0)delete chybyPending[k];
+  clearTimeout(chybyDebounce[k]);
+  chybyDebounce[k]=setTimeout(()=>flushChyby(k),STAT_FLUSH_MS);
+  prekresliChyby();
+  if(!opts.bezUndo){
+    if(delta>0){
+      undoStack.push({typ:'souper',zapasId,set});
+      if(undoStack.length>UNDO_MAX)undoStack.shift();
+    }else{
+      for(let i=undoStack.length-1;i>=0;i--){
+        const u=undoStack[i];
+        if(u.typ==='souper'&&u.zapasId===zapasId&&u.set===set){undoStack.splice(i,1);break;}
+      }
+    }
+    prekresliUndo();
+  }
+  return true;
+}
+
+async function flushChyby(key,opts={}){
+  const delta=chybyPending[key];
+  if(!delta)return;
+  clearTimeout(chybyDebounce[key]);
+  delete chybyDebounce[key];
+  const [zapasId,set]=key.split('_').map(Number);
+  delete chybyPending[key];
+  try{
+    const nova=await apiRpc('vb_zapis_chybu_souperu',
+      {p_zapas:zapasId,p_set:set,p_delta:delta},opts);
+    if(typeof nova==='number'){
+      // server vrací výslednou hodnotu včetně toho, co zapsal někdo druhý
+      const idx=state.chybySouperu.findIndex(c=>c.zapas_id===zapasId&&(c.set_cislo||1)===set);
+      if(idx>=0)state.chybySouperu[idx].pocet=nova;
+      else state.chybySouperu.push({zapas_id:zapasId,set_cislo:set,pocet:nova});
+      chybyDirty[chybyKey(zapasId,set)]=nova;
+      prekresliChyby();
+    }
+  }catch(e){
+    chybyPending[key]=(chybyPending[key]||0)+delta;   // vrátit do fronty, ať se to neztratí
+    toast('Chyba uložení: '+e.message,'error');
+  }
+}
+
+function flushVsechnyChyby(opts={}){
+  return Promise.all(Object.keys(chybyPending).map(k=>flushChyby(k,opts)));
+}
+
+function prekresliChyby(){
+  const zapasId=state.liveZapasId;
+  if(!zapasId)return;
+  const el=document.getElementById('v2-chyby-cislo');
+  if(el)el.textContent=souhrnCelyZapas
+    ?chybySouperuZapas(zapasId)
+    :chybySouperuHodnota(zapasId,state.liveSet);
+}
+
 /* ─── LIVE V2 ───
    Mřížka hráčky × akce znamená mířit ve dvou rozměrech naráz: najdi řádek
    a zároveň sloupec, na telefonu do 24px pruhu. V2 to rozdělí na dvě velká
@@ -673,6 +767,14 @@ function renderLive2(zapasId){
     }).join('')}</div>
   </div>`:'';
 
+  // Chyba soupeře nepatří žádné hráčce, takže není v panelu akcí, ale je to
+  // samostatné tlačítko s hodnotou — jak jsme se dohodli v #74.
+  const chyby=`<button class="v2-chyby" onclick="bumpChybaSouperu(${zapasId})"
+      title="Přičte bod z chyby soupeře; zpět přes lištu dole">
+    <span class="v2-chyby-nazev">🙅 Chyba soupeře</span>
+    <span class="v2-chyby-cislo" id="v2-chyby-cislo">${souhrnCelyZapas?chybySouperuZapas(zapasId):chybySouperuHodnota(zapasId,set)}</span>
+  </button>`;
+
   const seznam=hraci.map(h=>`<button class="v2-hrac" onclick="v2OtevriAkce(${zapasId},${h.id})">
     <span class="v2-cislo">${h.cislo?'#'+h.cislo:''}</span>
     <span class="v2-jmeno">${esc(h.jmeno)}</span>
@@ -685,9 +787,9 @@ function renderLive2(zapasId){
   const pridat=`<button class="v2-pridat" onclick="openHracPicker(${zapasId})"><span>+</span> Přidat hráčku</button>`;
   const prazdno=hraci.length?'':'<div class="empty" style="padding:24px"><span class="empty-icon">👥</span><div class="empty-text">Zatím prázdná sestava</div></div>';
 
-  el.innerHTML=prepinac+tym
+  el.innerHTML=prepinac+tym+chyby
     +`<div class="v2-seznam">${prazdno}${seznam}${pridat}</div>`
-    +(hraci.length?undoBarHtml('btn-undo-v2'):'');
+    +undoBarHtml('btn-undo-v2');
 }
 
 // Čísla se mění s každým klikem; překreslovat kvůli nim celý seznam by bylo
@@ -765,12 +867,13 @@ function statSoucetZive(zapasId,hracId,pole){
 
 function prepniSouhrn(){
   souhrnCelyZapas=!souhrnCelyZapas;
+  prekresliChyby();
   prekresliLive(state.liveZapasId);
 }
 
 function prepniSet(n){
   if(n===state.liveSet)return;
-  flushAllStats();                 // rozepsané patří do setu, ve kterém vznikly
+  flushVse();                      // rozepsané patří do setu, ve kterém vznikly
   state.liveSet=n;
   if(state.liveZapasId)ulozSet(state.liveZapasId,n);
   prekresliLive(state.liveZapasId);
@@ -987,6 +1090,10 @@ function popisAkce(field){
 function undoPopisek(){
   const u=undoStack[undoStack.length-1];
   if(!u)return null;
+  if(u.typ==='souper'){
+    const jinySet=u.set!==state.liveSet?` · ${u.set}. set`:'';
+    return `Chyba soupeře${jinySet}`;
+  }
   const h=state.hraci.find(h=>h.id===u.hracId);
   const jmeno=h?h.jmeno:'hráčka';
   // set se připomene jen když se zapisuje jinde, ať lišta zbytečně nehlučí
@@ -998,7 +1105,10 @@ function vratZpet(){
   const u=undoStack[undoStack.length-1];
   if(!u)return;
   const popis=undoPopisek();
-  if(bump(u.hracId,u.zapasId,u.field,-1,{set:u.set,bezUndo:true})){
+  const vratil=u.typ==='souper'
+    ? bumpChybaSouperu(u.zapasId,-1,{set:u.set,bezUndo:true})
+    : bump(u.hracId,u.zapasId,u.field,-1,{set:u.set,bezUndo:true});
+  if(vratil){
     undoStack.pop();
     toast('Vzato zpět: '+popis,'success');
     // odečet v cizím setu se v mřížce neprojeví, tu je potřeba překreslit
@@ -1118,6 +1228,12 @@ function flushAllStats(opts={}){
   return Promise.all(pendingKeys().map(k=>flushStat(k,opts)));
 }
 
+// Všechno rozepsané naráz. Odchod ze stránky si nesmí vybírat, co odešle —
+// zamčený telefon jinak o chyby soupeře přijde stejně jako o kliky.
+function flushVse(opts={}){
+  return Promise.all([flushAllStats(opts),flushVsechnyChyby(opts)]);
+}
+
 // Dorovnání s druhým zařízením (#27). Realtime by byl elegantnější, ale
 // znamenal by websocket a další závislost; na jeden otevřený zápas stačí
 // občasné dotažení. Rozepsané hodnoty se nepřepisují.
@@ -1143,7 +1259,19 @@ async function refreshLiveStats(){
         if(el)el.textContent=row[pole];
       });
     });
+    // chyby soupeře se dorovnávají taky, jinak by se zápis z druhého zařízení
+    // objevil až po reloadu
+    const chyby=await api('GET',`vb_chyby_souperu?zapas_id=eq.${zapasId}`);
+    (chyby||[]).forEach(row=>{
+      const set=row.set_cislo||1;
+      const idx=state.chybySouperu.findIndex(c=>c.zapas_id===row.zapas_id&&(c.set_cislo||1)===set);
+      if(idx>=0)state.chybySouperu[idx]=row;else state.chybySouperu.push(row);
+      const k=chybyKey(row.zapas_id,set);
+      if(k in chybyPending)return;              // tohle si drží uživatel
+      chybyDirty[k]=row.pocet||0;
+    });
     prekresliV2Cisla();
+    prekresliChyby();
   }catch(e){/* dorovnání je best effort, chybu netlačíme uživateli do obličeje */}
 }
 
@@ -1156,9 +1284,9 @@ function startLiveRefresh(){
 // nespustí a kliky se ztratí. keepalive drží request naživu i po unloadu;
 // sendBeacon použít nejde, neumí poslat hlavičky s apikey.
 document.addEventListener('visibilitychange',()=>{
-  if(document.hidden)flushAllStats({keepalive:true});
+  if(document.hidden)flushVse({keepalive:true});
 });
-window.addEventListener('pagehide',()=>flushAllStats({keepalive:true}));
+window.addEventListener('pagehide',()=>flushVse({keepalive:true}));
 
 /* ─── STATISTIKY ─── */
 
@@ -1445,6 +1573,14 @@ function renderStatistiky(){
       </tr>
     </tfoot>
   </table></div>`;
+
+  // Do tabulky hráček to nepatří (není to čí), ale musí to být někde vidět,
+  // jinak by šlo o číslo, které jde jen zapsat (#74).
+  const chybySoupere=d.zapasIds.reduce((n,zid)=>n+(selSet
+    ?chybySouperuHodnota(zid,selSet)
+    :chybySouperuZapas(zid)),0);
+  html+=`<div class="stats-chyby">🙅 Body z chyb soupeře${selSet?` (${selSet}. set)`:''}:
+    <strong>${chybySoupere}</strong></div>`;
   el.innerHTML=html;
 }
 
@@ -1875,9 +2011,12 @@ async function deleteZapas(id){
 
   // Zápas mizí i s akcemi a sestavou (FK ON DELETE CASCADE) a zpátky to nejde,
   // takže to dialog musí říct číslem, ne jen „opravdu?".
+  const chyby=chybySouperuZapas(id);
+  const chybyText=chyby?` Zmizí i ${chyby} zapsaných chyb soupeře.`:'';
   const co=akci||vSestave
-    ? `Smaže se i ${sklonujAkce(akci)} a sestava (${sklonujHracky(vSestave)}).`
-    : 'Zápas nemá zapsanou jedinou akci ani sestavu.';
+    ? `Smaže se i ${sklonujAkce(akci)} a sestava (${sklonujHracky(vSestave)}).${chybyText}`
+    : (chyby?`Zápas nemá zapsanou akci hráček, ale${chybyText.replace(' Zmizí i','')}`
+            :'Zápas nemá zapsanou jedinou akci ani sestavu.');
   const live=state.liveZapasId===id?'\nZápas máš zrovna otevřený v Live — zavře se.':'';
   if(!confirm(`Opravdu smazat zápas ${z.soupet} (${fmtDate(z.datum)})?\n${co}\nNejde vzít zpět.${live}`))return;
 
@@ -1886,6 +2025,11 @@ async function deleteZapas(id){
     state.zapasy=state.zapasy.filter(z=>z.id!==id);
     state.statistiky=state.statistiky.filter(s=>s.zapas_id!==id);
     state.zapasHraci=state.zapasHraci.filter(zh=>zh.zapas_id!==id);
+    state.chybySouperu=state.chybySouperu.filter(c=>c.zapas_id!==id);
+    for(let set=1;set<=SETU;set++){
+      const k=chybyKey(id,set);
+      delete chybyPending[k];clearTimeout(chybyDebounce[k]);delete chybyDirty[k];
+    }
     // Rozepsané kliky smazaného zápasu by flush poslal do neexistujícího řádku.
     Object.keys(pendingDeltas).forEach(k=>{if(k.startsWith(id+'_'))delete pendingDeltas[k];});
     Object.keys(dirtyStats).forEach(k=>{if(k.startsWith(id+'_'))delete dirtyStats[k];});
