@@ -1578,6 +1578,98 @@ pass &= ok('T34i přepnutí sezóny překreslí týmy i soupisku (#70)',
 await page.selectOption('#season-select', '1');
 await page.waitForTimeout(300);
 
+// ── #71 část 1: profil hráčky ──────────────────────────────────────────────
+await page.click('.nav-tab:nth-child(3)');                  // Hráčky
+await page.waitForSelector('#hraci-list .player-card');
+
+pass &= ok('T35a z karty v soupisce vede proklik do profilu (#71)',
+  await page.evaluate(() => {
+    const karta = document.querySelector('#hraci-list .player-card');
+    return karta.innerHTML.includes('otevriProfil(');
+  }));
+
+// ze soupisky = celá sezóna, bez ohledu na filtr ve Statistikách
+await page.click('.nav-tab:nth-child(7)');                  // Statistiky
+await page.waitForSelector('.stats-table');
+await page.selectOption('#stats-set-sel', '1');
+await page.waitForTimeout(300);
+await page.click('.nav-tab:nth-child(3)');
+await page.waitForTimeout(300);
+await page.evaluate(() => otevriProfil(13, true));
+await page.waitForSelector('#modal-profil:not(.hidden)');
+
+const rozsahText = () => page.textContent('#profil-rozsah');
+pass &= ok('T35b profil ze soupisky počítá celou sezónu, ne poslední filtr (#71)',
+  /celá sezóna/i.test(await rozsahText()) && !/set/.test(await rozsahText()));
+pass &= ok('T35c a je napsané, z čeho je počítaný (#71)',
+  /Počítáno z:/.test(await rozsahText()));
+const zapasuCelaSezona = await page.$$eval('#profil-obsah .profil-tabulka tbody tr', els => els.length);
+await page.click('#modal-profil .btn-secondary');
+
+// proklik z tabulky ve Statistikách filtr dál respektuje
+await page.click('.nav-tab:nth-child(7)');          // až tady jsou filtry vidět
+await page.waitForSelector('.stats-table');
+await page.selectOption('#stats-set-sel', '');
+await page.waitForTimeout(200);
+const jedenZapas = await page.evaluate(() => {
+  // zápas, ve kterém hráčka 13 hrála, ale není jediný v sezóně
+  const p = profilHracky(13, true);
+  return p.radky.length > 1 ? p.radky[0].z.id : null;
+});
+pass &= ok('T35d0 fixture má na co filtrovat (#71)', jedenZapas !== null);
+await page.selectOption('#stats-zapas-sel', String(jedenZapas));
+await page.waitForTimeout(300);
+await page.evaluate(() => otevriProfil(13));
+await page.waitForSelector('#modal-profil:not(.hidden)');
+pass &= ok('T35d proklik ze Statistik filtr respektuje (#71)',
+  await page.evaluate(id => {
+    const z = state.zapasy.find(z => z.id === id);
+    return document.getElementById('profil-rozsah').textContent.includes(z.soupet);
+  }, jedenZapas));
+const zapasuVeFiltru = await page.$$eval('#profil-obsah .profil-tabulka tbody tr', els => els.length);
+pass &= ok('T35e a ta dvě čísla se opravdu liší, ne jen popisek (#71)',
+  await page.evaluate(() => {
+    const zaSezonu = profilHracky(13, true);
+    const zaFiltr = profilHracky(13, false);
+    const soucet = p => p.radky.reduce((n, r) => n + r.sp + r.pp + r.up + r.bp + r.cm, 0);
+    return zaSezonu.radky.length !== zaFiltr.radky.length &&
+           soucet(zaSezonu) !== soucet(zaFiltr);
+  }));
+await page.click('#modal-profil .btn-secondary');
+await page.selectOption('#stats-zapas-sel', '');
+await page.waitForTimeout(300);
+
+// souhrnné kostky musí sedět na tabulku pod nimi
+await page.evaluate(() => otevriProfil(13, true));
+await page.waitForSelector('#modal-profil:not(.hidden)');
+pass &= ok('T35f kostky sedí na řádky tabulky, i když je rozsah celá sezóna (#71)',
+  await page.evaluate(() => {
+    const p = profilHracky(13, true);
+    const soucetRadku = p.radky.reduce((n, r) => n + r.total, 0);
+    return p.souhrn && p.souhrn.total === soucetRadku && p.souhrn.zapasy === p.radky.length;
+  }));
+pass &= ok('T35g počet zápasů za sezónu není menší než ve filtru na jeden set (#71)',
+  zapasuCelaSezona >= zapasuVeFiltru && zapasuCelaSezona > 0);
+
+// u zápasu je vidět, jak dopadl
+pass &= ok('T35h u dokončeného zápasu je v profilu výsledek, ne jen datum (#71)',
+  await page.evaluate(() => {
+    const znacky = [...document.querySelectorAll('#profil-obsah .profil-vysl')];
+    const dokoncene = profilHracky(13, true).radky
+      .filter(r => r.z.stav === 'dokonceny' && r.z.sety_my != null);
+    return znacky.length === dokoncene.length && znacky.length > 0 &&
+           znacky.every(e => /^[VP]?\s*\d+:\d+$/.test(e.textContent.trim()));
+  }));
+pass &= ok('T35i výhra a prohra se od sebe poznají i jinak než barvou (#71)',
+  await page.evaluate(() => {
+    const p = profilHracky(13, true);
+    const vyhry = p.radky.filter(r => r.z.sety_my > r.z.sety_oni).length;
+    const znacky = [...document.querySelectorAll('#profil-obsah .profil-vysl')]
+      .map(e => e.textContent.trim());
+    return znacky.filter(t => t.startsWith('V')).length === vyhry;
+  }));
+await page.click('#modal-profil .btn-secondary');
+
 
 await page.setViewportSize({ width: 1100, height: 900 });
 await page.waitForTimeout(300);
