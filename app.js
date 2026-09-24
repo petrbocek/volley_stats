@@ -453,61 +453,70 @@ async function toggleHracSezona(hracId,sezonaId,inSeason){
 }
 
 /* ─── LIVE ─── */
+function liveSelecty(){return [...document.querySelectorAll('.live-zapas-select')];}
+function zobrazStavTlacitka(z){
+  document.querySelectorAll('.js-btn-start').forEach(b=>b.style.display=z?.stav==='planovany'?'':'none');
+  document.querySelectorAll('.js-btn-end').forEach(b=>b.style.display=z?.stav==='probihajici'?'':'none');
+}
+// Obě záložky Live píšou do týchž dat, takže musí ukazovat i týž zápas —
+// jinak by se člověk po přepnutí díval jinam, než si myslí (#76).
+function prazdneLive(text){
+  const html=`<div class="empty"><span class="empty-icon">⚡</span><div class="empty-text">${text}</div></div>`;
+  ['live-table-wrap','live2-wrap'].forEach(id=>{
+    const el=document.getElementById(id);if(el)el.innerHTML=html;
+  });
+}
+function prekresliLive(zapasId){
+  renderLiveTable(zapasId);
+  renderLive2(zapasId);
+}
+
 function renderLiveSelect(){
   const sid=currentSeasonId();
-  const sel=document.getElementById('live-zapas-select');
+  const selecty=liveSelecty();
+  if(!selecty.length)return;
   const zapasy=sid?state.zapasy.filter(z=>z.sezona_id===sid):state.zapasy;
-  const prev=parseInt(sel.value)||state.liveZapasId||0;
-  sel.innerHTML='<option value="">— vyberte zápas —</option>';
-  zapasy.forEach(z=>{
-    const o=document.createElement('option');
-    o.value=z.id;
-    o.textContent=`${fmtDate(z.datum)} — ${z.soupet} [${stavLabel(z.stav)}]`;
-    if(prev===z.id)o.selected=true;
-    sel.appendChild(o);
-  });
+  const prev=parseInt(selecty.find(s=>s.value)?.value)||state.liveZapasId||0;
+  const volby='<option value="">— vyberte zápas —</option>'+zapasy.map(z=>
+    `<option value="${z.id}">${esc(fmtDate(z.datum))} — ${esc(z.soupet)} [${stavLabel(z.stav)}]</option>`).join('');
+  let vybrany=zapasy.some(z=>z.id===prev)?prev:0;
   // Auto-select: probíhající → plánovaný → první
-  if(!sel.value&&zapasy.length){
+  if(!vybrany&&zapasy.length){
     const best=zapasy.find(z=>z.stav==='probihajici')||zapasy.find(z=>z.stav==='planovany')||zapasy[0];
-    if(best)sel.value=best.id;
+    if(best)vybrany=best.id;
   }
-  if(sel.value){
-    const id=parseInt(sel.value);
-    if(state.liveZapasId!==id)undoStack.length=0;   // zásobník patří k jednomu zápasu
-    state.liveZapasId=id;
-    state.liveSet=nactiSet(id);
-    const z=state.zapasy.find(z=>z.id===id);
-    document.getElementById('btn-start-zapas').style.display=z?.stav==='planovany'?'':'none';
-    document.getElementById('btn-end-zapas').style.display=z?.stav==='probihajici'?'':'none';
-    renderLiveTable(id);
+  selecty.forEach(sel=>{sel.innerHTML=volby;sel.value=vybrany?String(vybrany):'';});
+  if(vybrany){
+    if(state.liveZapasId!==vybrany)undoStack.length=0;   // zásobník patří k jednomu zápasu
+    state.liveZapasId=vybrany;
+    state.liveSet=nactiSet(vybrany);
+    zobrazStavTlacitka(state.zapasy.find(z=>z.id===vybrany));
+    prekresliLive(vybrany);
   }else{
     // Sezóna bez zápasů: bez téhle větve by na obrazovce zůstala tabulka
     // předchozího zápasu a liveZapasId by ukazoval do cizí sezóny.
     state.liveZapasId=null;
-    document.getElementById('btn-start-zapas').style.display='none';
-    document.getElementById('btn-end-zapas').style.display='none';
-    document.getElementById('live-table-wrap').innerHTML='<div class="empty"><span class="empty-icon">⚡</span><div class="empty-text">V této sezóně nejsou žádné zápasy</div></div>';
+    zobrazStavTlacitka(null);
+    prazdneLive('V této sezóně nejsou žádné zápasy');
   }
 }
 
-function onLiveZapasChange(){
+function onLiveZapasChange(zdroj){
   flushAllStats();
-  const v=document.getElementById('live-zapas-select').value;
+  const v=(zdroj&&zdroj.value!==undefined?zdroj:document.getElementById('live-zapas-select')).value;
+  liveSelecty().forEach(sel=>{sel.value=v;});   // obě záložky drží týž zápas
   if(!v){
     state.liveZapasId=null;
-    document.getElementById('live-table-wrap').innerHTML='<div class="empty"><span class="empty-icon">⚡</span><div class="empty-text">Vyberte zápas</div></div>';
-    document.getElementById('btn-start-zapas').style.display='none';
-    document.getElementById('btn-end-zapas').style.display='none';
+    zobrazStavTlacitka(null);
+    prazdneLive('Vyberte zápas');
     return;
   }
   const id=parseInt(v);
   if(state.liveZapasId!==id)undoStack.length=0;
   state.liveZapasId=id;
   state.liveSet=nactiSet(id);
-  const z=state.zapasy.find(z=>z.id===id);
-  document.getElementById('btn-start-zapas').style.display=z?.stav==='planovany'?'':'none';
-  document.getElementById('btn-end-zapas').style.display=z?.stav==='probihajici'?'':'none';
-  renderLiveTable(id);
+  zobrazStavTlacitka(state.zapasy.find(z=>z.id===id));
+  prekresliLive(id);
 }
 
 async function startZapas(){
@@ -515,8 +524,7 @@ async function startZapas(){
   try{
     await apiPatch('vb_zapasy',id,{stav:'probihajici'});
     const z=state.zapasy.find(z=>z.id===id);if(z)z.stav='probihajici';
-    document.getElementById('btn-start-zapas').style.display='none';
-    document.getElementById('btn-end-zapas').style.display='';
+    zobrazStavTlacitka(z||{stav:'probihajici'});
     renderZapasy();renderLiveSelect();
     toast('Zápas zahájen','success');
   }catch(e){toast('Chyba: '+e.message,'error');}
@@ -619,6 +627,125 @@ function renderLiveTable(zapasId){
   if(hraci.length)napovedaZpet();
 }
 
+/* ─── LIVE V2 ───
+   Mřížka hráčky × akce znamená mířit ve dvou rozměrech naráz: najdi řádek
+   a zároveň sloupec, na telefonu do 24px pruhu. V2 to rozdělí na dvě velká
+   klepnutí — nejdřív hráčka přes celou šířku, pak akce jako dlaždice u spodní
+   hrany. Obě záložky píšou do týchž dat stejnou cestou, takže se dá kdykoli
+   přepnout zpátky (#76). */
+
+// Co se během zápasu hodí vidět u jména: kolik výborných a kolik chyb.
+// Celý rozpad na jedenáct čísel je od toho stará mřížka.
+const V2_VYBORNE=['servis_plus','prijem_plus','utok_plus','blok_plus'];
+const V2_CHYBY=['servis_minus','prijem_minus','utok_minus','chyba_minus'];
+
+function v2Soucet(zapasId,hracId,pole){
+  return pole.reduce((n,f)=>n+(souhrnCelyZapas
+    ?statSoucetZive(zapasId,hracId,f)
+    :getStatVal(zapasId,hracId,f,state.liveSet)),0);
+}
+
+function renderLive2(zapasId){
+  const el=document.getElementById('live2-wrap');
+  if(!el)return;
+  const sid=currentSeasonId();
+  const sezona_id=sid||state.zapasy.find(z=>z.id===zapasId)?.sezona_id||0;
+  const hraci=serazenaSestava(zapasId,hraciVSezoně(sezona_id));
+  const set=state.liveSet;
+  hraci.forEach(h=>ensureStat(zapasId,h.id,set));
+
+  const prepinac=`<div class="set-prepinac">
+    <span class="set-label">Set</span>
+    ${Array.from({length:SETU},(_,i)=>i+1).map(n=>{
+      const zapsano=hraci.some(h=>ACTIONS.some(a=>VARIANTS.some(v=>getStatVal(zapasId,h.id,`${a.key}_${v.suf}`,n))));
+      return `<button class="set-btn${n===set?' aktivni':''}${zapsano?' zapsany':''}" onclick="prepniSet(${n})">${n}</button>`;
+    }).join('')}
+  </div>`;
+
+  const tym=hraci.length?`<div class="v2-tym">
+    <button class="v2-tym-prepinac" onclick="prepniSouhrn()" title="Přepnout mezi zapisovaným setem a celým zápasem">Tým · ${souhrnCelyZapas?'zápas':set+'. set'} ⇄</button>
+    <div class="v2-tym-cisla">${ACTIONS.map(a=>{
+      const variants=a.varianty?VARIANTS.filter(v=>a.varianty.includes(v.suf)):VARIANTS;
+      return `<span class="v2-chip" style="border-color:${a.color}">
+        <span class="v2-chip-nazev" style="color:${a.color}">${a.icon}</span>
+        ${variants.map(v=>`<span class="v2-chip-num ${v.cls}"><span class="v2-chip-sym">${v.sym}</span><span id="v2tym-${a.key}_${v.suf}">${tymSoucet(zapasId,hraci,`${a.key}_${v.suf}`)}</span></span>`).join('')}
+      </span>`;
+    }).join('')}</div>
+  </div>`:'';
+
+  const seznam=hraci.map(h=>`<button class="v2-hrac" onclick="v2OtevriAkce(${zapasId},${h.id})">
+    <span class="v2-cislo">${h.cislo?'#'+h.cislo:''}</span>
+    <span class="v2-jmeno">${esc(h.jmeno)}</span>
+    <span class="v2-skore">
+      <span class="plus" id="v2plus-${h.id}">+${v2Soucet(zapasId,h.id,V2_VYBORNE)}</span>
+      <span class="minus" id="v2minus-${h.id}">−${v2Soucet(zapasId,h.id,V2_CHYBY)}</span>
+    </span>
+  </button>`).join('');
+
+  const pridat=`<button class="v2-pridat" onclick="openHracPicker(${zapasId})"><span>+</span> Přidat hráčku</button>`;
+  const prazdno=hraci.length?'':'<div class="empty" style="padding:24px"><span class="empty-icon">👥</span><div class="empty-text">Zatím prázdná sestava</div></div>';
+
+  el.innerHTML=prepinac+tym
+    +`<div class="v2-seznam">${prazdno}${seznam}${pridat}</div>`
+    +(hraci.length?undoBarHtml('btn-undo-v2'):'');
+}
+
+// Čísla se mění s každým klikem; překreslovat kvůli nim celý seznam by bylo
+// při zapisování znát, stejně jako u týmového řádku v mřížce.
+function prekresliV2Cisla(){
+  const zapasId=state.liveZapasId;
+  if(!zapasId||!document.querySelector('.v2-seznam'))return;
+  const sid=currentSeasonId();
+  const sezona_id=sid||state.zapasy.find(z=>z.id===zapasId)?.sezona_id||0;
+  const hraci=serazenaSestava(zapasId,hraciVSezoně(sezona_id));
+  hraci.forEach(h=>{
+    const p=document.getElementById(`v2plus-${h.id}`);
+    const m=document.getElementById(`v2minus-${h.id}`);
+    if(p)p.textContent='+'+v2Soucet(zapasId,h.id,V2_VYBORNE);
+    if(m)m.textContent='−'+v2Soucet(zapasId,h.id,V2_CHYBY);
+  });
+  ACTIONS.forEach(a=>VARIANTS.forEach(v=>{
+    const el=document.getElementById(`v2tym-${a.key}_${v.suf}`);
+    if(el)el.textContent=tymSoucet(zapasId,hraci,`${a.key}_${v.suf}`);
+  }));
+}
+
+function v2OtevriAkce(zapasId,hracId){
+  const h=state.hraci.find(h=>h.id===hracId);if(!h)return;
+  document.getElementById('v2-akce-zapas').value=zapasId;
+  document.getElementById('v2-akce-hrac').value=hracId;
+  document.getElementById('v2-akce-title').textContent=
+    `${h.jmeno}${h.cislo?' · #'+h.cislo:''} — ${state.liveSet}. set`;
+  document.getElementById('v2-akce-obsah').innerHTML=ACTIONS.map(a=>{
+    const variants=a.varianty?VARIANTS.filter(v=>a.varianty.includes(v.suf)):VARIANTS;
+    return `<div class="v2-akce-radek">
+      <div class="v2-akce-nazev" style="color:${a.color}">${a.icon} ${a.label}</div>
+      <div class="v2-akce-dlazdice">${variants.map(v=>
+        `<button class="v2-dlazdice ${v.cls}" style="border-color:${a.color}"
+           onclick="v2Zapis('${a.key}_${v.suf}')">
+          <span class="v2-dlazdice-sym">${v.sym}</span>
+          <span class="v2-dlazdice-cnt">${getStatVal(zapasId,hracId,`${a.key}_${v.suf}`,state.liveSet)}</span>
+        </button>`).join('')}</div>
+    </div>`;
+  }).join('');
+  openModal('modal-v2-akce');
+}
+
+function v2Zapis(field){
+  const zapasId=parseInt(document.getElementById('v2-akce-zapas').value);
+  const hracId=parseInt(document.getElementById('v2-akce-hrac').value);
+  if(!bump(hracId,zapasId,field,1))return;       // nepřihlášenému se nic nezavře
+  closeModal('modal-v2-akce');
+  prekresliV2Cisla();
+}
+
+function v2OdeberZeSestavy(){
+  const zapasId=parseInt(document.getElementById('v2-akce-zapas').value);
+  const hracId=parseInt(document.getElementById('v2-akce-hrac').value);
+  closeModal('modal-v2-akce');
+  removeZeSestava(zapasId,hracId);
+}
+
 // Součet jednoho pole za celou sestavu — buď za zapisovaný set, nebo za
 // celý zápas. Bere i rozepsané kliky, aby řádek odpovídal tomu, co je vidět.
 function tymSoucet(zapasId,hraci,pole){
@@ -638,7 +765,7 @@ function statSoucetZive(zapasId,hracId,pole){
 
 function prepniSouhrn(){
   souhrnCelyZapas=!souhrnCelyZapas;
-  renderLiveTable(state.liveZapasId);
+  prekresliLive(state.liveZapasId);
 }
 
 function prepniSet(n){
@@ -646,7 +773,7 @@ function prepniSet(n){
   flushAllStats();                 // rozepsané patří do setu, ve kterém vznikly
   state.liveSet=n;
   if(state.liveZapasId)ulozSet(state.liveZapasId,n);
-  renderLiveTable(state.liveZapasId);
+  prekresliLive(state.liveZapasId);
 }
 
 // Sestava jde v pořadí, v jakém se hráčky přidávaly — během rozehry se hledají
@@ -709,7 +836,7 @@ async function addDoSestava(zapasId,hracId){
     await apiUpsert('vb_zapas_hraci',{zapas_id:zapasId,hrac_id:hracId,poradi},'zapas_id,hrac_id');
     if(!state.zapasHraci.some(zh=>zh.zapas_id===zapasId&&zh.hrac_id===hracId))state.zapasHraci.push({zapas_id:zapasId,hrac_id:hracId,poradi});
     closeModal('modal-hrac-picker');
-    renderLiveTable(zapasId);
+    prekresliLive(zapasId);
   }catch(e){toast('Chyba: '+e.message,'error');}
 }
 
@@ -764,7 +891,7 @@ async function potvrdOdebrani(iStatistiky){
     await apiDelete('vb_zapas_hraci',`zapas_id=eq.${zapasId}&hrac_id=eq.${hracId}`);
     state.zapasHraci=state.zapasHraci.filter(zh=>!(zh.zapas_id===zapasId&&zh.hrac_id===hracId));
     closeModal('modal-odebrat');
-    renderLiveTable(zapasId);
+    prekresliLive(zapasId);
     renderStatistiky();
     toast(iStatistiky?'Odebráno i se statistikami':'Odebráno ze sestavy','success');
   }catch(e){toast('Chyba: '+e.message,'error');}
@@ -820,6 +947,7 @@ function bump(hracId,zapasId,field,delta=1,opts={}){
   clearTimeout(debounceMap[key]);
   debounceMap[key]=setTimeout(()=>flushStat(key),STAT_FLUSH_MS);
   prekresliSouhrn();
+  prekresliV2Cisla();
   zaznamenejProZpet(hracId,zapasId,field,set,nova-puvodni,opts);
   return true;
 }
@@ -874,15 +1002,17 @@ function vratZpet(){
     undoStack.pop();
     toast('Vzato zpět: '+popis,'success');
     // odečet v cizím setu se v mřížce neprojeví, tu je potřeba překreslit
-    if(u.set!==state.liveSet)renderLiveTable(state.liveZapasId);
+    if(u.set!==state.liveSet)prekresliLive(state.liveZapasId);
   }
   prekresliUndo();
 }
 
-function undoBarHtml(){
+// Lišta je v obou záložkách Live, takže id se předává — dva stejné by se
+// v DOM potkaly a prekresliUndo by aktualizovala jen tu první.
+function undoBarHtml(id='btn-undo'){
   const popis=undoPopisek();
   return `<div class="undo-bar">
-    <button class="undo-btn" id="btn-undo" ${popis?'':'disabled'} onclick="vratZpet()"
+    <button class="undo-btn" id="${id}" ${popis?'':'disabled'} onclick="vratZpet()"
       title="${popis?'Vezme zpět poslední zápis':'Zatím není co vracet'}">
       <span class="undo-sipka">↩</span>
       <span class="undo-text">${popis?'Zpět: '+esc(popis):'Zatím není co vracet'}</span>
@@ -893,12 +1023,12 @@ function undoBarHtml(){
 // Lišta se mění s každým klikem; překreslovat kvůli ní celou tabulku by bylo
 // při zapisování znát, stejně jako u týmového souhrnu.
 function prekresliUndo(){
-  const btn=document.getElementById('btn-undo');
-  if(!btn)return;
   const popis=undoPopisek();
-  btn.disabled=!popis;
-  btn.title=popis?'Vezme zpět poslední zápis':'Zatím není co vracet';
-  btn.querySelector('.undo-text').textContent=popis?'Zpět: '+popis:'Zatím není co vracet';
+  document.querySelectorAll('.undo-btn').forEach(btn=>{
+    btn.disabled=!popis;
+    btn.title=popis?'Vezme zpět poslední zápis':'Zatím není co vracet';
+    btn.querySelector('.undo-text').textContent=popis?'Zpět: '+popis:'Zatím není co vracet';
+  });
 }
 
 // Řádek se mění s každým klikem, ale překreslovat kvůli tomu celou tabulku
@@ -1013,6 +1143,7 @@ async function refreshLiveStats(){
         if(el)el.textContent=row[pole];
       });
     });
+    prekresliV2Cisla();
   }catch(e){/* dorovnání je best effort, chybu netlačíme uživateli do obličeje */}
 }
 
@@ -1964,9 +2095,9 @@ function showTab(name){
   document.querySelectorAll('.tab-content').forEach(el=>el.classList.remove('active'));
   document.querySelectorAll('.nav-tab').forEach(el=>el.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
-  const tabs={prehled:0,zapasy:1,tym:2,live:3,statistiky:4};
+  const tabs={prehled:0,zapasy:1,tym:2,live:3,live2:4,statistiky:5};
   document.querySelectorAll('.nav-tab')[tabs[name]]?.classList.add('active');
-  if(name==='live')renderLiveSelect();
+  if(name==='live'||name==='live2')renderLiveSelect();
   if(name==='statistiky')renderStatistiky();
 }
 
