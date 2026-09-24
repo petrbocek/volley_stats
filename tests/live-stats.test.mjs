@@ -1260,6 +1260,98 @@ await page.evaluate(() => {
   renderLiveTable(100);
 });
 
+// ── #76: lišta „vzít zpět" ─────────────────────────────────────────────────
+await page.waitForSelector('#btn-undo');
+const undoText = () => page.textContent('.undo-text');
+const undoVypnuto = () => page.evaluate(() => document.getElementById('btn-undo').disabled);
+// předchozí sada nechala zapisovaný set jinde — blok se ukotví na první,
+// ať se tvrzení o setech nedrží na tom, co po sobě nechal někdo jiný
+await klikSet(1);
+await page.waitForTimeout(300);
+await page.evaluate(() => { undoStack.length = 0; prekresliUndo(); });
+
+pass &= ok('T31a bez zápisu lišta říká, že není co vracet (#76)',
+  (await undoVypnuto()) && /[Nn]ení co vracet/.test(await undoText()));
+
+const predZapisem = await cnt('#cnt-11-servis_plus');
+await page.click('#cnt-11-servis_plus');
+await page.waitForTimeout(250);
+pass &= ok('T31b po zápisu lišta pojmenuje hráčku i akci (#76)',
+  !(await undoVypnuto()) && /Beta/.test(await undoText()) && /Servis/.test(await undoText()));
+
+// jedno klepnutí, žádné držení
+await page.click('#btn-undo');
+await page.waitForTimeout(250);
+pass &= ok('T31c klepnutí na lištu vezme zápis zpět (#76)',
+  await cnt('#cnt-11-servis_plus') === predZapisem);
+pass &= ok('T31d po vyčerpání je lišta zase prázdná (#76)', await undoVypnuto());
+
+// zásobník, ne jen poslední akce
+await page.click('#cnt-11-servis_plus');
+await page.waitForTimeout(150);
+await page.click('#cnt-11-servis_plus');
+await page.waitForTimeout(150);
+await page.click('#btn-undo');
+await page.waitForTimeout(150);
+pass &= ok('T31e vrací se i druhý zápis zpátky, ne jen poslední (#76)',
+  await cnt('#cnt-11-servis_plus') === predZapisem + 1 && !(await undoVypnuto()));
+await page.click('#btn-undo');
+await page.waitForTimeout(200);
+pass &= ok('T31f po vrácení všeho lišta zhasne (#76)',
+  await cnt('#cnt-11-servis_plus') === predZapisem && (await undoVypnuto()));
+
+// ruční odečet je sám o sobě „zpět" — lišta nesmí nabízet vrátit ho podruhé
+await page.click('#cnt-11-servis_plus');
+await page.waitForTimeout(150);
+await longPress('.live-act-cnt#cnt-11-servis_plus');
+await page.waitForTimeout(250);
+pass &= ok('T31g po ručním odečtu nezůstane v liště, co už je vráceno (#76)',
+  await cnt('#cnt-11-servis_plus') === predZapisem && (await undoVypnuto()));
+
+// „zpět" musí trefit set, ve kterém akce vznikla
+await page.click('#cnt-11-servis_plus');
+await page.waitForTimeout(150);
+await klikSet(2);
+await page.waitForTimeout(300);
+pass &= ok('T31h po přepnutí setu lišta připomene, kterého setu se zpět týká (#76)',
+  /1\. set/.test(await undoText()));
+const vSetu2 = await cnt('#cnt-11-servis_plus');
+await page.click('#btn-undo');
+await page.waitForTimeout(400);
+pass &= ok('T31i zpět odečte v setu, kde akce vznikla, ne v tom zobrazeném (#76)',
+  await page.evaluate(() => getStatVal(100, 11, 'servis_plus', 1)) === predZapisem &&
+  await cnt('#cnt-11-servis_plus') === vSetu2);
+await klikSet(1);
+await page.waitForTimeout(300);
+
+// lišta nesmí ukousnout „+ Přidat hráčku" jako u #59
+await page.setViewportSize({ width: 390, height: 844 });
+await page.waitForTimeout(300);
+const undoGeometrie = () => page.evaluate(() => {
+  const wrap = document.getElementById('live-table-wrap');
+  const scroll = wrap.querySelector('.live-table-scroll');
+  const bar = wrap.querySelector('.undo-bar');
+  const btn = [...scroll.querySelectorAll('button')].find(b => b.textContent.includes('Přidat hráčku'));
+  const b = bar.getBoundingClientRect(), w = wrap.getBoundingClientRect();
+  return {
+    // proti scrollovací části, ne proti obalu — pod ní je teď lišta
+    useknuto: btn ? Math.round(btn.getBoundingClientRect().bottom - scroll.getBoundingClientRect().bottom) : 'není',
+    listaMimo: Math.round(b.bottom - w.bottom),
+    vyskaTlacitka: Math.round(document.getElementById('btn-undo').getBoundingClientRect().height),
+  };
+});
+let g = await undoGeometrie();
+pass &= ok('T31j lišta neukousne „Přidat hráčku" na telefonu (#76)', g.useknuto <= 0);
+pass &= ok('T31k lišta se vejde do obalu Live (#76)', g.listaMimo <= 0);
+pass &= ok('T31l tlačítko zpět má aspoň 44px, jak se na palec sluší (#76)', g.vyskaTlacitka >= 44);
+
+await page.setViewportSize({ width: 390, height: 600 });
+await page.waitForTimeout(300);
+g = await undoGeometrie();
+pass &= ok('T31m ani na nízké obrazovce (#76)', g.useknuto <= 0 && g.listaMimo <= 0);
+await page.setViewportSize({ width: 1100, height: 900 });
+await page.waitForTimeout(300);
+
 // ── přihlášení přežije reload ──────────────────────────────────────────────
 await page.reload();
 await nactenoOK();
