@@ -254,6 +254,7 @@ function renderAll(){
   renderPrehled();
   renderZapasy();
   renderTym();
+  renderTymy();
   renderLiveSelect();
   renderStatistiky();
 }
@@ -379,12 +380,15 @@ function isHracInSezona(hracId,sid){
   return state.hraciSezony.some(hs=>hs.hrac_id===hracId&&hs.sezona_id===sid);
 }
 
+// Soupiska a týmy jsou dvě různé věci a od #70 mají každá svou záložku,
+// takže renderTym() kreslí jen hráčky a renderTymy() si žije vlastním životem.
 function renderTym(){
   const sid=currentSeasonId();
   const el=document.getElementById('hraci-list');
   const note=document.getElementById('tym-season-note');
-  if(sid){note.textContent='Přepínačem aktivujete/deaktivujete hráčku pro vybranou sezónu.';}
-  else{note.textContent='Zobrazeni všichni hráči. Vyberte sezónu pro správu soupisky.';}
+  if(note)note.textContent=sid
+    ?'Přepínačem aktivujete/deaktivujete hráčku pro vybranou sezónu.'
+    :'Zobrazeni všichni hráči. Vyberte sezónu pro správu soupisky.';
   if(!state.hraci.length){el.innerHTML='<div class="empty"><span class="empty-icon">👥</span><div class="empty-text">Žádné hráčky</div></div>';return;}
   const zive=zivehraci();
   const archiv=state.hraci.filter(jeArchivovana);
@@ -405,7 +409,6 @@ function renderTym(){
     })).join('');
   }
   el.innerHTML=html||'<div class="empty"><span class="empty-icon">👥</span><div class="empty-text">Žádné hráčky</div></div>';
-  renderTymy();
 }
 
 // Karta hráčky se kreslí na třech místech (soupiska, výběr do sestavy, správa
@@ -450,7 +453,7 @@ async function toggleHracSezona(hracId,sezonaId,inSeason){
         state.hraciSezony.push({hrac_id:hracId,sezona_id:sezonaId});
       }
     }
-    renderTym();renderPrehled();renderLiveSelect();
+    renderTym();renderTymy();renderPrehled();renderLiveSelect();
   }catch(e){toast('Chyba: '+e.message,'error');}
 }
 
@@ -1716,9 +1719,17 @@ function otevriProfil(hracId){
 /* ─── TÝMY ─── */
 function renderTymy(){
   const el=document.getElementById('tymy-list');
-  const tymy=tymySezony(currentSeasonId());
+  const sid=currentSeasonId();
+  const note=document.getElementById('tymy-season-note');
+  if(note){
+    const sez=state.sezony.find(s=>s.id===sid);
+    note.textContent=sez
+      ?`Tým platí jen v sezóně, ve které vznikl — tady ${sez.nazev}.`
+      :'Vyberte sezónu nahoře; tým se zakládá vždy do konkrétní sezóny.';
+  }
+  const tymy=tymySezony(sid);
   if(!tymy.length){
-    el.innerHTML=`<div class="empty" style="padding:24px"><span class="empty-icon" style="font-size:28px">🏐</span><div class="empty-text" style="font-size:14px">${currentSeasonId()?'V této sezóně zatím žádný tým':'Vyberte sezónu'}</div></div>`;
+    el.innerHTML=`<div class="empty" style="padding:24px"><span class="empty-icon" style="font-size:28px">🏐</span><div class="empty-text" style="font-size:14px">${sid?'V této sezóně zatím žádný tým':'Vyberte sezónu'}</div></div>`;
     return;
   }
   el.innerHTML=`<div class="tymy-grid">${tymy.map(t=>{
@@ -2085,7 +2096,7 @@ async function smazatHracku(){
     state.hraciTymy=state.hraciTymy.filter(x=>x.hrac_id!==id);
     state.zapasHraci=state.zapasHraci.filter(x=>x.hrac_id!==id);
     closeModal('modal-hrac');
-    renderTym();renderPrehled();renderLiveSelect();renderStatistiky();
+    renderTym();renderTymy();renderPrehled();renderLiveSelect();renderStatistiky();
     toast('Hráčka smazána','success');
   }catch(e){toast('Chyba: '+e.message,'error');}
 }
@@ -2107,7 +2118,7 @@ async function nastavAktivni(id,aktivni,hlaska){
     const h=state.hraci.find(x=>x.id===id);
     if(h)h.aktivni=aktivni;
     closeModal('modal-hrac');
-    renderTym();renderPrehled();renderLiveSelect();renderStatistiky();
+    renderTym();renderTymy();renderPrehled();renderLiveSelect();renderStatistiky();
     toast(hlaska,'success');
   }catch(e){toast('Chyba: '+e.message,'error');}
 }
@@ -2125,7 +2136,7 @@ async function saveHrac(){
       if(idx>=0)state.hraci[idx]={...state.hraci[idx],...(res&&res[0]?res[0]:{jmeno,cislo:cislo?parseInt(cislo):null,pozice})};
       state.hraci.sort((a,b)=>a.jmeno.localeCompare(b.jmeno));
       closeModal('modal-hrac');
-      renderTym();renderPrehled();renderLiveSelect();renderStatistiky();
+      renderTym();renderTymy();renderPrehled();renderLiveSelect();renderStatistiky();
       toast('Hráčka upravena','success');
     }else{
       const res=await api('POST','vb_hraci',{jmeno,cislo:cislo?parseInt(cislo):null,pozice,aktivni:true});
@@ -2138,7 +2149,7 @@ async function saveHrac(){
         state.hraciSezony.push({hrac_id:nh.id,sezona_id:sid});
       }
       closeModal('modal-hrac');
-      renderTym();renderPrehled();renderLiveSelect();
+      renderTym();renderTymy();renderPrehled();renderLiveSelect();
       toast('Hráčka přidána','success');
     }
     document.getElementById('in-hrac-jmeno').value='';
@@ -2239,9 +2250,10 @@ function showTab(name){
   document.querySelectorAll('.tab-content').forEach(el=>el.classList.remove('active'));
   document.querySelectorAll('.nav-tab').forEach(el=>el.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
-  const tabs={prehled:0,zapasy:1,tym:2,live:3,live2:4,statistiky:5};
+  const tabs={prehled:0,zapasy:1,hracky:2,tymy:3,live:4,live2:5,statistiky:6};
   document.querySelectorAll('.nav-tab')[tabs[name]]?.classList.add('active');
   if(name==='live'||name==='live2')renderLiveSelect();
+  if(name==='tymy')renderTymy();
   if(name==='statistiky')renderStatistiky();
 }
 
