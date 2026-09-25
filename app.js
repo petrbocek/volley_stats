@@ -759,7 +759,9 @@ function prekresliSouper(){
    Zóny jako ve volejbale: 4-3-2 u sítě, 5-6-1 vzadu, zóna 1 podává. Libero
    se do zóny neukládá — pozná se podle pozice a stojí stranou, protože se
    střídá mimo rotaci (#84). */
-const ZONY_ROZLOZENI=[[4,3,2],[5,6,1]];   // shora dolů, jak to vidí zapisovatel
+// Síť vpravo: standardní schéma otočené o 90°. Pravý sloupec je u sítě
+// (4-3-2 shora dolů), levý zadní řada (5-6-1), takže zóna 1 je vlevo dole.
+const ZONY_ROZLOZENI=[[5,4],[6,3],[1,2]];
 let v2Hriste=false;                       // přepínač seznam ⇄ hřiště
 
 function postaveniSetu(zapasId,set){
@@ -769,11 +771,41 @@ function postaveniSetu(zapasId,set){
   return m;
 }
 
-function jeLibero(h){return (h?.pozice||'').toLowerCase()==='libero';}
+// Libero je role v konkrétním zápase, ne vlastnost hráčky: pozice v kartě
+// hráčky o tom nerozhoduje, nominuje se do sestavy zápasu.
+function jeLibero(zapasId,hracId){
+  return !!state.zapasHraci.find(zh=>zh.zapas_id===zapasId&&zh.hrac_id===hracId)?.libero;
+}
 
 function liberaSestavy(zapasId){
   const sid=currentSeasonId()||state.zapasy.find(z=>z.id===zapasId)?.sezona_id||0;
-  return serazenaSestava(zapasId,hraciVSezoně(sid)).filter(jeLibero);
+  return serazenaSestava(zapasId,hraciVSezoně(sid)).filter(h=>jeLibero(zapasId,h.id));
+}
+
+async function prepniLibero(zapasId,hracId){
+  if(!isLoggedIn()){toast('Na změny se přihlas (🔒 nahoře)','error');return;}
+  const zh=state.zapasHraci.find(x=>x.zapas_id===zapasId&&x.hrac_id===hracId);
+  if(!zh)return;
+  const nove=!zh.libero;
+  try{
+    await apiUpsert('vb_zapas_hraci',{zapas_id:zapasId,hrac_id:hracId,libero:nove},'zapas_id,hrac_id');
+    zh.libero=nove;
+    // nominované libero na hřišti nestojí, tak ji z postavení vyndáme
+    if(nove)for(let set=1;set<=SETU;set++){
+      const m=postaveniSetu(zapasId,set);
+      const zona=[...m.entries()].find(([,id])=>id===hracId)?.[0];
+      if(zona)vyndejZeZony(zapasId,set,zona);
+    }
+    prekresliLive(zapasId);
+    toast(nove?'Nominováno jako libero':'Libero zrušeno','success');
+  }catch(e){toast('Chyba: '+e.message,'error');}
+}
+
+function v2PrepniLibero(){
+  const zapasId=parseInt(document.getElementById('v2-akce-zapas').value);
+  const hracId=parseInt(document.getElementById('v2-akce-hrac').value);
+  closeModal('modal-v2-akce');
+  prepniLibero(zapasId,hracId);
 }
 
 // Kdo je v sestavě, ale zrovna nestojí na hřišti. Libera se do zón nedávají,
@@ -782,34 +814,28 @@ function lavicka(zapasId,set){
   const sid=currentSeasonId()||state.zapasy.find(z=>z.id===zapasId)?.sezona_id||0;
   const naHristi=[...postaveniSetu(zapasId,set).values()];
   return serazenaSestava(zapasId,hraciVSezoně(sid))
-    .filter(h=>!naHristi.includes(h.id)&&!jeLibero(h));
+    .filter(h=>!naHristi.includes(h.id)&&!jeLibero(zapasId,h.id));
 }
 
-async function postavDoZony(zapasId,set,zona,hracId){
+// Všechno postavení jde jednou cestou: stav se upraví v paměti a odešle celý.
+// Dva požadavky za sebou (smaž tam, zapiš sem) můžou skončit v půlce a nechat
+// set bez hráčky.
+function postavDoZony(zapasId,set,zona,hracId){
   if(!isLoggedIn()){toast('Na změny se přihlas (🔒 nahoře)','error');return;}
-  try{
-    // hráčka může být na hřišti jen jednou — z původní zóny ji vyndáme,
-    // jinak by unikátní index zápis odmítl a zůstalo by to rozbité
-    const puvodni=[...postaveniSetu(zapasId,set).entries()].find(([,id])=>id===hracId);
-    if(puvodni&&puvodni[0]!==zona){
-      await apiDelete('vb_postaveni',`zapas_id=eq.${zapasId}&set_cislo=eq.${set}&zona=eq.${puvodni[0]}`);
-      state.postaveni=state.postaveni.filter(p=>!(p.zapas_id===zapasId&&(p.set_cislo||1)===set&&p.zona===puvodni[0]));
-    }
-    await apiUpsert('vb_postaveni',{zapas_id:zapasId,set_cislo:set,zona,hrac_id:hracId},'zapas_id,set_cislo,zona');
-    const i=state.postaveni.findIndex(p=>p.zapas_id===zapasId&&(p.set_cislo||1)===set&&p.zona===zona);
-    const radek={zapas_id:zapasId,set_cislo:set,zona,hrac_id:hracId};
-    if(i>=0)state.postaveni[i]=radek;else state.postaveni.push(radek);
-    prekresliLive(zapasId);
-  }catch(e){toast('Chyba: '+e.message,'error');}
+  const m=postaveniSetu(zapasId,set);
+  [...m.entries()].forEach(([z,id])=>{if(id===hracId)m.delete(z);});   // jen jednou na hřišti
+  m.set(zona,hracId);
+  state.postaveni=state.postaveni.filter(p=>!(p.zapas_id===zapasId&&(p.set_cislo||1)===set));
+  state.postaveni.push(...[...m.entries()].map(([z,id])=>({zapas_id:zapasId,set_cislo:set,zona:z,hrac_id:id})));
+  ulozPostaveni(zapasId,set);
+  prekresliLive(zapasId);
 }
 
-async function vyndejZeZony(zapasId,set,zona){
+function vyndejZeZony(zapasId,set,zona){
   if(!isLoggedIn()){toast('Na změny se přihlas (🔒 nahoře)','error');return;}
-  try{
-    await apiDelete('vb_postaveni',`zapas_id=eq.${zapasId}&set_cislo=eq.${set}&zona=eq.${zona}`);
-    state.postaveni=state.postaveni.filter(p=>!(p.zapas_id===zapasId&&(p.set_cislo||1)===set&&p.zona===zona));
-    prekresliLive(zapasId);
-  }catch(e){toast('Chyba: '+e.message,'error');}
+  state.postaveni=state.postaveni.filter(p=>!(p.zapas_id===zapasId&&(p.set_cislo||1)===set&&p.zona===zona));
+  ulozPostaveni(zapasId,set);
+  prekresliLive(zapasId);
 }
 
 // Základní postavení se dá převzít z předchozího setu — naklikávat šestku
@@ -819,7 +845,10 @@ async function prevezmiPostaveni(zapasId,set){
   if(zdroj<1)return;
   const m=postaveniSetu(zapasId,zdroj);
   if(!m.size){toast('Předchozí set žádné postavení nemá','error');return;}
-  for(const [zona,hracId] of m)await postavDoZony(zapasId,set,zona,hracId);
+  state.postaveni=state.postaveni.filter(p=>!(p.zapas_id===zapasId&&(p.set_cislo||1)===set));
+  state.postaveni.push(...[...m.entries()].map(([zona,hrac_id])=>({zapas_id:zapasId,set_cislo:set,zona,hrac_id})));
+  await ulozPostaveni(zapasId,set);
+  prekresliLive(zapasId);
   toast(`Převzato z ${zdroj}. setu`,'success');
 }
 
@@ -862,6 +891,27 @@ function kontrolaSkore(zapasId,set){
           rozdilMy,rozdilOni,sedi:rozdilMy===0&&rozdilOni===0};
 }
 
+// Stav utkání = kolik setů je rozhodnutých. Zapsaný výsledek má přednost před
+// odvozeným; bez něj se set počítá za rozhodnutý podle pravidla (25, v pátém
+// 15, vždy o dva) — dřív ne, aby se rozehraný set nehlásil jako vyhraný.
+function setRozhodnuty(zapasId,set){
+  const z=state.zapasy.find(z=>z.id===zapasId);
+  const my=z?.[`set${set}_my`],oni=z?.[`set${set}_oni`];
+  const s=(my!=null&&oni!=null)?{nase:my,jejich:oni}:skoreSetu(zapasId,set);
+  const cil=set===5?15:25;
+  if(Math.max(s.nase,s.jejich)<cil||Math.abs(s.nase-s.jejich)<2)return null;
+  return s.nase>s.jejich?'my':'oni';
+}
+
+function stavUtkani(zapasId){
+  let my=0,oni=0;
+  for(let set=1;set<=SETU;set++){
+    const v=setRozhodnuty(zapasId,set);
+    if(v==='my')my++;else if(v==='oni')oni++;
+  }
+  return {my,oni};
+}
+
 function skoreHtml(zapasId){
   const set=state.liveSet;
   const s=skoreSetu(zapasId,set);
@@ -877,7 +927,9 @@ function skoreHtml(zapasId){
          ⚠ Zapsáno ${k.zapsane.nase}:${k.zapsane.jejich} — z akcí vychází ${k.odvozene.nase}:${k.odvozene.jejich}
        </div>`
     : '';
+  const u=stavUtkani(zapasId);
   return `<div class="skore">
+    <div class="skore-utkani">Sety <strong>${u.my}:${u.oni}</strong></div>
     <div class="skore-hlavni">
       <span class="skore-popis">${set}. set</span>
       <span class="skore-cisla"><span id="skore-nase">${s.nase}</span><span class="skore-dvojtecka">:</span><span id="skore-jejich">${s.jejich}</span></span>
@@ -917,23 +969,25 @@ function otocNaPodavajici(zapasId,set,hracId){
   const nove=[...m.entries()].map(([z,id])=>({zapas_id:zapasId,set_cislo:set,zona:poRotaci(z,kroku),hrac_id:id}));
   state.postaveni=state.postaveni.filter(p=>!(p.zapas_id===zapasId&&(p.set_cislo||1)===set));
   state.postaveni.push(...nove);
-  ulozPostaveni(nove);
+  ulozPostaveni(zapasId,set);
   return true;
 }
 
-async function ulozPostaveni(radky){
-  if(!radky.length||!isLoggedIn())return;
+// Rotace padala na unikátním indexu (zápas, set, hráčka): upsert po řádcích
+// znamená, že hráčka na okamžik existuje ve dvou zónách naráz. Celé postavení
+// se proto vyměňuje jednou RPC v jedné transakci.
+async function ulozPostaveni(zapasId,set){
+  if(!isLoggedIn())return;
+  const radky=[...postaveniSetu(zapasId,set).entries()].map(([zona,hrac_id])=>({zona,hrac_id}));
   try{
-    // jedním zápisem, ne šesti: během rozehry se nemá co posílat šestkrát
-    await apiUpsert('vb_postaveni',radky,'zapas_id,set_cislo,zona');
+    await apiRpc('vb_uloz_postaveni',{p_zapas:zapasId,p_set:set,p_postaveni:radky});
   }catch(e){toast('Postavení se neuložilo: '+e.message,'error');}
 }
 
 function obnovPostaveni(zapasId,set,dvojice){
   state.postaveni=state.postaveni.filter(p=>!(p.zapas_id===zapasId&&(p.set_cislo||1)===set));
-  const radky=dvojice.map(([zona,hrac_id])=>({zapas_id:zapasId,set_cislo:set,zona,hrac_id}));
-  state.postaveni.push(...radky);
-  ulozPostaveni(radky);
+  state.postaveni.push(...dvojice.map(([zona,hrac_id])=>({zapas_id:zapasId,set_cislo:set,zona,hrac_id})));
+  ulozPostaveni(zapasId,set);
 }
 
 // Ruční oprava: když zapisovatel jeden servis vynechá, postavení se rozjede
@@ -1029,9 +1083,11 @@ function hristeHtml(zapasId){
 
   return `<div class="hriste-wrap">
     ${napoveda}
-    <div class="hriste-sit">síť</div>
-    <div class="hriste">${ZONY_ROZLOZENI.map(rada=>
-      `<div class="hriste-rada">${rada.map(karta).join('')}</div>`).join('')}</div>
+    <div class="hriste-plocha">
+      <div class="hriste">${ZONY_ROZLOZENI.map(rada=>
+        `<div class="hriste-rada">${rada.map(karta).join('')}</div>`).join('')}</div>
+      <div class="hriste-sit"><span>síť</span></div>
+    </div>
     ${liberaHtml}
   </div>`;
 }
@@ -1151,6 +1207,8 @@ function v2OtevriAkce(zapasId,hracId,zona=0){
   // hřišti opravdu stojí
   document.getElementById('btn-v2-stridat').style.display=zona?'':'none';
   document.getElementById('btn-v2-podava').style.display=zona&&zona!==1?'':'none';
+  const btnLib=document.getElementById('btn-v2-libero');
+  btnLib.textContent=jeLibero(zapasId,hracId)?'🎽 Zrušit libero':'🎽 Libero';
   document.getElementById('v2-akce-title').textContent=
     `${h.jmeno}${h.cislo?' · #'+h.cislo:''} — ${state.liveSet}. set`;
   document.getElementById('v2-akce-obsah').innerHTML=ACTIONS.map(a=>{

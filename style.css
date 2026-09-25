@@ -373,10 +373,14 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 .hriste-wrap{padding:10px}
 .hriste-napoveda{font-size:12px;color:var(--muted);margin-bottom:8px;display:flex;
   align-items:center;gap:8px;flex-wrap:wrap}
-.hriste-sit{text-align:center;font-size:10px;text-transform:uppercase;letter-spacing:2px;
-  color:var(--muted);border-top:3px solid var(--muted);padding-top:3px;margin-bottom:6px}
-.hriste{display:flex;flex-direction:column;gap:6px}
-.hriste-rada{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+/* Síť vpravo: svislý pruh vedle plochy, ne vodorovný nad ní. */
+.hriste-plocha{display:flex;gap:6px;align-items:stretch}
+.hriste-sit{flex-shrink:0;width:18px;border-left:3px solid var(--muted);display:flex;
+  align-items:center;justify-content:center}
+.hriste-sit span{font-size:10px;text-transform:uppercase;letter-spacing:2px;color:var(--muted);
+  writing-mode:vertical-rl}
+.hriste{flex:1;display:flex;flex-direction:column;gap:6px;min-width:0}
+.hriste-rada{display:grid;grid-template-columns:repeat(2,1fr);gap:6px}
 .hriste-zona{min-height:76px;display:flex;flex-direction:column;align-items:flex-start;
   justify-content:center;gap:1px;padding:6px 8px;border:1px solid var(--border);border-radius:10px;
   background:var(--surface2);cursor:pointer;color:var(--text);font-family:inherit;text-align:left;
@@ -408,6 +412,8 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
    Skóre se neukládá, skládá se z akcí. Varování se ukazuje, jen když se
    rozchází se zapsaným výsledkem — pak v zápisu něco chybí (#84). */
 .skore{flex-shrink:0;padding:8px 12px;border-bottom:1px solid var(--border);background:var(--surface2)}
+.skore-utkani{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:700}
+.skore-utkani strong{color:var(--accent2);font-family:'Oswald',sans-serif;font-size:15px}
 .skore-hlavni{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
 .skore-popis{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:700}
 .skore-cisla{font-family:'Oswald',sans-serif;font-size:30px;font-weight:700;line-height:1}
