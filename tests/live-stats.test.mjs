@@ -39,6 +39,7 @@ const FIX = {
   vb_chyby_souperu: [{ zapas_id: 100, set_cislo: 1, pocet: 2, body: 0 }],
   vb_postaveni: [],
   vb_set_info: [],
+  vb_udalosti: [],
   vb_zapas_hraci: [{ zapas_id: 100, hrac_id: 10 }, { zapas_id: 100, hrac_id: 11 },
                    { zapas_id: 100, hrac_id: 12 }, { zapas_id: 100, hrac_id: 13 },
                    { zapas_id: 200, hrac_id: 10 }],
@@ -99,6 +100,17 @@ await page.route('**/rest/v1/rpc/vb_uloz_postaveni', async route => {
     body: JSON.stringify({ zapas_id: p_zapas, set_cislo: p_set, pocet: p_postaveni.length }) });
 });
 
+let udalostId = 1000;
+await page.route('**/rest/v1/rpc/vb_smaz_posledni_udalost', async route => {
+  const { p_zapas, p_set, p_hrac, p_pole } = route.request().postDataJSON();
+  for (let i = FIX.vb_udalosti.length - 1; i >= 0; i--) {
+    const u = FIX.vb_udalosti[i];
+    if (u.zapas_id === p_zapas && u.set_cislo === p_set && u.pole === p_pole &&
+        (u.hrac_id ?? null) === (p_hrac ?? null)) { FIX.vb_udalosti.splice(i, 1); break; }
+  }
+  return route.fulfill({ status: 200, contentType: 'application/json', body: 'null' });
+});
+
 await page.route('**/rest/v1/rpc/vb_zapis_set_info', async route => {
   const { p_zapas, p_set, p_pole, p_delta } = route.request().postDataJSON();
   let r = FIX.vb_set_info.find(x => x.zapas_id === p_zapas && x.set_cislo === p_set);
@@ -138,6 +150,11 @@ await page.route('**/rest/v1/**', async route => {
     });
   }
   otherWrites.push({ table, method: req.method(), url: req.url(), body: req.postDataJSON?.() });
+  if (req.method() === 'POST' && table === 'vb_udalosti') {
+    const u = { id: udalostId++, ...req.postDataJSON() };
+    FIX.vb_udalosti.push(u);
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([u]) });
+  }
   if (req.method() === 'POST' && table === 'vb_tymy') {
     const t = { id: 99, ...req.postDataJSON() };
     FIX.vb_tymy.push(t);
@@ -208,7 +225,12 @@ pass &= ok('T1a klik pošle jednu deltu +1 (#27)',
   rpcCalls.length === 1 && rpcCalls[0].length === 1 &&
   rpcCalls[0][0].hrac_id === 10 && rpcCalls[0][0].pole === 'servis_plus' && rpcCalls[0][0].delta === 1);
 pass &= ok('T1b zápis nese access token (#24)', hlavicky.some(h => h === 'Bearer TESTTOKEN'));
-pass &= ok('T1c nikdo nepíše přímo do vb_statistiky (#27)', otherWrites.length === 0);
+pass &= ok('T1c nikdo nepíše přímo do vb_statistiky (#27)',
+  !otherWrites.some(w => w.table === 'vb_statistiky'));
+pass &= ok('T1c2 klik se zaloguje do výměn, aby šlo spočítat side-out (#84)',
+  otherWrites.filter(w => w.table === 'vb_udalosti' && w.method === 'POST').length === 1);
+pass &= ok('T1c3 a nic jiného se přitom nezapisuje (#27)',
+  otherWrites.every(w => w.table === 'vb_udalosti' || w.method === 'GET'));
 pass &= ok('T1d hráčka bez kliku se neuloží (žádné nulové řádky)',
   !rpcCalls.flat().some(z => z.hrac_id === 11));
 
@@ -2903,6 +2925,121 @@ pass &= ok('T44n všechno se pořád vejde na telefon (#84)', await page.evaluat
 }));
 await page.setViewportSize({ width: 1100, height: 900 });
 await page.waitForTimeout(300);
+
+
+// ── #84 část 9: side-out, série a rotace z logu výměn ──────────────────────
+await page.click('.nav-tab:nth-child(6)');
+await page.waitForSelector('#live2-wrap');
+await page.evaluate(() => { if (!v2Hriste) v2PrepniHriste(); });
+await page.waitForSelector('.hriste-info');
+
+// čistý set: čtyři hráčky v zónách, prázdný log
+await page.evaluate(() => {
+  state.liveSet = 4;
+  state.udalosti = state.udalosti.filter(u => u.zapas_id !== 100);
+  state.setInfo = state.setInfo.filter(x => x.zapas_id !== 100);
+  state.postaveni = state.postaveni.filter(p => p.zapas_id !== 100);
+  [10, 11, 12, 13].forEach((id, i) => state.postaveni.push(
+    { zapas_id: 100, set_cislo: 4, zona: i + 1, hrac_id: id }));
+  renderLive2(100);
+});
+await page.waitForTimeout(300);
+
+pass &= ok('T45a bez prvního podání se side-out nepočítá a appka o něj požádá (#84)',
+  await page.evaluate(() => sideOut(100, 4)) === null &&
+  /Podání na začátku/.test(await page.textContent('.hriste-info')));
+
+otherWrites = [];
+await page.click('.hriste-info button:has-text("Soupeře")');
+await page.waitForTimeout(500);
+pass &= ok('T45b zadané první podání se uloží (#84)',
+  await page.evaluate(() => setInfo(100, 4).prvni_podani) === 'oni' &&
+  otherWrites.some(w => w.table === 'vb_set_info' && w.body && w.body.prvni_podani === 'oni'));
+
+// výměny: soupeř podává, my uhrajeme dvě, pak ztratíme
+const zapis = (hrac, pole) => page.evaluate(([h, p]) => {
+  if (h === null) bumpSouper(100, p === 'souper_chyba' ? 'pocet' : 'body', 1);
+  else bump(h, 100, p, 1);
+}, [hrac, pole]);
+
+await zapis(10, 'utok_plus');    await page.waitForTimeout(250);
+await zapis(11, 'utok_plus');    await page.waitForTimeout(250);
+await zapis(12, 'utok_minus');   await page.waitForTimeout(250);
+
+pass &= ok('T45c side-out počítá jen výměny při soupeřově podání (#84)',
+  await page.evaluate(() => {
+    const so = sideOut(100, 4);
+    // podával soupeř, dva body naše (side-out), pak jsme podávali a ztratili
+    return so.celkem === 1 && so.uhrano === 1 && so.pct === 100;
+  }));
+pass &= ok('T45d podání přechází, když bod získá ten, kdo nepodával (#84)',
+  await page.evaluate(() => {
+    const p = prubehSetu(100, 4);
+    return p.vymeny.length === 3 &&
+           p.vymeny[0].podaval === 'oni' && p.vymeny[0].bod === 'my' &&
+           p.vymeny[1].podaval === 'my'  && p.vymeny[1].bod === 'my' &&
+           p.vymeny[2].podaval === 'my'  && p.vymeny[2].bod === 'oni';
+  }));
+pass &= ok('T45e série počítá po sobě jdoucí body (#84)',
+  await page.evaluate(() => {
+    const p = prubehSetu(100, 4);
+    return p.serie.kdo === 'oni' && p.serie.delka === 1 && p.nejdelsi.my === 2;
+  }));
+
+// neutrální akce výměnu neuzavírá
+const predNeutralem = await page.evaluate(() => prubehSetu(100, 4).vymeny.length);
+await zapis(10, 'utok_neutral'); await page.waitForTimeout(300);
+pass &= ok('T45f neutrální akce se do výměn nepočítá (#84)',
+  await page.evaluate(() => prubehSetu(100, 4).vymeny.length) === predNeutralem);
+
+// soupeřova strana do logu taky
+await zapis(null, 'souper_chyba'); await page.waitForTimeout(300);
+pass &= ok('T45g chyba soupeře je výměna jako každá jiná (#84)',
+  await page.evaluate(n => {
+    const p = prubehSetu(100, 4);
+    return p.vymeny.length === n + 1 && p.vymeny.at(-1).bod === 'my';
+  }, predNeutralem));
+
+// rotace podle podávající
+pass &= ok('T45h rotace se poznává podle podávající, ne podle čísla (#84)',
+  await page.evaluate(() => {
+    const r = rotacePrehled(100, 4);
+    return r.length > 0 && r.every(x => x.hrac_id && state.hraci.some(h => h.id === x.hrac_id));
+  }));
+pass &= ok('T45i nejhorší rotace je první, tam se hledá problém (#84)',
+  await page.evaluate(() => {
+    const r = rotacePrehled(100, 4);
+    return r.every((x, i) => i === 0 || r[i - 1].rozdil <= x.rozdil);
+  }));
+pass &= ok('T45j bilance rotací sedí na výměny (#84)', await page.evaluate(() => {
+  const p = prubehSetu(100, 4), r = rotacePrehled(100, 4);
+  const naseVRotacich = r.reduce((n, x) => n + x.nase, 0);
+  const naseVeVymenach = p.vymeny.filter(v => v.bod === 'my' && v.zona1).length;
+  return naseVRotacich === naseVeVymenach;
+}));
+
+// zpět odebere i z logu
+const predZpetem = await page.evaluate(() => prubehSetu(100, 4).vymeny.length);
+await page.click('#btn-undo-v2');
+await page.waitForTimeout(500);
+pass &= ok('T45k zpět odebere výměnu i z logu (#84)',
+  await page.evaluate(() => prubehSetu(100, 4).vymeny.length) === predZpetem - 1);
+
+// a je to vidět
+pass &= ok('T45l side-out a série jsou vidět pod hřištěm (#84)',
+  await page.evaluate(() => {
+    const t = document.querySelector('.hriste-info').textContent;
+    return /Side-out/.test(t) && /Série/.test(t) && /Rotace/.test(t);
+  }));
+pass &= ok('T45m slabý side-out je odlišený (#84)', await page.evaluate(() => {
+  // pod 60 % je podle prohlížených appek varovná hranice
+  const so = sideOut(100, 4);
+  const el = document.querySelector('.hriste-info .info-hodnota');
+  return so.pct == null || (so.pct < 60) === el.classList.contains('slabe');
+}));
+
+await page.evaluate(() => { state.liveSet = 1; renderLive2(100); });
+await page.waitForTimeout(200);
 
 await b.close();
 console.log(pass ? '\nVŠE PROŠLO' : '\nNĚCO SELHALO');
