@@ -391,7 +391,16 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
   overflow:hidden}
 .hriste-zona:active{background:var(--surface)}
 .hriste-zona:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.hriste-zona.podava{border-color:var(--accent);background:rgba(255,107,53,.08)}
+/* Zóny 1–6 jsou naše šestka na hřišti — nesou oranžovou (#84). */
+.hriste .hriste-zona{border-color:rgba(249,115,22,.45);background:rgba(249,115,22,.10)}
+.hriste .hriste-zona.prazdna{border-color:rgba(249,115,22,.3);background:rgba(249,115,22,.03)}
+.hriste .hriste-zona .hriste-cislo-zony{color:var(--accent)}
+/* Podávající ať se v té oranžové neztratí: plná barva a silnější rámeček. */
+.hriste .hriste-zona.podava{border-color:var(--accent);border-width:2px;
+  background:rgba(249,115,22,.24)}
+/* Odezva na klepnutí musí přebít obarvení, proto až za ním. */
+.hriste .hriste-zona:active,.hriste .hriste-zona.podava:active,
+.hriste-zona.libero:active{background:var(--surface)}
 .hriste-zona.prazdna{align-items:center;justify-content:center;border-style:dashed;color:var(--muted)}
 .hriste-cislo-zony{font-size:10px;line-height:1.4;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
 .hriste-zona.podava .hriste-cislo-zony{color:var(--accent)}
@@ -416,12 +425,13 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 .info-souper{font-family:'Oswald',sans-serif;font-size:13px;margin-left:4px}
 .info-souper.plus{color:var(--green)}
 .info-souper.minus{color:var(--red)}
-.hriste-dlazdice{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;
+.hriste-dlazdice{display:flex;flex-direction:column;align-items:center;justify-content:center;
   gap:1px;padding:6px 8px;border:1px solid var(--border);border-radius:10px;
-  background:var(--surface2);color:var(--text);font-family:inherit;text-align:left;
+  background:var(--surface2);color:var(--text);font-family:inherit;text-align:center;
   min-height:44px;overflow:hidden}
 /* Sety jsou jen dvě číslice — nemusí dostat tolik místa jako cíl na klepnutí. */
-.hriste-mimo>.dl-sety{flex:0 0 auto;flex-direction:row;align-items:baseline;gap:6px;min-height:32px}
+.hriste-mimo>.dl-sety{flex:0 0 auto;flex-direction:row;align-items:baseline;
+  justify-content:center;gap:6px;min-height:32px}
 .dlazdice-sety{font-family:'Oswald',sans-serif;font-size:17px;font-weight:700;color:var(--accent2)}
 button.hriste-dlazdice{cursor:pointer}
 button.hriste-dlazdice:active{background:var(--surface)}
@@ -431,8 +441,12 @@ button.hriste-dlazdice:focus-visible{outline:2px solid var(--accent);outline-off
 .hriste-dlazdice.dl-skore .dlazdice-hodnota .plus{color:var(--green)}
 .hriste-dlazdice.dl-skore .dlazdice-hodnota .minus{color:var(--red)}
 .dlazdice-uprava{font-size:9px;color:var(--accent);text-transform:uppercase;letter-spacing:.5px}
-.hriste-zona.libero{border-style:dashed;border-color:var(--accent2)}
+/* Libero je mimo hřiště, tak nese modrou proti oranžové šestce (#84). */
+.hriste-zona.libero{border-style:solid;border-color:var(--accent2);background:rgba(77,171,247,.12)}
+.hriste-zona.libero.prazdna{border-style:dashed;border-color:rgba(77,171,247,.45);
+  background:rgba(77,171,247,.04)}
 .hriste-zona.libero .hriste-cislo-zony{color:var(--accent2)}
+.hriste-zona.libero .hriste-jmeno{color:var(--accent2)}
 
 /* úprava skóre mimo statistiku */
 .skore-uprava-radek{display:flex;align-items:center;justify-content:space-between;gap:10px;

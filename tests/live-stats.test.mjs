@@ -3122,6 +3122,74 @@ pass &= ok('T46f na telefonu zůstalo hřiště kompaktní (#84)', await page.ev
 await page.setViewportSize({ width: 1100, height: 900 });
 await page.waitForTimeout(300);
 
+
+// ── #84 část 11: barvy hřiště a zarovnání stavu ───────────────────────────
+await page.setViewportSize({ width: 1390, height: 1800 });
+await page.waitForTimeout(400);
+
+// rgb(a) → {r,g,b}; oranžová má r výrazně nad g nad b, modrá naopak
+const rozbor = 'x=>{const[r,g,b,a]=getComputedStyle(x).backgroundColor.match(/[\\d.]+/g).map(Number);' +
+  'return{r,g,b,a:a===undefined?1:a};}';
+
+pass &= ok('T47a0 zóny i libero jsou obsazené, jinak by se měřilo prázdno (#84)',
+  await page.evaluate(() =>
+    [...document.querySelectorAll('.hriste .hriste-zona')].some(e => e.querySelector('.hriste-jmeno')) &&
+    !!document.querySelector('.hriste-mimo .hriste-zona.libero .hriste-jmeno')));
+
+pass &= ok('T47a všech šest zón na hřišti nese oranžovou (#84)', await page.evaluate(f => {
+  const barva = eval(f);
+  const z = [...document.querySelectorAll('.hriste .hriste-zona')];
+  return z.length === 6 && z.every(e => {
+    const p = barva(e), r = getComputedStyle(e).borderTopColor.match(/[\d.]+/g).map(Number);
+    return p.r > p.g && p.g > p.b && r[0] > r[1] && r[1] > r[2];
+  });
+}, rozbor));
+
+pass &= ok('T47b podávající je v té oranžové pořád rozeznatelná (#84)',
+  await page.evaluate(f => {
+    const barva = eval(f);
+    const podava = document.querySelector('.hriste .hriste-zona.podava');
+    const jina = [...document.querySelectorAll('.hriste .hriste-zona')].find(e => e !== podava);
+    const s = getComputedStyle(podava), j = getComputedStyle(jina);
+    return s.backgroundColor !== j.backgroundColor &&
+           (s.borderTopColor !== j.borderTopColor ||
+            parseFloat(s.borderTopWidth) > parseFloat(j.borderTopWidth)) &&
+           barva(podava).a > barva(jina).a;   // sytější oranžová, ne jiný odstín
+  }, rozbor));
+
+pass &= ok('T47c libero se barvou liší od zón na hřišti (#84)', await page.evaluate(f => {
+  const barva = eval(f);
+  const lib = document.querySelector('.hriste-mimo .hriste-zona.libero');
+  const zona = document.querySelector('.hriste .hriste-zona');
+  const lp = barva(lib), zp = barva(zona);
+  const lr = getComputedStyle(lib).borderTopColor.match(/[\d.]+/g).map(Number);
+  // modrá: b nad r; navíc se nesmí trefit do stejné barvy jako hřiště
+  return lp.b > lp.r && lr[2] > lr[0] &&
+         getComputedStyle(lib).backgroundColor !== getComputedStyle(zona).backgroundColor &&
+         (lp.r !== zp.r || lp.b !== zp.b);
+}, rozbor));
+
+pass &= ok('T47d stav a sety jsou v dlaždici na střed (#84)', await page.evaluate(() =>
+  ['.dl-sety', '.dl-skore'].every(sel => {
+    const d = document.querySelector('.hriste-mimo ' + sel);
+    const r = d.getBoundingClientRect();
+    const deti = [...d.children].map(e => e.getBoundingClientRect());
+    const levy = Math.min(...deti.map(x => x.left)), pravy = Math.max(...deti.map(x => x.right));
+    // obsah je vystředěný, když jsou okraje vlevo i vpravo stejně široké
+    return Math.abs((levy - r.left) - (r.right - pravy)) <= 2;
+  })));
+
+await page.setViewportSize({ width: 390, height: 844 });
+await page.waitForTimeout(300);
+pass &= ok('T47e na telefonu barvy drží a nic nepřeteklo (#84)', await page.evaluate(f => {
+  const barva = eval(f);
+  const z = document.querySelector('.hriste .hriste-zona'), p = barva(z);
+  return p.r > p.b &&
+         document.documentElement.scrollWidth - document.documentElement.clientWidth <= 0;
+}, rozbor));
+await page.setViewportSize({ width: 1100, height: 900 });
+await page.waitForTimeout(300);
+
 await b.close();
 console.log(pass ? '\nVŠE PROŠLO' : '\nNĚCO SELHALO');
 process.exit(pass ? 0 : 1);
