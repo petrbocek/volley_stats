@@ -2144,6 +2144,124 @@ pass &= ok('T38s hřiště se vejde na telefon bez přetečení (#84)', await pa
 await page.setViewportSize({ width: 1100, height: 900 });
 await page.waitForTimeout(300);
 
+
+// ── #84 část 3: rotace z podání ────────────────────────────────────────────
+await page.click('.nav-tab:nth-child(6)');                  // Live V2
+await page.waitForSelector('#live2-wrap');
+await page.click('#live2-wrap .set-prepinac button:nth-of-type(1)');
+await page.waitForTimeout(300);
+
+// čistá šestka: zóna → hráčka
+await page.evaluate(async () => {
+  state.postaveni = state.postaveni.filter(p => p.zapas_id !== 100);
+  const ids = [10, 11, 12, 13];
+  [1, 2, 3, 4].forEach((z, i) => state.postaveni.push(
+    { zapas_id: 100, set_cislo: 1, zona: z, hrac_id: ids[i] }));
+  if (!v2Hriste) v2PrepniHriste(); else renderLive2(100);
+});
+await page.waitForSelector('.hriste-zona:not(.prazdna)');
+
+const kdoKde = () => page.evaluate(() =>
+  Object.fromEntries([...postaveniSetu(100, 1).entries()]));
+// sestava nemá plnou šestku, takže po rotaci jsou obsazené jiné zóny —
+// zóna se vybírá podle skutečného stavu, ne natvrdo
+const obsazenaZona = (krome = 0) => page.evaluate(k =>
+  [...postaveniSetu(100, 1).keys()].find(z => z !== k), krome);
+
+pass &= ok('T39a výpočet rotace posouvá 2→1, 1→6 (#84)', await page.evaluate(() =>
+  poRotaci(2, 1) === 1 && poRotaci(1, 1) === 6 && poRotaci(6, 1) === 5 &&
+  poRotaci(3, 2) === 1 && poRotaci(1, 6) === 1));
+
+// zapsaný servis hráčky ze zóny 3 ji musí posunout do jedničky
+const predRotaci = await kdoKde();
+otherWrites = [];
+const zonaA = await obsazenaZona(1);
+await page.evaluate(z => v2OtevriAkce(100, postaveniSetu(100, 1).get(z), z), zonaA);
+await page.waitForSelector('#modal-v2-akce:not(.hidden)');
+await page.click('#modal-v2-akce .v2-dlazdice[onclick*="servis_plus"]');
+await page.waitForTimeout(700);
+const po = await kdoKde();
+pass &= ok('T39b zapsaný servis postaví podávající do zóny 1 (#84)',
+  po[1] === predRotaci[zonaA]);
+pass &= ok('T39c ostatní se posunou o zónu, nikdo se neztratí ani nezdvojí (#84)',
+  await page.evaluate(p => {
+    const po = Object.fromEntries([...postaveniSetu(100, 1).entries()]);
+    const bylo = Object.values(p).sort(), je = Object.values(po).sort();
+    return JSON.stringify(bylo) === JSON.stringify(je) &&
+           new Set(Object.values(po)).size === Object.values(po).length;
+  }, predRotaci));
+pass &= ok('T39d postavení se uloží jedním zápisem, ne šesti (#84)',
+  otherWrites.filter(w => w.table === 'vb_postaveni' && w.method === 'POST').length === 1);
+
+// servis hráčky, která už v jedničce stojí, nic neotáčí
+const predOpak = await kdoKde();
+await page.evaluate(() => v2OtevriAkce(100, postaveniSetu(100, 1).get(1), 1));
+await page.waitForSelector('#modal-v2-akce:not(.hidden)');
+await page.click('#modal-v2-akce .v2-dlazdice[onclick*="servis_neutral"]');
+await page.waitForTimeout(700);
+pass &= ok('T39e servis z jedničky postavením nehne (#84)',
+  JSON.stringify(await kdoKde()) === JSON.stringify(predOpak));
+
+// „zpět" musí vrátit i rotaci
+const zonaB = await obsazenaZona(1);
+await page.evaluate(z => v2OtevriAkce(100, postaveniSetu(100, 1).get(z), z), zonaB);
+await page.waitForSelector('#modal-v2-akce:not(.hidden)');
+const postaveniPredZpet = await kdoKde();
+await page.click('#modal-v2-akce .v2-dlazdice[onclick*="servis_plus"]');
+await page.waitForTimeout(700);
+pass &= ok('T39f servis otočil šestku (#84)',
+  JSON.stringify(await kdoKde()) !== JSON.stringify(postaveniPredZpet));
+await page.click('#btn-undo-v2');
+await page.waitForTimeout(700);
+pass &= ok('T39g zpět vrátí i rotaci, nejen počítadlo (#84)',
+  JSON.stringify(await kdoKde()) === JSON.stringify(postaveniPredZpet));
+
+// akce, která není servis, rotací nehýbe
+const predUtokem = await kdoKde();
+const zonaC = await obsazenaZona(0);
+await page.evaluate(z => v2OtevriAkce(100, postaveniSetu(100, 1).get(z), z), zonaC);
+await page.waitForSelector('#modal-v2-akce:not(.hidden)');
+await page.click('#modal-v2-akce .v2-dlazdice[onclick*="utok_plus"]');
+await page.waitForTimeout(700);
+pass &= ok('T39h útok ani blok postavením nehýbou (#84)',
+  JSON.stringify(await kdoKde()) === JSON.stringify(predUtokem));
+
+// ruční srovnání, když se servis nezapsal
+const zonaD = await obsazenaZona(1);
+await page.evaluate(z => v2OtevriAkce(100, postaveniSetu(100, 1).get(z), z), zonaD);
+await page.waitForSelector('#modal-v2-akce:not(.hidden)');
+pass &= ok('T39i u hráčky mimo jedničku je ruční srovnání (#84)',
+  await page.isVisible('#btn-v2-podava'));
+const ctyrka = await page.evaluate(z => postaveniSetu(100, 1).get(z), zonaD);
+rpcCalls = [];
+await page.click('#btn-v2-podava');
+await page.waitForTimeout(700);
+pass &= ok('T39j ruční srovnání postaví hráčku do jedničky (#84)',
+  await page.evaluate(() => postaveniSetu(100, 1).get(1)) === ctyrka);
+pass &= ok('T39k a nezapíše přitom žádnou akci (#84)', rpcCalls.length === 0);
+
+await page.evaluate(() => v2OtevriAkce(100, postaveniSetu(100, 1).get(1), 1));
+await page.waitForSelector('#modal-v2-akce:not(.hidden)');
+pass &= ok('T39l u hráčky v jedničce se ruční srovnání nenabízí (#84)',
+  await page.isHidden('#btn-v2-podava'));
+await page.click('#modal-v2-akce .modal-footer .btn-secondary');
+
+// servis hráčky mimo hřiště (libero) postavením nehne
+const predLiberem = await kdoKde();
+const mimoHriste = await page.evaluate(() => {
+  const naHristi = [...postaveniSetu(100, 1).values()];
+  const h = state.hraci.find(h => !naHristi.includes(h.id) &&
+    state.zapasHraci.some(zh => zh.zapas_id === 100 && zh.hrac_id === h.id));
+  return h ? h.id : null;
+});
+pass &= ok('T39m0 je koho zkusit mimo šestku (#84)', mimoHriste !== null);
+await page.evaluate(id => v2OtevriAkce(100, id), mimoHriste);
+await page.waitForSelector('#modal-v2-akce:not(.hidden)');
+await page.click('#modal-v2-akce .v2-dlazdice[onclick*="servis_plus"]');
+await page.waitForTimeout(700);
+pass &= ok('T39m servis hráčky mimo šestku postavením nehne (#84)',
+  JSON.stringify(await kdoKde()) === JSON.stringify(predLiberem));
+
 await b.close();
 console.log(pass ? '\nVŠE PROŠLO' : '\nNĚCO SELHALO');
 process.exit(pass ? 0 : 1);

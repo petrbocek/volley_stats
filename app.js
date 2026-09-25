@@ -822,6 +822,59 @@ async function prevezmiPostaveni(zapasId,set){
   toast(`Převzato z ${zdroj}. setu`,'success');
 }
 
+/* ─── ROTACE ───
+   Kdo podává, stojí v zóně 1 — to je pravidlo, ne odhad. Takže zapsaný servis
+   určuje celé postavení a rotace se veze na kliku, který se dělá tak jako tak.
+   Rotace naší šestky se mění jen při zisku podání, takže „poslední, kdo
+   podával" ji plně určuje (#84).
+
+   Hráčky se posouvají 2→1→6→5→4→3→2, tedy o zónu zpět, a z jedničky na šestku. */
+function poRotaci(zona,kroku){
+  return ((zona-1-kroku)%6+6)%6+1;
+}
+
+// Vrací true, když se postavení opravdu změnilo. Zápis do DB běží na pozadí,
+// stav se mění hned — během rozehry se nedá čekat na server.
+function otocNaPodavajici(zapasId,set,hracId){
+  const m=postaveniSetu(zapasId,set);
+  const zona=[...m.entries()].find(([,id])=>id===hracId)?.[0];
+  if(!zona)return false;                  // hráčka není na hřišti (třeba libero)
+  const kroku=(zona-1)%6;
+  if(!kroku)return false;                 // už v jedničce, není co otáčet
+  const nove=[...m.entries()].map(([z,id])=>({zapas_id:zapasId,set_cislo:set,zona:poRotaci(z,kroku),hrac_id:id}));
+  state.postaveni=state.postaveni.filter(p=>!(p.zapas_id===zapasId&&(p.set_cislo||1)===set));
+  state.postaveni.push(...nove);
+  ulozPostaveni(nove);
+  return true;
+}
+
+async function ulozPostaveni(radky){
+  if(!radky.length||!isLoggedIn())return;
+  try{
+    // jedním zápisem, ne šesti: během rozehry se nemá co posílat šestkrát
+    await apiUpsert('vb_postaveni',radky,'zapas_id,set_cislo,zona');
+  }catch(e){toast('Postavení se neuložilo: '+e.message,'error');}
+}
+
+function obnovPostaveni(zapasId,set,dvojice){
+  state.postaveni=state.postaveni.filter(p=>!(p.zapas_id===zapasId&&(p.set_cislo||1)===set));
+  const radky=dvojice.map(([zona,hrac_id])=>({zapas_id:zapasId,set_cislo:set,zona,hrac_id}));
+  state.postaveni.push(...radky);
+  ulozPostaveni(radky);
+}
+
+// Ruční oprava: když zapisovatel jeden servis vynechá, postavení se rozjede
+// a bez tohohle by se rovnalo překlikáním celé šestky.
+function v2TahlePodava(){
+  const zapasId=parseInt(document.getElementById('v2-akce-zapas').value);
+  const hracId=parseInt(document.getElementById('v2-akce-hrac').value);
+  closeModal('modal-v2-akce');
+  if(otocNaPodavajici(zapasId,state.liveSet,hracId)){
+    prekresliLive(zapasId);
+    toast('Postavení srovnáno','success');
+  }
+}
+
 function v2PrepniHriste(){
   v2Hriste=!v2Hriste;
   prekresliLive(state.liveZapasId);
@@ -1020,8 +1073,10 @@ function v2OtevriAkce(zapasId,hracId,zona=0){
   document.getElementById('v2-akce-zapas').value=zapasId;
   document.getElementById('v2-akce-hrac').value=hracId;
   document.getElementById('v2-akce-zona').value=zona;
-  // střídání dává smysl jen u hráčky, která na hřišti opravdu stojí
+  // střídání i ruční srovnání rotace dávají smysl jen u hráčky, která na
+  // hřišti opravdu stojí
   document.getElementById('btn-v2-stridat').style.display=zona?'':'none';
+  document.getElementById('btn-v2-podava').style.display=zona&&zona!==1?'':'none';
   document.getElementById('v2-akce-title').textContent=
     `${h.jmeno}${h.cislo?' · #'+h.cislo:''} — ${state.liveSet}. set`;
   document.getElementById('v2-akce-obsah').innerHTML=ACTIONS.map(a=>{
@@ -1258,6 +1313,18 @@ function bump(hracId,zapasId,field,delta=1,opts={}){
   prekresliSouhrn();
   prekresliV2Cisla();
   zaznamenejProZpet(hracId,zapasId,field,set,nova-puvodni,opts);
+
+  // Zapsaný servis určuje postavení. Předchozí stav si schová záznam pro
+  // „zpět" — jinak by vrácený servis nechal šestku otočenou a člověk by
+  // marně hledal, proč stojí jinak, než si myslí.
+  if(delta>0&&field.startsWith('servis_')){
+    const pred=[...postaveniSetu(zapasId,set).entries()];
+    if(otocNaPodavajici(zapasId,set,hracId)){
+      const u=undoStack[undoStack.length-1];
+      if(u&&!opts.bezUndo)u.predRotaci=pred;
+      prekresliLive(zapasId);
+    }
+  }
   return true;
 }
 
@@ -1316,6 +1383,7 @@ function vratZpet(){
     ? bumpSouper(u.zapasId,u.pole||'pocet',-1,{set:u.set,bezUndo:true})
     : bump(u.hracId,u.zapasId,u.field,-1,{set:u.set,bezUndo:true});
   if(vratil){
+    if(u.predRotaci)obnovPostaveni(u.zapasId,u.set,u.predRotaci);
     undoStack.pop();
     toast('Vzato zpět: '+popis,'success');
     // odečet v cizím setu se v mřížce neprojeví, tu je potřeba překreslit
