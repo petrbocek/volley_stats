@@ -527,3 +527,10 @@ button.hriste-dlazdice:focus-visible{outline:2px solid var(--accent);outline-off
   .hriste-info{grid-column:2;grid-row:2;margin-top:0;padding-top:0;padding-left:14px;
     border-top:0;border-left:1px solid var(--border)}
 }
+
+/* Nabídka po dohraném setu — u skóre v seznamu i pod hřištěm. */
+.konec-setu{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px;
+  padding:6px 8px;border:1px solid var(--accent);border-radius:8px;
+  background:rgba(249,115,22,.12)}
+.konec-setu-popis{font-size:11px;text-transform:uppercase;letter-spacing:.5px;
+  color:var(--accent);font-weight:700}
