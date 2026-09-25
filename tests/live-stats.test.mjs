@@ -2952,9 +2952,11 @@ pass &= ok('T45a bez prvního podání se side-out nepočítá a appka o něj po
 otherWrites = [];
 await page.click('.hriste-info button:has-text("Soupeře")');
 await page.waitForTimeout(500);
-pass &= ok('T45b zadané první podání se uloží (#84)',
-  await page.evaluate(() => setInfo(100, 4).prvni_podani) === 'oni' &&
-  otherWrites.some(w => w.table === 'vb_set_info' && w.body && w.body.prvni_podani === 'oni'));
+// ve 4. setu je volba přepočtená do prvního: strany se po setech střídají
+pass &= ok('T45b zadané první podání se uloží (#84, #94)',
+  await page.evaluate(() => prvniPodani(100, 4)) === 'oni' &&
+  otherWrites.some(w => w.table === 'vb_set_info' && w.body &&
+    w.body.set_cislo === 1 && w.body.prvni_podani === 'my'));
 
 // výměny: soupeř podává, my uhrajeme dvě, pak ztratíme
 const zapis = (hrac, pole) => page.evaluate(([h, p]) => {
@@ -3296,6 +3298,101 @@ await page.evaluate(() => {
   state.liveSet = 1; renderLive2(100);
 });
 await page.waitForTimeout(300);
+
+
+// ── #84 část 13: podání na začátku se losuje jen v 1. a 5. setu ───────────
+// Ve 2.–4. se strany v podání střídají, takže z první volby plyne zbytek sám.
+await page.evaluate(() => {
+  state.setInfo = state.setInfo.filter(x => x.zapas_id !== 100);
+  state.udalosti = state.udalosti.filter(u => u.zapas_id !== 100);
+  state.setInfo.push({ zapas_id: 100, set_cislo: 1, prvni_podani: 'my',
+                       oddechove_casy: 0, stridani: 0 });
+  state.liveSet = 2;
+  renderLive2(100);
+});
+await page.waitForTimeout(400);
+
+pass &= ok('T49a z prvního setu plyne celý zápas, strany se střídají (#84)',
+  JSON.stringify(await page.evaluate(() =>
+    [1, 2, 3, 4].map(s => prvniPodani(100, s)))) ===
+  JSON.stringify(['my', 'oni', 'my', 'oni']));
+
+pass &= ok('T49b pátý set má vlastní los, z prvního se neodvozuje (#84)',
+  await page.evaluate(() => prvniPodani(100, 5)) === null);
+
+pass &= ok('T49c ve 2. setu se appka na podání neptá (#84)',
+  await page.evaluate(() => {
+    const t = document.querySelector('.hriste-info').textContent;
+    return !/Podání na začátku/.test(t) && /Začátek/.test(t) && /soupeře/.test(t);
+  }));
+
+// side-out se počítá z odvozeného podání, ne z prázdna
+await page.evaluate(() => bump(10, 100, 'utok_plus', 1));
+await page.waitForTimeout(600);
+pass &= ok('T49d side-out ve 2. setu počítá z odvozeného podání (#84)',
+  JSON.stringify(await page.evaluate(() => {
+    const so = sideOut(100, 2);
+    return so && { celkem: so.celkem, uhrano: so.uhrano };
+  })) === JSON.stringify({ celkem: 1, uhrano: 1 }));
+
+// volba zadaná ve 3. setu patří prvnímu — stejná parita
+await page.evaluate(() => {
+  state.setInfo = state.setInfo.filter(x => x.zapas_id !== 100);
+  state.liveSet = 3;
+  renderLive2(100);
+});
+await page.waitForTimeout(400);
+pass &= ok('T49e bez volby se appka zeptá i ve 3. setu (#84)',
+  /Podání na začátku 3\. setu/.test(await page.textContent('.hriste-info')));
+
+otherWrites = [];
+await page.click('.hriste-info button:has-text("Naše")');
+await page.waitForTimeout(600);
+pass &= ok('T49f volba ve 3. setu se zapíše do prvního beze změny (#84)',
+  await page.evaluate(() => setInfo(100, 1).prvni_podani) === 'my' &&
+  await page.evaluate(() => prvniPodani(100, 3)) === 'my' &&
+  otherWrites.some(w => w.table === 'vb_set_info' && w.body &&
+    w.body.set_cislo === 1 && w.body.prvni_podani === 'my'));
+
+// … a ve 2. setu obráceně
+await page.evaluate(() => {
+  state.setInfo = state.setInfo.filter(x => x.zapas_id !== 100);
+  state.liveSet = 2;
+  renderLive2(100);
+});
+await page.waitForTimeout(400);
+otherWrites = [];
+await page.click('.hriste-info button:has-text("Naše")');
+await page.waitForTimeout(600);
+pass &= ok('T49g volba ve 2. setu se do prvního přepočítá (#84)',
+  await page.evaluate(() => setInfo(100, 1).prvni_podani) === 'oni' &&
+  await page.evaluate(() => prvniPodani(100, 2)) === 'my' &&
+  otherWrites.some(w => w.table === 'vb_set_info' && w.body &&
+    w.body.set_cislo === 1 && w.body.prvni_podani === 'oni'));
+
+// starší zápisy mají volbu u každého setu zvlášť — o tu se nesmí přijít
+await page.evaluate(() => {
+  state.setInfo = state.setInfo.filter(x => x.zapas_id !== 100);
+  state.setInfo.push({ zapas_id: 100, set_cislo: 3, prvni_podani: 'oni',
+                       oddechove_casy: 0, stridani: 0 });
+  state.liveSet = 3;
+  renderLive2(100);
+});
+await page.waitForTimeout(400);
+pass &= ok('T49h starý zápis s volbou u setu se pořád použije (#84)',
+  await page.evaluate(() => prvniPodani(100, 3)) === 'oni' &&
+  !/Podání na začátku/.test(await page.textContent('.hriste-info')));
+
+await page.evaluate(() => {
+  state.setInfo = state.setInfo.filter(x => x.zapas_id !== 100);
+  state.liveSet = 1;
+  renderLive2(100);
+});
+await page.waitForTimeout(300);
+pass &= ok('T49i v prvním setu se appka ptá bez čísla setu (#84)', await page.evaluate(() => {
+  const t = document.querySelector('.hriste-info').textContent;
+  return /Podání na začátku/.test(t) && !/Podání na začátku 1\. setu/.test(t);
+}));
 
 await b.close();
 console.log(pass ? '\nVŠE PROŠLO' : '\nNĚCO SELHALO');

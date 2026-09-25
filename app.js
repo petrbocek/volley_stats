@@ -1322,12 +1322,31 @@ async function odlogujUdalost(zapasId,set,hracId,pole){
 /* ─── PRŮBĚH SETU Z LOGU ───
    Podání přechází, když bod získá ten, kdo nepodával. Z toho a z prvního
    podání plyne u každé výměny, kdo podával — a tedy co byl side-out. */
+/* Kdo začíná set, se losuje jen před prvním a pátým setem — ve 2. až 4. se
+   strany v podání střídají, takže z první volby plyne zbytek sám a appka se
+   na něj nemá co ptát (#84). */
+const OPACNE={my:'oni',oni:'my'};
+
+function prvniPodani(zapasId,set){
+  const vlastni=setInfo(zapasId,set).prvni_podani||null;
+  if(set===1||set===5)return vlastni;
+  const zPrvniho=setInfo(zapasId,1).prvni_podani||null;
+  // starší zápisy mají volbu u každého setu zvlášť — o tu se nepřipraví
+  if(!zPrvniho)return vlastni;
+  return set%2===1?zPrvniho:OPACNE[zPrvniho];
+}
+
+// Ve kterém setu volba bydlí a co se do něj zapíše, když ji člověk zadá tady.
+function cilPodani(set,kdo){
+  if(set===5)return {set:5,kdo};
+  return {set:1,kdo:set%2===1?kdo:OPACNE[kdo]};
+}
+
 function prubehSetu(zapasId,set){
-  const info=setInfo(zapasId,set);
   const udalosti=state.udalosti
     .filter(u=>u.zapas_id===zapasId&&(u.set_cislo||1)===set)
     .sort((a,b)=>a.id-b.id);
-  const prvni=info.prvni_podani||null;
+  const prvni=prvniPodani(zapasId,set);
   let podava=prvni;
   let serie={kdo:null,delka:0},nejdelsi={my:0,oni:0};
   const vymeny=[];
@@ -1376,14 +1395,17 @@ function rotacePrehled(zapasId,set){
 async function nastavPrvniPodani(kdo){
   const zapasId=state.liveZapasId;if(!zapasId)return;
   if(!isLoggedIn()){toast('Na změny se přihlas (🔒 nahoře)','error');return;}
-  const set=state.liveSet;
-  const info=setInfo(zapasId,set);
-  const i=state.setInfo.findIndex(x=>x.zapas_id===zapasId&&(x.set_cislo||1)===set);
-  const novy={...info,prvni_podani:kdo};
+  // Volba patří 1. (nebo 5.) setu. Zadaná ve 2.–4. se přepočítá zpátky, ať má
+  // zápas jednu definici a nezačne si ve dvou setech odporovat.
+  const cil=cilPodani(state.liveSet,kdo);
+  const info=setInfo(zapasId,cil.set);
+  const i=state.setInfo.findIndex(x=>x.zapas_id===zapasId&&(x.set_cislo||1)===cil.set);
+  const novy={...info,prvni_podani:cil.kdo};
   if(i>=0)state.setInfo[i]=novy;else state.setInfo.push(novy);
   prekresliLive(zapasId);
   try{
-    await apiUpsert('vb_set_info',{zapas_id:zapasId,set_cislo:set,prvni_podani:kdo},'zapas_id,set_cislo');
+    await apiUpsert('vb_set_info',
+      {zapas_id:zapasId,set_cislo:cil.set,prvni_podani:cil.kdo},'zapas_id,set_cislo');
   }catch(e){toast('Chyba: '+e.message,'error');}
 }
 
@@ -1427,9 +1449,9 @@ function prekresliInfo(){
 }
 
 function prubehHtml(zapasId,set){
-  const info=setInfo(zapasId,set);
-  if(!info.prvni_podani)return `<div class="hriste-info-radek">
-    <span class="hriste-info-nazev">Podání na začátku</span>
+  const zacatek=prvniPodani(zapasId,set);
+  if(!zacatek)return `<div class="hriste-info-radek">
+    <span class="hriste-info-nazev">Podání na začátku${set>1&&set<5?` ${set}. setu`:''}</span>
     <button class="btn btn-sm btn-secondary" onclick="nastavPrvniPodani('my')">Naše</button>
     <button class="btn btn-sm btn-secondary" onclick="nastavPrvniPodani('oni')">Soupeře</button>
     <span class="info-proc">bez toho se nepočítá side-out</span>
@@ -1445,7 +1467,14 @@ function prubehHtml(zapasId,set){
   const nejhorsi=rot.length?rot[0]:null;
   const jmeno=id=>{const h=state.hraci.find(x=>x.id===id);return h?h.jmeno:'—';};
 
+  // Odkud se ve 2.–4. setu vzalo první podání, ať je jasné, že se nikdo
+  // nespletl — plyne ze střídání stran po setech, ne z další volby.
+  const zdroj=set>1&&set<5&&setInfo(zapasId,1).prvni_podani
+    ?` · z 1. setu`:'';
+
   return `<div class="hriste-info-radek">
+      <span class="hriste-info-nazev">Začátek</span>
+      <span class="info-proc" title="Kdo podával na začátku setu${zdroj?' — odvozeno ze střídání stran':''}">${zacatek==='my'?'naše':'soupeře'}${zdroj}</span>
       <span class="hriste-info-nazev">Side-out</span>
       <span class="info-hodnota ${so&&so.pct!=null&&so.pct<60?'slabe':''}"
         title="Uhrané výměny při soupeřově podání">${so&&so.pct!=null?so.pct+'%':'—'}</span>
