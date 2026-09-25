@@ -941,10 +941,11 @@ function skoreHtml(zapasId){
 
 function prekresliSkore(){
   const zapasId=state.liveZapasId;
-  if(!zapasId||!document.querySelector('.skore'))return;
-  // celý blok, ne jen dvě čísla: mění se i řádek po setech a varování
+  if(!zapasId)return;
+  if(v2Hriste)return;                    // v hřišti se skóre překresluje s dlaždicemi
   const el=document.querySelector('.skore');
-  el.outerHTML=skoreHtml(zapasId);
+  // celý blok, ne jen dvě čísla: mění se i řádek po setech a varování
+  if(el)el.outerHTML=skoreHtml(zapasId);
 }
 
 /* ─── ROTACE ───
@@ -1034,7 +1035,8 @@ function v2VyberDoZony(hracId){
   const zapasId=parseInt(document.getElementById('v2-zona-zapas').value);
   const zona=parseInt(document.getElementById('v2-zona-cislo').value);
   closeModal('modal-v2-zona');
-  postavDoZony(zapasId,state.liveSet,zona,hracId);
+  if(zona)postavDoZony(zapasId,state.liveSet,zona,hracId);
+  else prepniLibero(zapasId,hracId);          // slot libera, ne zóna na hřišti
 }
 
 function v2Stridat(){
@@ -1044,10 +1046,22 @@ function v2Stridat(){
   if(zona)v2OtevriObsazeni(zapasId,zona,1);
 }
 
+// Zóny 7 a 8 jsou sloty pro libera mimo hřiště. Nejsou v databázi — plynou
+// z nominace v sestavě, takže neexistují dvě pravdy o tom, kdo je libero.
+const ZONY_LIBERO=[7,8];
+
 function hristeHtml(zapasId){
   const set=state.liveSet;
   const m=postaveniSetu(zapasId,set);
   const prazdnych=6-m.size;
+  const libera=liberaSestavy(zapasId);
+
+  const skore=skoreSetu(zapasId,set);
+  const u=stavUtkani(zapasId);
+  const cisla=(h,barva)=>`<span class="hriste-skore">
+    <span class="plus">+${v2Soucet(zapasId,h.id,V2_VYBORNE)}</span>
+    <span class="minus">−${v2Soucet(zapasId,h.id,V2_CHYBY)}</span></span>`;
+
   const karta=zona=>{
     const hracId=m.get(zona);
     const h=hracId?state.hraci.find(x=>x.id===hracId):null;
@@ -1058,38 +1072,100 @@ function hristeHtml(zapasId){
       <span class="hriste-cislo-zony">${zona}${zona===1?' • podání':''}</span>
       <span class="hriste-jmeno">${esc(h.jmeno)}</span>
       <span class="hriste-dres">${h.cislo?'#'+h.cislo:''}</span>
-      <span class="hriste-skore">
-        <span class="plus">+${v2Soucet(zapasId,h.id,V2_VYBORNE)}</span>
-        <span class="minus">−${v2Soucet(zapasId,h.id,V2_CHYBY)}</span>
-      </span>
+      ${cisla(h)}
     </button>`;
   };
-  const naHristi=[...m.values()];
-  const libera=liberaSestavy(zapasId).filter(h=>!naHristi.includes(h.id));
-  const liberaHtml=libera.length?`<div class="hriste-libera">
-    <div class="hriste-libera-nadpis">Libero</div>
-    ${libera.map(h=>`<button class="hriste-libero" onclick="v2OtevriAkce(${zapasId},${h.id})">
+
+  // Slot libera: prázdný nominuje, obsazený otevře akce jako každá jiná zóna.
+  const liberoKarta=(zona,i)=>{
+    const h=libera[i];
+    if(!h)return `<button class="hriste-zona libero prazdna" onclick="v2NominujLibero(${zapasId})"
+      title="Nominovat libero"><span class="hriste-cislo-zony">${zona} · libero</span>
+      <span class="hriste-prazdno">+</span></button>`;
+    return `<button class="hriste-zona libero" onclick="v2OtevriAkce(${zapasId},${h.id})">
+      <span class="hriste-cislo-zony">${zona} · libero</span>
       <span class="hriste-jmeno">${esc(h.jmeno)}</span>
       <span class="hriste-dres">${h.cislo?'#'+h.cislo:''}</span>
-      <span class="hriste-skore"><span class="plus">+${v2Soucet(zapasId,h.id,V2_VYBORNE)}</span>
-        <span class="minus">−${v2Soucet(zapasId,h.id,V2_CHYBY)}</span></span>
-    </button>`).join('')}
-  </div>`:'';
+      ${cisla(h)}
+    </button>`;
+  };
 
   const napoveda=prazdnych?`<div class="hriste-napoveda">
     Chybí ${prazdnych===1?'jedna hráčka':prazdnych<5?prazdnych+' hráčky':prazdnych+' hráček'} — klepni na prázdnou zónu.
     ${set>1&&postaveniSetu(zapasId,set-1).size?`<button class="btn btn-sm btn-secondary" onclick="prevezmiPostaveni(${zapasId},${set})">Převzít z ${set-1}. setu</button>`:''}
   </div>`:'';
 
+  // Stav a sety mají vlastní dlaždice v levém sloupci místo pruhu přes celou
+  // šířku — ten bral 80px z 654, tedy víc než jedna řada hřiště (#84).
+  const mimo=`<div class="hriste-mimo">
+    <div class="hriste-dlazdice dl-sety">
+      <span class="hriste-cislo-zony">Sety</span>
+      <span class="dlazdice-hodnota">${u.my}:${u.oni}</span>
+    </div>
+    <button class="hriste-dlazdice dl-skore" onclick="v2UpravSkore()"
+        title="Klepnutím upravíš skóre mimo statistiku hráček">
+      <span class="hriste-cislo-zony">${set}. set</span>
+      <span class="dlazdice-hodnota"><span class="plus">${skore.nase}</span>:<span class="minus">${skore.jejich}</span></span>
+      <span class="dlazdice-uprava">upravit</span>
+    </button>
+    ${ZONY_LIBERO.map(liberoKarta).join('')}
+  </div>`;
+
   return `<div class="hriste-wrap">
     ${napoveda}
     <div class="hriste-plocha">
+      ${mimo}
       <div class="hriste">${ZONY_ROZLOZENI.map(rada=>
         `<div class="hriste-rada">${rada.map(karta).join('')}</div>`).join('')}</div>
       <div class="hriste-sit"><span>síť</span></div>
     </div>
-    ${liberaHtml}
   </div>`;
+}
+
+// Nominace libera z prázdného slotu: nabídne ty ze sestavy, které nominované
+// nejsou a nestojí na hřišti.
+function v2NominujLibero(zapasId){
+  document.getElementById('v2-zona-zapas').value=zapasId;
+  document.getElementById('v2-zona-cislo').value=0;       // 0 = nominace, ne zóna
+  document.getElementById('v2-zona-title').textContent='Kdo bude libero?';
+  const volni=lavicka(zapasId,state.liveSet);
+  const el=document.getElementById('v2-zona-obsah');
+  el.innerHTML=volni.length
+    ? volni.map(h=>playerCard(h,{
+        atributy:`style="cursor:pointer" onclick="v2VyberDoZony(${h.id})"`,
+        ovladani:'<span style="color:var(--green);font-size:20px;font-weight:700">+</span>'
+      })).join('')
+    : '<div class="empty" style="padding:20px"><span class="empty-icon">👥</span><div class="empty-text">Není koho nominovat</div></div>';
+  openModal('modal-v2-zona');
+}
+
+// Skóre se jinak skládá z akcí. Když je potřeba ho srovnat mimo statistiku
+// hráček, jde to přes chybu a bod soupeře — tedy tam, kam to patří.
+function v2UpravSkore(){
+  const zapasId=state.liveZapasId;
+  const set=state.liveSet;
+  const s=skoreSetu(zapasId,set);
+  document.getElementById('v2-skore-title').textContent=`${set}. set — ${s.nase}:${s.jejich}`;
+  document.getElementById('v2-skore-obsah').innerHTML=SOUPER_POLE.map(sp=>`
+    <div class="skore-uprava-radek">
+      <div class="skore-uprava-nazev ${sp.cls}">${sp.znak} ${sp.label}<br>
+        <span class="skore-uprava-komu">${sp.komu}</span></div>
+      <div class="skore-uprava-tlacitka">
+        <button class="btn btn-secondary" onclick="v2SkoreZmen('${sp.pole}',-1)">−</button>
+        <span class="skore-uprava-hodnota" id="skore-uprava-${sp.pole}">${souperHodnota(zapasId,set,sp.pole)}</span>
+        <button class="btn btn-primary" onclick="v2SkoreZmen('${sp.pole}',1)">+</button>
+      </div>
+    </div>`).join('');
+  openModal('modal-v2-skore');
+}
+
+function v2SkoreZmen(pole,delta){
+  const zapasId=state.liveZapasId;
+  if(!bumpSouper(zapasId,pole,delta))return;
+  const el=document.getElementById('skore-uprava-'+pole);
+  if(el)el.textContent=souperHodnota(zapasId,state.liveSet,pole);
+  const s=skoreSetu(zapasId,state.liveSet);
+  document.getElementById('v2-skore-title').textContent=`${state.liveSet}. set — ${s.nase}:${s.jejich}`;
 }
 
 /* ─── LIVE V2 ───
@@ -1167,10 +1243,13 @@ function renderLive2(zapasId){
   const pridat=`<button class="v2-pridat" onclick="openHracPicker(${zapasId})"><span>+</span> Přidat hráčku</button>`;
   const prazdno=hraci.length?'':'<div class="empty" style="padding:24px"><span class="empty-icon">👥</span><div class="empty-text">Zatím prázdná sestava</div></div>';
 
+  // V hřišti mají stav i soupeřova strana svoje dlaždice, takže pruhy přes
+  // celou šířku odpadají — braly 129px z 654 (#84).
   const obsah=v2Hriste
     ? `<div class="v2-seznam">${hristeHtml(zapasId)}</div>`
     : `<div class="v2-seznam">${prazdno}${seznam}${pridat}</div>`;
-  el.innerHTML=prepinac+skoreHtml(zapasId)+prepinacZobrazeni+tym+chyby+obsah+undoBarHtml('btn-undo-v2');
+  el.innerHTML=prepinac+(v2Hriste?'':skoreHtml(zapasId))+prepinacZobrazeni+tym
+    +(v2Hriste?'':chyby)+obsah+undoBarHtml('btn-undo-v2');
 }
 
 // Čísla se mění s každým klikem; překreslovat kvůli nim celý seznam by bylo

@@ -2033,8 +2033,9 @@ pass &= ok('T38a V2 má přepínač seznam ⇄ hřiště, ne osmou záložku (#8
 
 await page.click('#live2-wrap .v2-zobrazeni-btn:nth-child(2)');   // Hřiště
 await page.waitForSelector('.hriste');
-pass &= ok('T38b hřiště má šest zón (#84)',
-  (await page.$$eval('.hriste-zona', els => els.length)) === 6);
+pass &= ok('T38b hřiště má šest zón a dva sloty pro libera (#84)',
+  (await page.$$eval('.hriste .hriste-zona', els => els.length)) === 6 &&
+  (await page.$$eval('.hriste-mimo .hriste-zona.libero', els => els.length)) === 2);
 pass &= ok('T38c síť je vpravo, u ní 4-3-2, vzadu 5-6-1 (#84)',
   await page.evaluate(() => {
     const rady = [...document.querySelectorAll('.hriste-rada')]
@@ -2046,11 +2047,11 @@ pass &= ok('T38c síť je vpravo, u ní 4-3-2, vzadu 5-6-1 (#84)',
   }));
 pass &= ok('T38d prázdná šestka to řekne a nabídne obsazení (#84)',
   /Chybí/.test(await page.textContent('.hriste-napoveda')) &&
-  (await page.$$eval('.hriste-zona.prazdna', els => els.length)) === 6);
+  (await page.$$eval('.hriste .hriste-zona.prazdna', els => els.length)) === 6);
 
 // obsazení zóny
 otherWrites = []; postaveniRpc = [];
-await page.click('.hriste-zona:nth-child(1)');              // zóna 5 (vlevo nahoře)
+await page.click('.hriste .hriste-zona:nth-child(1)');              // zóna 5 (vlevo nahoře)
 await page.waitForSelector('#modal-v2-zona:not(.hidden)');
 pass &= ok('T38e nominované libero se do zóny nenabízí (#84)',
   !(await page.textContent('#v2-zona-obsah')).includes('Libuše'));
@@ -2068,14 +2069,14 @@ pass &= ok('T38f obsazení zóny se uloží celé a v jedné transakci (#84)',
   !otherWrites.some(w => w.table === 'vb_postaveni'));
 pass &= ok('T38g obsazená zóna ukazuje jméno a čísla hráčky (#84)',
   await page.evaluate(() => {
-    const z = document.querySelector('.hriste-zona:not(.prazdna)');
+    const z = document.querySelector('.hriste .hriste-zona:not(.prazdna)');
     return !!z && !!z.querySelector('.hriste-jmeno') && !!z.querySelector('.hriste-skore');
   }));
 
 // zóna 1 je odlišená, protože z ní se podává
 pass &= ok('T38h zóna 1 je odlišená jako podávající, i když je prázdná (#84)',
   await page.evaluate(() => {
-    const zony = [...document.querySelectorAll('.hriste-zona')]
+    const zony = [...document.querySelectorAll('.hriste .hriste-zona')]
       .map(z => ({ zona: parseInt(z.querySelector('.hriste-cislo-zony').textContent),
                    podava: z.classList.contains('podava') }));
     // přesně jedna, a je to jednička — z ní se čte rotace
@@ -2084,16 +2085,21 @@ pass &= ok('T38h zóna 1 je odlišená jako podávající, i když je prázdná 
   }));
 
 // libero je stranou a taky se na něj dá klikat
-pass &= ok('T38i libero je vedle hřiště, ne v zóně (#84)',
-  (await page.textContent('.hriste-libera')).includes('Libuše'));
-await page.click('.hriste-libero');
+pass &= ok('T38i libero má svůj slot mimo hřiště, ne zónu (#84)',
+  (await page.textContent('.hriste-mimo')).includes('Libuše') &&
+  await page.evaluate(() => {
+    const sloty = [...document.querySelectorAll('.hriste-mimo .hriste-zona.libero .hriste-cislo-zony')]
+      .map(e => parseInt(e.textContent));
+    return JSON.stringify(sloty) === JSON.stringify([7, 8]);
+  }));
+await page.click('.hriste-mimo .hriste-zona.libero:not(.prazdna)');
 await page.waitForSelector('#modal-v2-akce:not(.hidden)');
 pass &= ok('T38j u libera se nenabízí střídání, není v zóně (#84)',
   await page.isHidden('#btn-v2-stridat'));
 await page.click('#modal-v2-akce .modal-footer .btn-secondary');
 
 // klik na hráčku v zóně otevře akce a nabídne střídání
-await page.click('.hriste-zona:not(.prazdna)');
+await page.click('.hriste .hriste-zona:not(.prazdna)');
 await page.waitForSelector('#modal-v2-akce:not(.hidden)');
 pass &= ok('T38k klik na zónu otevře akce a nabídne střídání (#84)',
   await page.isVisible('#btn-v2-stridat'));
@@ -2130,7 +2136,7 @@ await page.click('#live2-wrap .set-prepinac button:nth-of-type(2)');
 await page.waitForTimeout(400);
 pass &= ok('T38o druhý set začíná s vlastním postavením (#84)',
   await page.evaluate(() => postaveniSetu(100, 2).size) === 0 &&
-  (await page.$$eval('.hriste-zona.prazdna', els => els.length)) === 6);
+  (await page.$$eval('.hriste .hriste-zona.prazdna', els => els.length)) === 6);
 pass &= ok('T38p nabídne převzít postavení z předchozího setu (#84)',
   /Převzít z 1\. setu/.test(await page.textContent('.hriste-napoveda')));
 await page.click('.hriste-napoveda button');
@@ -2146,7 +2152,7 @@ pass &= ok('T38q převzetí naklikané postavení zkopíruje (#84)',
 await page.click('#live2-wrap .set-prepinac button:nth-of-type(1)');
 await page.waitForTimeout(400);
 rpcCalls = [];
-await page.click('.hriste-zona:not(.prazdna)');
+await page.click('.hriste .hriste-zona:not(.prazdna)');
 await page.waitForSelector('#modal-v2-akce:not(.hidden)');
 await page.click('#modal-v2-akce .v2-dlazdice[onclick*="utok_plus"]');
 await page.waitForTimeout(600);
@@ -2159,7 +2165,7 @@ await page.waitForTimeout(300);
 pass &= ok('T38s hřiště se vejde na telefon bez přetečení (#84)', await page.evaluate(() => {
   const wrap = document.getElementById('live2-wrap');
   const seznam = wrap.querySelector('.v2-seznam');
-  const zona = document.querySelector('.hriste-zona').getBoundingClientRect();
+  const zona = document.querySelector('.hriste .hriste-zona').getBoundingClientRect();
   return document.documentElement.scrollWidth - document.documentElement.clientWidth <= 0 &&
          seznam.scrollWidth - seznam.clientWidth <= 0 &&
          zona.width >= 44 && zona.height >= 44;
@@ -2290,6 +2296,8 @@ pass &= ok('T39m servis hráčky mimo šestku postavením nehne (#84)',
 
 // ── #84 část 4: stav setu ──────────────────────────────────────────────────
 await page.click('.nav-tab:nth-child(6)');                  // Live V2
+await page.waitForSelector('#live2-wrap');
+await page.evaluate(() => { if (v2Hriste) v2PrepniHriste(); });
 await page.waitForSelector('.skore');
 await page.click('#live2-wrap .set-prepinac button:nth-of-type(1)');
 await page.waitForTimeout(300);
@@ -2379,7 +2387,7 @@ pass &= ok('T40i skóre na obrazovce sedí na výpočet (#84)', await page.evalu
 pass &= ok('T40i2 kdo stojí v zóně, není zároveň v pruhu libera (#84)',
   await page.evaluate(() => {
     const vZonach = [...postaveniSetu(100, state.liveSet).values()];
-    const vPruhu = [...document.querySelectorAll('.hriste-libero')]
+    const vPruhu = [...document.querySelectorAll('.hriste-mimo .hriste-zona.libero:not(.prazdna)')]
       .map(e => e.querySelector('.hriste-jmeno').textContent);
     const jmena = id => (state.hraci.find(h => h.id === id) || {}).jmeno;
     return vZonach.every(id => !vPruhu.includes(jmena(id)));
@@ -2465,8 +2473,8 @@ pass &= ok('T41c a hráčka v něm není dvakrát (#84)', await page.evaluate(()
 }));
 
 // 2. stav utkání
-pass &= ok('T41d skóre ukazuje i stav utkání v setech (#84)',
-  /Sety/.test(await page.textContent('.skore-utkani')));
+pass &= ok('T41d sety mají v hřišti vlastní dlaždici (#84)',
+  /Sety/.test(await page.textContent('.hriste-dlazdice.dl-sety')));
 pass &= ok('T41e rozehraný set se nepočítá jako vyhraný (#84)', await page.evaluate(() => {
   const z = state.zapasy.find(z => z.id === 100);
   for (let i = 1; i <= 5; i++) { delete z[`set${i}_my`]; delete z[`set${i}_oni`]; }
@@ -2480,7 +2488,7 @@ pass &= ok('T41f set o dva body přes 25 se počítá (#84)', await page.evaluat
   renderLive2(100);
   const u = stavUtkani(100);
   return u.my === 1 && u.oni === 1 &&
-         document.querySelector('.skore-utkani').textContent.includes('1:1');
+         document.querySelector('.hriste-dlazdice.dl-sety').textContent.includes('1:1');
 }));
 pass &= ok('T41g v pátém setu se hraje do patnácti (#84)', await page.evaluate(() => {
   const z = state.zapasy.find(z => z.id === 100);
@@ -2506,7 +2514,7 @@ pass &= ok('T41i síť je vpravo od hřiště, ne nad ním (#84)', await page.ev
 }));
 pass &= ok('T41j zóny u sítě jsou v pravém sloupci (#84)', await page.evaluate(() => {
   const stred = z => {
-    const el = [...document.querySelectorAll('.hriste-zona')]
+    const el = [...document.querySelectorAll('.hriste .hriste-zona')]
       .find(e => parseInt(e.querySelector('.hriste-cislo-zony').textContent) === z);
     const r = el.getBoundingClientRect();
     return r.left + r.width / 2;
@@ -2519,7 +2527,7 @@ pass &= ok('T41j zóny u sítě jsou v pravém sloupci (#84)', await page.evalua
 pass &= ok('T41k libero se pozná z nominace v sestavě (#84)', await page.evaluate(() => {
   const nominovana = state.zapasHraci.filter(zh => zh.zapas_id === 100 && zh.libero)
     .map(zh => zh.hrac_id);
-  const vPruhu = [...document.querySelectorAll('.hriste-libero .hriste-jmeno')]
+  const vPruhu = [...document.querySelectorAll('.hriste-mimo .hriste-zona.libero .hriste-jmeno')]
     .map(e => e.textContent);
   const jmeno = id => state.hraci.find(h => h.id === id).jmeno;
   return nominovana.length > 0 && nominovana.every(id => vPruhu.includes(jmeno(id)));
@@ -2528,7 +2536,7 @@ pass &= ok('T41l pozice „libero" v kartě hráčky o tom nerozhoduje (#84)',
   await page.evaluate(() => {
     const h = state.hraci.find(h => (h.pozice || '').toLowerCase() === 'libero' &&
       state.zapasHraci.some(zh => zh.zapas_id === 100 && zh.hrac_id === h.id && !zh.libero));
-    const vPruhu = [...document.querySelectorAll('.hriste-libero .hriste-jmeno')]
+    const vPruhu = [...document.querySelectorAll('.hriste-mimo .hriste-zona.libero .hriste-jmeno')]
       .map(e => e.textContent);
     return !!h && !vPruhu.includes(h.jmeno);
   }));
@@ -2561,6 +2569,136 @@ await page.click('#btn-v2-libero');
 await page.waitForTimeout(600);
 pass &= ok('T41q zrušení nominace se taky uloží (#84)',
   await page.evaluate(id => !jeLibero(100, id), kdoNaNominaci));
+
+
+// ── #84 část 6: hřiště jako jeden grid ─────────────────────────────────────
+await page.click('.nav-tab:nth-child(6)');
+await page.waitForSelector('#live2-wrap');
+await page.evaluate(() => { if (!v2Hriste) v2PrepniHriste(); });
+await page.waitForSelector('.hriste-mimo');
+await page.setViewportSize({ width: 390, height: 844 });
+await page.waitForTimeout(400);
+
+const vyskyBloku = () => page.evaluate(() => {
+  const w = document.getElementById('live2-wrap');
+  const v = sel => { const e = w.querySelector(sel); return e ? Math.round(e.getBoundingClientRect().height) : 0; };
+  return { obal: Math.round(w.getBoundingClientRect().height),
+           skorePruh: v(':scope > .skore'), souperPruh: v('.v2-souper'),
+           plocha: v('.v2-seznam') };
+});
+const m = await vyskyBloku();
+
+pass &= ok('T42a v hřišti zmizely pruhy se skóre i soupeřem (#84)',
+  m.skorePruh === 0 && m.souperPruh === 0);
+pass &= ok('T42a2 dlaždice a pruh se skóre si nelezou do třídy (#84)',
+  await page.evaluate(() =>
+    document.querySelectorAll('#live2-wrap > .skore').length === 0 &&
+    document.querySelectorAll('.hriste-dlazdice.skore').length === 0));
+pass &= ok('T42b na hřiště tím zbylo přes polovinu obalu (#84)',
+  m.plocha / m.obal > 0.55);
+
+pass &= ok('T42c sety i skóre mají vlastní dlaždice v levém sloupci (#84)',
+  await page.evaluate(() => {
+    const mimo = document.querySelector('.hriste-mimo').getBoundingClientRect();
+    const hriste = document.querySelector('.hriste').getBoundingClientRect();
+    return !!document.querySelector('.hriste-dlazdice.dl-sety') &&
+           !!document.querySelector('.hriste-dlazdice.dl-skore') &&
+           mimo.right <= hriste.left + 1;      // mimo hřiště, vlevo od zón
+  }));
+
+pass &= ok('T42d sloty libera jsou 7 a 8 a taky mimo hřiště (#84)',
+  await page.evaluate(() => {
+    const sloty = [...document.querySelectorAll('.hriste-mimo .hriste-zona.libero .hriste-cislo-zony')]
+      .map(e => parseInt(e.textContent));
+    const vHristi = [...document.querySelectorAll('.hriste .hriste-cislo-zony')]
+      .map(e => parseInt(e.textContent));
+    return JSON.stringify(sloty) === JSON.stringify([7, 8]) &&
+           !vHristi.some(z => z > 6);
+  }));
+
+pass &= ok('T42e sloty libera nejsou v databázi, plynou z nominace (#84)',
+  await page.evaluate(() => {
+    const vPostaveni = state.postaveni.filter(p => p.zapas_id === 100).map(p => p.zona);
+    return !vPostaveni.some(z => z > 6);
+  }));
+
+// prázdný slot nominuje
+await page.evaluate(() => {
+  state.zapasHraci.filter(zh => zh.zapas_id === 100).forEach(zh => { zh.libero = false; });
+  renderLive2(100);
+});
+await page.waitForTimeout(200);
+pass &= ok('T42f bez nominace jsou oba sloty prázdné (#84)',
+  (await page.$$eval('.hriste-mimo .hriste-zona.libero.prazdna', els => els.length)) === 2);
+otherWrites = [];
+await page.click('.hriste-mimo .hriste-zona.libero.prazdna');
+await page.waitForSelector('#modal-v2-zona:not(.hidden)');
+pass &= ok('T42g klik na prázdný slot nabídne nominaci, ne postavení do zóny (#84)',
+  /libero/i.test(await page.textContent('#v2-zona-title')));
+await page.click('#v2-zona-obsah .player-card');
+await page.waitForTimeout(600);
+pass &= ok('T42h nominace ze slotu se uloží do sestavy (#84)',
+  otherWrites.some(w => w.table === 'vb_zapas_hraci' && w.body && w.body.libero === true) &&
+  (await page.$$eval('.hriste-mimo .hriste-zona.libero:not(.prazdna)', els => els.length)) === 1);
+pass &= ok('T42i a nezapsala se přitom do vb_postaveni (#84)',
+  !otherWrites.some(w => w.table === 'vb_postaveni'));
+
+// dlaždice se skóre upravuje skóre mimo statistiku hráček
+const predUpravou = await page.evaluate(() => skoreSetu(100, state.liveSet));
+await page.click('.hriste-dlazdice.dl-skore');
+await page.waitForSelector('#modal-v2-skore:not(.hidden)');
+pass &= ok('T42j dlaždice skóre otevře úpravu s pojmenovanými akcemi (#84)',
+  await page.evaluate(() => {
+    const t = document.getElementById('v2-skore-obsah').textContent;
+    return /Chyba soupeře/.test(t) && /Bod soupeře/.test(t) &&
+           /náš bod/.test(t) && /jejich bod/.test(t);
+  }));
+chybyRpc = [];
+await page.click('#v2-skore-obsah .skore-uprava-radek:first-child .btn-primary');
+await page.waitForTimeout(600);
+pass &= ok('T42k přidání bodu jde přes chybu soupeře, ne mimo statistiku (#84)',
+  chybyRpc.length === 1 && chybyRpc[0].p_pole === 'pocet' && chybyRpc[0].p_delta === 1 &&
+  await page.evaluate(p => skoreSetu(100, state.liveSet).nase === p.nase + 1, predUpravou));
+pass &= ok('T42l hodnota v panelu se rovnou srovná (#84)',
+  await page.evaluate(() =>
+    parseInt(document.getElementById('skore-uprava-pocet').textContent) ===
+    souperHodnota(100, state.liveSet, 'pocet')));
+await page.click('#v2-skore-obsah .skore-uprava-radek:first-child .btn-secondary');
+await page.waitForTimeout(600);
+pass &= ok('T42m a jde to zase ubrat (#84)',
+  await page.evaluate(p => skoreSetu(100, state.liveSet).nase === p.nase, predUpravou));
+await page.click('#modal-v2-skore .modal-footer .btn-secondary');
+await page.waitForTimeout(300);
+pass &= ok('T42n dlaždice po zavření ukazuje srovnané skóre (#84)',
+  await page.evaluate(() => {
+    const s = skoreSetu(100, state.liveSet);
+    return document.querySelector('.hriste-dlazdice.dl-skore .dlazdice-hodnota')
+      .textContent.replace(/\s/g, '') === `${s.nase}:${s.jejich}`;
+  }));
+
+pass &= ok('T42n2 oba sloupce gridu končí na stejné čáře (#84)', await page.evaluate(() => {
+  const mimo = document.querySelector('.hriste-mimo').getBoundingClientRect();
+  const hriste = document.querySelector('.hriste').getBoundingClientRect();
+  return Math.abs(mimo.bottom - hriste.bottom) <= 1 && Math.abs(mimo.top - hriste.top) <= 1;
+}));
+pass &= ok('T42n3 grid vyplní dostupnou výšku, nenechá pod sebou prázdno (#84)',
+  await page.evaluate(() => {
+    const seznam = document.querySelector('.v2-seznam').getBoundingClientRect();
+    const plocha = document.querySelector('.hriste-plocha').getBoundingClientRect();
+    return plocha.bottom >= seznam.bottom - 24;
+  }));
+
+pass &= ok('T42o všechno se pořád vejde na telefon (#84)', await page.evaluate(() => {
+  const w = document.getElementById('live2-wrap');
+  const seznam = w.querySelector('.v2-seznam');
+  const zona = document.querySelector('.hriste .hriste-zona').getBoundingClientRect();
+  return document.documentElement.scrollWidth - document.documentElement.clientWidth <= 0 &&
+         seznam.scrollWidth - seznam.clientWidth <= 0 &&
+         zona.width >= 44 && zona.height >= 44 &&
+         document.querySelector('.hriste-dlazdice.dl-skore').getBoundingClientRect().height >= 44;
+}));
+await page.setViewportSize({ width: 1100, height: 900 });
+await page.waitForTimeout(300);
 
 await b.close();
 console.log(pass ? '\nVŠE PROŠLO' : '\nNĚCO SELHALO');

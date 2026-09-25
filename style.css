@@ -370,18 +370,19 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 .v2-zobrazeni-btn.aktivni{background:var(--accent);color:#fff;border-color:var(--accent)}
 .v2-zobrazeni-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
-.hriste-wrap{padding:10px}
-.hriste-napoveda{font-size:12px;color:var(--muted);margin-bottom:8px;display:flex;
+.hriste-wrap{padding:10px;height:100%;display:flex;flex-direction:column;gap:8px}
+.hriste-napoveda{flex-shrink:0;font-size:12px;color:var(--muted);display:flex;
   align-items:center;gap:8px;flex-wrap:wrap}
 /* Síť vpravo: svislý pruh vedle plochy, ne vodorovný nad ní. */
-.hriste-plocha{display:flex;gap:6px;align-items:stretch}
+.hriste-plocha{flex:1;min-height:0;display:flex;gap:6px;align-items:stretch}
 .hriste-sit{flex-shrink:0;width:18px;border-left:3px solid var(--muted);display:flex;
   align-items:center;justify-content:center}
 .hriste-sit span{font-size:10px;text-transform:uppercase;letter-spacing:2px;color:var(--muted);
   writing-mode:vertical-rl}
 .hriste{flex:1;display:flex;flex-direction:column;gap:6px;min-width:0}
+.hriste-rada{flex:1}
 .hriste-rada{display:grid;grid-template-columns:repeat(2,1fr);gap:6px}
-.hriste-zona{min-height:76px;display:flex;flex-direction:column;align-items:flex-start;
+.hriste-zona{min-height:64px;display:flex;flex-direction:column;align-items:flex-start;
   justify-content:center;gap:1px;padding:6px 8px;border:1px solid var(--border);border-radius:10px;
   background:var(--surface2);cursor:pointer;color:var(--text);font-family:inherit;text-align:left;
   overflow:hidden}
@@ -398,15 +399,37 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 .hriste-skore{display:flex;gap:6px;font-family:'Oswald',sans-serif;font-size:13px;font-weight:700}
 .hriste-skore .plus{color:var(--green)}
 .hriste-skore .minus{color:var(--red)}
-.hriste-libera{margin-top:10px;border-top:1px solid var(--border);padding-top:8px}
-.hriste-libera-nadpis{font-size:10px;text-transform:uppercase;letter-spacing:.5px;
-  color:var(--muted);margin-bottom:6px}
-.hriste-libero{width:100%;min-height:48px;display:flex;align-items:center;gap:8px;padding:0 10px;
-  border:1px solid var(--border);border-radius:10px;background:var(--surface2);cursor:pointer;
-  color:var(--text);font-family:inherit;text-align:left;margin-bottom:6px}
-.hriste-libero:active{background:var(--surface)}
-.hriste-libero:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.hriste-libero .hriste-skore{margin-left:auto}
+/* Levý sloupec je mimo hřiště: dlaždice se stavem a sloty pro libera.
+   Sety a skóre tu zabírají místo, které dřív bral pruh přes celou šířku. */
+.hriste-mimo{flex:0 0 33%;display:flex;flex-direction:column;gap:6px;min-width:0}
+.hriste-mimo>*{flex:1}
+.hriste-dlazdice{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;
+  gap:1px;padding:6px 8px;border:1px solid var(--border);border-radius:10px;
+  background:var(--surface2);color:var(--text);font-family:inherit;text-align:left;
+  min-height:44px;overflow:hidden}
+button.hriste-dlazdice{cursor:pointer}
+button.hriste-dlazdice:active{background:var(--surface)}
+button.hriste-dlazdice:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.dlazdice-hodnota{font-family:'Oswald',sans-serif;font-size:22px;font-weight:700;line-height:1}
+.hriste-dlazdice.dl-sety .dlazdice-hodnota{color:var(--accent2)}
+.hriste-dlazdice.dl-skore .dlazdice-hodnota .plus{color:var(--green)}
+.hriste-dlazdice.dl-skore .dlazdice-hodnota .minus{color:var(--red)}
+.dlazdice-uprava{font-size:9px;color:var(--accent);text-transform:uppercase;letter-spacing:.5px}
+.hriste-zona.libero{border-style:dashed;border-color:var(--accent2)}
+.hriste-zona.libero .hriste-cislo-zony{color:var(--accent2)}
+
+/* úprava skóre mimo statistiku */
+.skore-uprava-radek{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:10px 0;border-bottom:1px solid var(--border)}
+.skore-uprava-radek:last-child{border-bottom:none}
+.skore-uprava-nazev{font-size:13px;font-weight:600;line-height:1.3}
+.skore-uprava-nazev.plus{color:var(--green)}
+.skore-uprava-nazev.minus{color:var(--red)}
+.skore-uprava-komu{font-size:11px;color:var(--muted);font-weight:400}
+.skore-uprava-tlacitka{display:flex;align-items:center;gap:10px;flex-shrink:0}
+.skore-uprava-tlacitka .btn{min-width:48px;min-height:44px;font-size:18px}
+.skore-uprava-hodnota{font-family:'Oswald',sans-serif;font-size:20px;font-weight:700;
+  min-width:28px;text-align:center}
 
 /* ── STAV SETU ──
    Skóre se neukládá, skládá se z akcí. Varování se ukazuje, jen když se
