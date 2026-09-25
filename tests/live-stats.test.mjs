@@ -2262,6 +2262,149 @@ await page.waitForTimeout(700);
 pass &= ok('T39m servis hráčky mimo šestku postavením nehne (#84)',
   JSON.stringify(await kdoKde()) === JSON.stringify(predLiberem));
 
+
+// ── #84 část 4: stav setu ──────────────────────────────────────────────────
+await page.click('.nav-tab:nth-child(6)');                  // Live V2
+await page.waitForSelector('.skore');
+await page.click('#live2-wrap .set-prepinac button:nth-of-type(1)');
+await page.waitForTimeout(300);
+
+const skore = () => page.evaluate(() => ({
+  nase: parseInt(document.getElementById('skore-nase').textContent),
+  jejich: parseInt(document.getElementById('skore-jejich').textContent),
+}));
+
+pass &= ok('T40a V2 ukazuje stav zapisovaného setu (#84)',
+  await page.isVisible('.skore') &&
+  /1\. set/.test(await page.textContent('.skore-popis')));
+
+pass &= ok('T40b skóre sedí na dohodnutý model (#84)', await page.evaluate(() => {
+  const s = skoreSetu(100, 1);
+  const hraci = hraciVSezoně(currentSeasonId());
+  const suma = pole => hraci.reduce((n, h) =>
+    n + pole.reduce((m, f) => m + getStatVal(100, h.id, f, 1), 0), 0);
+  return s.nase === suma(['servis_plus', 'utok_plus', 'blok_plus']) + souperHodnota(100, 1, 'pocet') &&
+         s.jejich === suma(['servis_minus', 'prijem_minus', 'utok_minus', 'chyba_minus'])
+                    + souperHodnota(100, 1, 'body');
+}));
+
+// bodované akce: plus nám, minus jim
+const predSkore = await skore();
+await page.evaluate(() => {
+  const id = state.zapasHraci.find(zh => zh.zapas_id === 100).hrac_id;
+  v2OtevriAkce(100, id);
+});
+await page.waitForSelector('#modal-v2-akce:not(.hidden)');
+await page.click('#modal-v2-akce .v2-dlazdice[onclick*="utok_plus"]');
+await page.waitForTimeout(600);
+pass &= ok('T40c smeč přidá bod nám (#84)', await page.evaluate(p =>
+  skoreSetu(100, 1).nase === p.nase + 1 && skoreSetu(100, 1).jejich === p.jejich, predSkore));
+
+await page.evaluate(() => {
+  const id = state.zapasHraci.find(zh => zh.zapas_id === 100).hrac_id;
+  v2OtevriAkce(100, id);
+});
+await page.waitForSelector('#modal-v2-akce:not(.hidden)');
+await page.click('#modal-v2-akce .v2-dlazdice[onclick*="prijem_minus"]');
+await page.waitForTimeout(600);
+pass &= ok('T40d zkažený příjem je bod jim, i když je příjem jinak kvalita (#84)',
+  await page.evaluate(p => skoreSetu(100, 1).jejich === p.jejich + 1, predSkore));
+
+// kvalita skóre nehýbe
+const predKvalitou = await page.evaluate(() => skoreSetu(100, 1));
+await page.evaluate(() => {
+  const id = state.zapasHraci.find(zh => zh.zapas_id === 100).hrac_id;
+  v2OtevriAkce(100, id);
+});
+await page.waitForSelector('#modal-v2-akce:not(.hidden)');
+await page.click('#modal-v2-akce .v2-dlazdice[onclick*="prijem_plus"]');
+await page.waitForTimeout(600);
+pass &= ok('T40e dobrý příjem skóre nemění, je to kvalita (#84)',
+  await page.evaluate(p => JSON.stringify(skoreSetu(100, 1)) === JSON.stringify(p), predKvalitou));
+
+await page.evaluate(() => {
+  const id = state.zapasHraci.find(zh => zh.zapas_id === 100).hrac_id;
+  v2OtevriAkce(100, id);
+});
+await page.waitForSelector('#modal-v2-akce:not(.hidden)');
+await page.click('#modal-v2-akce .v2-dlazdice[onclick*="utok_neutral"]');
+await page.waitForTimeout(600);
+pass &= ok('T40f útok, po kterém se pokračuje, skóre nemění (#84)',
+  await page.evaluate(p => JSON.stringify(skoreSetu(100, 1)) === JSON.stringify(p), predKvalitou));
+
+// soupeřova strana
+const predSouperem = await page.evaluate(() => skoreSetu(100, 1));
+await page.click('#live2-wrap .v2-souper-btn.plus');
+await page.waitForTimeout(600);
+pass &= ok('T40g chyba soupeře je bod nám (#84)',
+  await page.evaluate(p => skoreSetu(100, 1).nase === p.nase + 1, predSouperem));
+await page.click('#live2-wrap .v2-souper-btn.minus');
+await page.waitForTimeout(600);
+pass &= ok('T40h bod soupeře je bod jim (#84)',
+  await page.evaluate(p => skoreSetu(100, 1).jejich === p.jejich + 1, predSouperem));
+
+pass &= ok('T40i skóre na obrazovce sedí na výpočet (#84)', await page.evaluate(async () => {
+  const s = skoreSetu(100, 1);
+  return parseInt(document.getElementById('skore-nase').textContent) === s.nase &&
+         parseInt(document.getElementById('skore-jejich').textContent) === s.jejich;
+}));
+
+// prázdný set se neukazuje jako 0:0 vedle rozehraného
+// hráčka nesmí být na obrazovce dvakrát — šla by z ní zapsat akce ze dvou míst
+pass &= ok('T40i2 kdo stojí v zóně, není zároveň v pruhu libera (#84)',
+  await page.evaluate(() => {
+    const vZonach = [...postaveniSetu(100, state.liveSet).values()];
+    const vPruhu = [...document.querySelectorAll('.hriste-libero')]
+      .map(e => e.querySelector('.hriste-jmeno').textContent);
+    const jmena = id => (state.hraci.find(h => h.id === id) || {}).jmeno;
+    return vZonach.every(id => !vPruhu.includes(jmena(id)));
+  }));
+
+pass &= ok('T40j řádek po setech ukazuje jen sety s daty a ten rozehraný (#84)',
+  await page.evaluate(() => {
+    const videt = [...document.querySelectorAll('.skore-set')]
+      .map(e => parseInt(e.textContent));
+    return videt.every(i => setMaData(100, i) || i === state.liveSet) &&
+           videt.includes(state.liveSet);
+  }));
+
+// kontrola proti Výsledku
+pass &= ok('T40k bez zapsaného výsledku není co kontrolovat (#84)',
+  await page.evaluate(() => {
+    const z = state.zapasy.find(z => z.id === 100);
+    delete z.set1_my; delete z.set1_oni;
+    return kontrolaSkore(100, 1) === null;
+  }));
+pass &= ok('T40l shodný zápis se nehlásí (#84)', await page.evaluate(() => {
+  const z = state.zapasy.find(z => z.id === 100), s = skoreSetu(100, 1);
+  z.set1_my = s.nase; z.set1_oni = s.jejich;
+  renderLive2(100);
+  return kontrolaSkore(100, 1).sedi && !document.querySelector('.skore-nesedi');
+}));
+pass &= ok('T40m rozdíl se ukáže i s oběma čísly (#84)', await page.evaluate(() => {
+  const z = state.zapasy.find(z => z.id === 100), s = skoreSetu(100, 1);
+  z.set1_my = s.nase + 3; z.set1_oni = s.jejich;
+  renderLive2(100);
+  const k = kontrolaSkore(100, 1), el = document.querySelector('.skore-nesedi');
+  return !k.sedi && k.rozdilMy === -3 && !!el &&
+         el.textContent.includes(String(s.nase + 3)) && el.textContent.includes(String(s.nase));
+}));
+
+// a totéž u políček ve Výsledku, kde skóre zadáváš
+await page.evaluate(() => editVysledek(100));
+await page.waitForSelector('#modal-vysledek:not(.hidden)');
+pass &= ok('T40n u políček Výsledku je vidět, co vychází z akcí (#84)',
+  await page.evaluate(() => {
+    const el = document.getElementById('odv-set1');
+    const s = skoreSetu(100, 1);
+    return !!el && el.textContent.includes(`${s.nase}:${s.jejich}`);
+  }));
+await page.click('#modal-vysledek .modal-footer .btn-secondary');
+await page.evaluate(() => {
+  const z = state.zapasy.find(z => z.id === 100);
+  delete z.set1_my; delete z.set1_oni;
+});
+
 await b.close();
 console.log(pass ? '\nVŠE PROŠLO' : '\nNĚCO SELHALO');
 process.exit(pass ? 0 : 1);

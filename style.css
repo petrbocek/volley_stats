@@ -403,3 +403,21 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 .hriste-libero:active{background:var(--surface)}
 .hriste-libero:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .hriste-libero .hriste-skore{margin-left:auto}
+
+/* ── STAV SETU ──
+   Skóre se neukládá, skládá se z akcí. Varování se ukazuje, jen když se
+   rozchází se zapsaným výsledkem — pak v zápisu něco chybí (#84). */
+.skore{flex-shrink:0;padding:8px 12px;border-bottom:1px solid var(--border);background:var(--surface2)}
+.skore-hlavni{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.skore-popis{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:700}
+.skore-cisla{font-family:'Oswald',sans-serif;font-size:30px;font-weight:700;line-height:1}
+#skore-nase{color:var(--green)}
+#skore-jejich{color:var(--red)}
+.skore-dvojtecka{color:var(--muted);margin:0 4px}
+.skore-sety{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
+.skore-set{font-size:11px;color:var(--muted);font-family:'Oswald',sans-serif}
+.skore-set.aktivni{color:var(--accent);font-weight:700}
+.skore-nesedi{margin-top:6px;font-size:11px;color:#ffc107;background:rgba(255,193,7,.12);
+  border:1px solid rgba(255,193,7,.3);border-radius:6px;padding:4px 7px;line-height:1.35}
+.vysledek-odvozene{font-size:11px;color:var(--muted);margin:-4px 0 10px}
+.vysledek-odvozene strong{color:var(--accent2);font-family:'Oswald',sans-serif;font-size:13px}
