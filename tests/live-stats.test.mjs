@@ -38,6 +38,7 @@ const FIX = {
   vb_souteze: [{ id: 7, sezona_id: 1, nazev: SOUTEZ_S_XSS }],
   vb_chyby_souperu: [{ zapas_id: 100, set_cislo: 1, pocet: 2, body: 0 }],
   vb_postaveni: [],
+  vb_set_info: [],
   vb_zapas_hraci: [{ zapas_id: 100, hrac_id: 10 }, { zapas_id: 100, hrac_id: 11 },
                    { zapas_id: 100, hrac_id: 12 }, { zapas_id: 100, hrac_id: 13 },
                    { zapas_id: 200, hrac_id: 10 }],
@@ -96,6 +97,15 @@ await page.route('**/rest/v1/rpc/vb_uloz_postaveni', async route => {
   postaveniRpc.push({ p_zapas, p_set, pocet: p_postaveni.length });
   return route.fulfill({ status: 200, contentType: 'application/json',
     body: JSON.stringify({ zapas_id: p_zapas, set_cislo: p_set, pocet: p_postaveni.length }) });
+});
+
+await page.route('**/rest/v1/rpc/vb_zapis_set_info', async route => {
+  const { p_zapas, p_set, p_pole, p_delta } = route.request().postDataJSON();
+  let r = FIX.vb_set_info.find(x => x.zapas_id === p_zapas && x.set_cislo === p_set);
+  if (!r) { r = { zapas_id: p_zapas, set_cislo: p_set, oddechove_casy: 0, stridani: 0 };
+            FIX.vb_set_info.push(r); }
+  r[p_pole] = Math.max(0, r[p_pole] + p_delta);
+  return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(r) });
 });
 
 let chybyRpc = [];
@@ -2774,6 +2784,119 @@ pass &= ok('T43i v seznamu souhrn zůstává nahoře (#84)', await page.evaluate
 }));
 
 pass &= ok('T43g nic z toho stránku nepřetéká (#84)', await page.evaluate(() => {
+  const seznam = document.querySelector('.v2-seznam');
+  return document.documentElement.scrollWidth - document.documentElement.clientWidth <= 0 &&
+         seznam.scrollWidth - seznam.clientWidth <= 0;
+}));
+await page.setViewportSize({ width: 1100, height: 900 });
+await page.waitForTimeout(300);
+
+
+// ── #84 část 8: informace o zápase pod hřištěm ─────────────────────────────
+await page.click('.nav-tab:nth-child(6)');
+await page.waitForSelector('#live2-wrap');
+await page.evaluate(() => { if (!v2Hriste) v2PrepniHriste(); });
+await page.waitForSelector('.hriste-info');
+await page.evaluate(() => {
+  state.setInfo = state.setInfo.filter(x => x.zapas_id !== 100);
+  state.postaveni = state.postaveni.filter(p => p.zapas_id !== 100);
+  [10, 11, 12, 13].forEach((id, i) => state.postaveni.push(
+    { zapas_id: 100, set_cislo: state.liveSet, zona: i + 1, hrac_id: id }));
+  renderLive2(100);
+});
+await page.waitForTimeout(300);
+
+// kdo podává teď a kdo po ní
+pass &= ok('T44a je vidět, kdo podává a kdo je na řadě (#84)', await page.evaluate(() => {
+  const m = postaveniSetu(100, state.liveSet);
+  const jm = id => state.hraci.find(h => h.id === id).jmeno;
+  const ted = document.querySelector('.info-podava').textContent;
+  const pristi = document.querySelector('.info-pristi').textContent;
+  return ted.includes(jm(m.get(1))) && pristi.includes(jm(m.get(2)));
+}));
+pass &= ok('T44b podávající se po rotaci přepíše (#84)', await page.evaluate(() => {
+  const puvodni = document.querySelector('.info-podava').textContent;
+  const kdo = postaveniSetu(100, state.liveSet).get(3);
+  otocNaPodavajici(100, state.liveSet, kdo);
+  renderLive2(100);
+  return document.querySelector('.info-podava').textContent !== puvodni &&
+         document.querySelector('.info-podava').textContent
+           .includes(state.hraci.find(h => h.id === kdo).jmeno);
+}));
+
+// oddechové časy
+pass &= ok('T44c oddešáky začínají nevyčerpané (#84)', await page.evaluate(() =>
+  document.querySelectorAll('.tecka').length === 2 &&
+  document.querySelectorAll('.tecka.cerpana').length === 0));
+otherWrites = [];
+let setInfoRpc = 0;
+await page.click('.info-oddechovy');
+await page.waitForTimeout(600);
+pass &= ok('T44d klepnutí vyčerpá jeden (#84)',
+  await page.evaluate(() => setInfo(100, state.liveSet).oddechove_casy) === 1 &&
+  (await page.$$eval('.tecka.cerpana', els => els.length)) === 1);
+pass &= ok('T44e zapisuje se přírůstkem přes vlastní RPC (#84)',
+  !otherWrites.some(w => w.table === 'vb_set_info'));
+await page.click('.info-oddechovy');
+await page.waitForTimeout(600);
+pass &= ok('T44f druhý taky, a víc už se nenabízí samo (#84)',
+  await page.evaluate(() => setInfo(100, state.liveSet).oddechove_casy) === 2);
+page.once('dialog', d => d.dismiss());
+await page.click('.info-oddechovy');
+await page.waitForTimeout(500);
+pass &= ok('T44g přes limit se appka zeptá a zamítnutí nic nepřidá (#84)',
+  await page.evaluate(() => setInfo(100, state.liveSet).oddechove_casy) === 2);
+
+// střídání se počítá samo
+const predStrid = await page.evaluate(() => setInfo(100, state.liveSet).stridani);
+await page.click('.hriste .hriste-zona:not(.prazdna)');
+await page.waitForSelector('#modal-v2-akce:not(.hidden)');
+await page.click('#btn-v2-stridat');
+await page.waitForSelector('#modal-v2-zona:not(.hidden)');
+await page.click('#v2-zona-obsah .player-card');
+await page.waitForTimeout(800);
+pass &= ok('T44h střídání se přičte samo, neklika se zvlášť (#84)',
+  await page.evaluate(() => setInfo(100, state.liveSet).stridani) === predStrid + 1);
+pass &= ok('T44i a je vidět kolik z kolika (#84)',
+  /\d+\/6/.test(await page.textContent('.hriste-info')));
+
+// pouhé obsazení prázdné zóny střídání není
+pass &= ok('T44j0 je koho postavit, jinak by se měřilo prázdno (#84)',
+  await page.evaluate(() => {
+    const zona = [...postaveniSetu(100, state.liveSet).keys()][0];
+    vyndejZeZony(100, state.liveSet, zona);
+    return lavicka(100, state.liveSet).length > 0;
+  }));
+await page.waitForTimeout(400);
+const predObsazenim = await page.evaluate(() => setInfo(100, state.liveSet).stridani);
+await page.click('.hriste .hriste-zona.prazdna');
+await page.waitForSelector('#modal-v2-zona:not(.hidden)');
+await page.click('#v2-zona-obsah .player-card');
+await page.waitForTimeout(800);
+pass &= ok('T44j obsazení prázdné zóny se jako střídání nepočítá (#84)',
+  await page.evaluate(() => setInfo(100, state.liveSet).stridani) === predObsazenim);
+
+// kdo dělá body a kdo je dává
+pass &= ok('T44k je vidět, kdo dělá body a kdo je dává (#84)', await page.evaluate(() => {
+  const b = bodyPoHrackach(100, state.liveSet);
+  const t = document.querySelector('.hriste-info').textContent;
+  return (!b.dela || t.includes(b.dela.h.jmeno)) && (!b.dava || t.includes(b.dava.h.jmeno));
+}));
+pass &= ok('T44l počítá se ze stejných akcí jako skóre (#84)', await page.evaluate(() => {
+  const set = state.liveSet;
+  const b = bodyPoHrackach(100, set);
+  if (!b.dela) return false;
+  const rucne = SKORE_NASE.reduce((n, f) => n + getStatVal(100, b.dela.h.id, f, set), 0);
+  return b.dela.ziskane === rucne;
+}));
+pass &= ok('T44m hráčka bez bodů se jako nejlepší neukáže (#84)', await page.evaluate(() => {
+  const b = bodyPoHrackach(100, state.liveSet);
+  return (!b.dela || b.dela.ziskane > 0) && (!b.dava || b.dava.ztracene > 0);
+}));
+
+await page.setViewportSize({ width: 390, height: 844 });
+await page.waitForTimeout(400);
+pass &= ok('T44n všechno se pořád vejde na telefon (#84)', await page.evaluate(() => {
   const seznam = document.querySelector('.v2-seznam');
   return document.documentElement.scrollWidth - document.documentElement.clientWidth <= 0 &&
          seznam.scrollWidth - seznam.clientWidth <= 0;

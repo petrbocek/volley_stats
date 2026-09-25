@@ -461,3 +461,20 @@ button.hriste-dlazdice:focus-visible{outline:2px solid var(--accent);outline-off
   border:1px solid rgba(255,193,7,.3);border-radius:6px;padding:4px 7px;line-height:1.35}
 .vysledek-odvozene{font-size:11px;color:var(--muted);margin:-4px 0 10px}
 .vysledek-odvozene strong{color:var(--accent2);font-family:'Oswald',sans-serif;font-size:13px}
+
+/* informace o zápase pod hřištěm — co jiné appky ukazují courtside */
+.hriste-info-radek+.hriste-info-radek{margin-top:4px}
+.info-podava{font-size:13px;font-weight:700;color:var(--accent)}
+.info-dres{color:var(--muted);font-weight:400;font-size:11px}
+.info-pristi{font-size:11px;color:var(--muted)}
+.info-oddechovy{display:flex;align-items:center;gap:5px;background:none;border:none;padding:2px 0;
+  cursor:pointer;font-family:inherit;color:inherit}
+.info-oddechovy:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.tecky{display:flex;gap:3px}
+.tecka{width:9px;height:9px;border-radius:50%;border:1px solid var(--muted)}
+.tecka.cerpana{background:var(--accent);border-color:var(--accent)}
+.info-hodnota{font-family:'Oswald',sans-serif;font-size:13px;font-weight:700}
+.info-hodnota.prekroceno{color:var(--red)}
+.info-body{font-size:11px;font-weight:600}
+.info-body.plus{color:var(--green)}
+.info-body.minus{color:var(--red)}
