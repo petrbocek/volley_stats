@@ -113,10 +113,25 @@
     <div class="modal-title" id="v2-akce-title">Akce</div>
     <input type="hidden" id="v2-akce-zapas" />
     <input type="hidden" id="v2-akce-hrac" />
+    <input type="hidden" id="v2-akce-zona" />
     <div id="v2-akce-obsah"></div>
     <div class="modal-footer">
       <button class="btn btn-secondary" onclick="closeModal('modal-v2-akce')">Zavřít</button>
+      <button class="btn btn-secondary" id="btn-v2-stridat" style="display:none" onclick="v2Stridat()">⇄ Střídat</button>
       <button class="btn btn-red" onclick="v2OdeberZeSestavy()">Odebrat ze sestavy</button>
+    </div>
+  </div>
+</div>
+
+<!-- Live V2: kdo stojí v zóně -->
+<div class="modal-overlay hidden" id="modal-v2-zona">
+  <div class="modal">
+    <div class="modal-title" id="v2-zona-title">Kdo stojí v zóně?</div>
+    <input type="hidden" id="v2-zona-zapas" />
+    <input type="hidden" id="v2-zona-cislo" />
+    <div id="v2-zona-obsah" class="player-grid" style="margin-bottom:16px"></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('modal-v2-zona')">Zrušit</button>
     </div>
   </div>
 </div>

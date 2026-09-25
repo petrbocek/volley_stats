@@ -359,3 +359,47 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 .tym-top-zapasy{color:var(--muted);font-size:12px;flex-shrink:0}
 .tym-top-total{font-family:'Oswald',sans-serif;font-size:16px;font-weight:700;color:var(--accent);
   min-width:32px;text-align:right}
+
+/* ── HŘIŠTĚ ──
+   Zóny jako ve volejbale: 4-3-2 u sítě nahoře, 5-6-1 vzadu. Zóna 1 podává,
+   proto je odlišená — z postavení se pak dá přečíst rotace (#84). */
+.v2-zobrazeni{flex-shrink:0;display:flex;gap:6px;padding:6px 8px;border-bottom:1px solid var(--border)}
+.v2-zobrazeni-btn{flex:1;min-height:36px;border:1px solid var(--border);border-radius:8px;
+  background:var(--surface2);color:var(--muted);font-size:13px;font-weight:600;cursor:pointer;
+  font-family:inherit}
+.v2-zobrazeni-btn.aktivni{background:var(--accent);color:#fff;border-color:var(--accent)}
+.v2-zobrazeni-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.hriste-wrap{padding:10px}
+.hriste-napoveda{font-size:12px;color:var(--muted);margin-bottom:8px;display:flex;
+  align-items:center;gap:8px;flex-wrap:wrap}
+.hriste-sit{text-align:center;font-size:10px;text-transform:uppercase;letter-spacing:2px;
+  color:var(--muted);border-top:3px solid var(--muted);padding-top:3px;margin-bottom:6px}
+.hriste{display:flex;flex-direction:column;gap:6px}
+.hriste-rada{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.hriste-zona{min-height:76px;display:flex;flex-direction:column;align-items:flex-start;
+  justify-content:center;gap:1px;padding:6px 8px;border:1px solid var(--border);border-radius:10px;
+  background:var(--surface2);cursor:pointer;color:var(--text);font-family:inherit;text-align:left;
+  overflow:hidden}
+.hriste-zona:active{background:var(--surface)}
+.hriste-zona:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.hriste-zona.podava{border-color:var(--accent);background:rgba(255,107,53,.08)}
+.hriste-zona.prazdna{align-items:center;justify-content:center;border-style:dashed;color:var(--muted)}
+.hriste-cislo-zony{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.hriste-zona.podava .hriste-cislo-zony{color:var(--accent)}
+.hriste-prazdno{font-size:24px;font-weight:700;line-height:1}
+.hriste-jmeno{font-size:13px;font-weight:700;max-width:100%;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.hriste-dres{font-size:11px;color:var(--muted);font-family:'Oswald',sans-serif}
+.hriste-skore{display:flex;gap:6px;font-family:'Oswald',sans-serif;font-size:13px;font-weight:700}
+.hriste-skore .plus{color:var(--green)}
+.hriste-skore .minus{color:var(--red)}
+.hriste-libera{margin-top:10px;border-top:1px solid var(--border);padding-top:8px}
+.hriste-libera-nadpis{font-size:10px;text-transform:uppercase;letter-spacing:.5px;
+  color:var(--muted);margin-bottom:6px}
+.hriste-libero{width:100%;min-height:48px;display:flex;align-items:center;gap:8px;padding:0 10px;
+  border:1px solid var(--border);border-radius:10px;background:var(--surface2);cursor:pointer;
+  color:var(--text);font-family:inherit;text-align:left;margin-bottom:6px}
+.hriste-libero:active{background:var(--surface)}
+.hriste-libero:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.hriste-libero .hriste-skore{margin-left:auto}
