@@ -702,6 +702,7 @@ function bumpSouper(zapasId,pole,delta=1,opts={}){
   const poleLogu=pole==='pocet'?'souper_chyba':'souper_bod';
   if(delta>0)zalogujUdalost(zapasId,set,null,poleLogu);
   else odlogujUdalost(zapasId,set,null,poleLogu);
+  zkontrolujKonecSetu(zapasId,set);
   if(!opts.bezUndo){
     if(delta>0){
       undoStack.push({typ:'souper',zapasId,set,pole});
@@ -919,6 +920,66 @@ function stavUtkani(zapasId){
   return {my,oni};
 }
 
+/* ─── KONEC SETU ───
+   Skóre se skládá z akcí, takže set sám od sebe nikde neskončí — po 25. bodu
+   se zapisovalo dál do stejného setu (nahlášeno z turnaje). Jakmile je set
+   podle pravidla rozhodnutý, appka nabídne přepnutí na další; další set je
+   prázdný, takže začne od 0:0 sám.
+
+   Výsledek setu se přitom NEzapisuje do zápasu automaticky. Kontrola proti
+   „Výsledku" má smysl jen tehdy, když je v něm to, co stálo na ukazateli —
+   kdyby si tam appka zapsala vlastní odvozené skóre, hlídala by sama sebe. */
+const nabidnutyKonec=new Set();          // zápas:set, na který už se appka ptala
+
+function konecZapasu(zapasId){
+  const u=stavUtkani(zapasId);
+  return Math.max(u.my,u.oni)>Math.floor(SETU/2);
+}
+
+function zkontrolujKonecSetu(zapasId,set){
+  if(zapasId!==state.liveZapasId||set!==state.liveSet)return;   // cizí set neřešíme
+  // Dopisování statistik k odehranému zápasu není rozehraný set — nabídka by
+  // tam jen otravovala.
+  if(state.zapasy.find(z=>z.id===zapasId)?.stav==='dokonceny')return;
+  const klic=`${zapasId}:${set}`;
+  if(!setRozhodnuty(zapasId,set)){
+    nabidnutyKonec.delete(klic);        // „zpět" vrátilo skóre pod hranici
+    return;
+  }
+  // Tlačítko u skóre se objeví samo: konecSetuHtml je součástí bloku, který
+  // se po každé akci překresluje. Volat odsud prekresliLive nelze — vyměnilo
+  // by element mezi stiskem a puštěním a rozbilo dlouhý stisk (#76).
+  if(nabidnutyKonec.has(klic))return;   // ptát se po každém dalším bodu je obtěžování
+  nabidnutyKonec.add(klic);
+  const s=skoreSetu(zapasId,set);
+  const hotovo=konecZapasu(zapasId)||set>=SETU;
+  const otazka=hotovo
+    ?`${set}. set končí ${s.nase}:${s.jejich}. Ukončit zápas?`
+    :`${set}. set končí ${s.nase}:${s.jejich}. Přepnout na ${set+1}. set?`;
+  // setTimeout: confirm uprostřed zápisu by spolkl doklepnutí, tohle ho pustí až po něm
+  setTimeout(()=>{if(confirm(otazka))dalsiSet(zapasId);},0);
+}
+
+// Tlačítko i odpověď na otázku výše — po zamítnutí zůstane u skóre, aby se
+// dalo přepnout i později (třeba po opravě překliku).
+function dalsiSet(zapasId){
+  const set=state.liveSet;
+  if(konecZapasu(zapasId)||set>=SETU){editVysledek(zapasId,true);return;}
+  prepniSet(set+1);
+}
+
+// Nabídka u skóre: jen když je rozehraný set rozhodnutý.
+function konecSetuHtml(zapasId){
+  const set=state.liveSet;
+  if(!setRozhodnuty(zapasId,set))return '';
+  const hotovo=konecZapasu(zapasId)||set>=SETU;
+  return `<div class="konec-setu">
+    <span class="konec-setu-popis">${set}. set rozhodnutý</span>
+    <button class="btn btn-sm btn-primary" onclick="dalsiSet(${zapasId})">
+      ${hotovo?'✅ Ukončit zápas':`▶ ${set+1}. set`}</button>
+  </div>`;
+}
+
 function skoreHtml(zapasId){
   const set=state.liveSet;
   const s=skoreSetu(zapasId,set);
@@ -943,6 +1004,7 @@ function skoreHtml(zapasId){
     </div>
     <div class="skore-sety">${sety.join('')}</div>
     ${varovani}
+    ${konecSetuHtml(zapasId)}
   </div>`;
 }
 
@@ -1440,6 +1502,7 @@ function hristeInfoHtml(zapasId){
     ${k&&!k.sedi?`<div class="skore-nesedi" title="Odvozeno z akcí vs. zapsáno ve Výsledku">
       ⚠ Zapsáno ${k.zapsane.nase}:${k.zapsane.jejich} — z akcí vychází ${k.odvozene.nase}:${k.odvozene.jejich}
     </div>`:''}
+    ${konecSetuHtml(zapasId)}
     ${tymSouhrnHtml(zapasId)}
   </div>`;
 }
@@ -1840,6 +1903,7 @@ function bump(hracId,zapasId,field,delta=1,opts={}){
   zaznamenejProZpet(hracId,zapasId,field,set,nova-puvodni,opts);
   if(delta>0)zalogujUdalost(zapasId,set,hracId,field);
   else odlogujUdalost(zapasId,set,hracId,field);
+  zkontrolujKonecSetu(zapasId,set);
 
   // Zapsaný servis určuje postavení. Předchozí stav si schová záznam pro
   // „zpět" — jinak by vrácený servis nechal šestku otočenou a člověk by

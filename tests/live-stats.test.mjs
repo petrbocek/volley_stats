@@ -3190,6 +3190,113 @@ pass &= ok('T47e na telefonu barvy drží a nic nepřeteklo (#84)', await page.e
 await page.setViewportSize({ width: 1100, height: 900 });
 await page.waitForTimeout(300);
 
+
+// ── #84 část 12: dohraný set se nabídne přepnout ──────────────────────────
+// Z turnaje: skóre přešlo 25 a zapisovalo se dál do stejného setu.
+await page.evaluate(() => { state.liveSet = 4; renderLive2(100); });
+await page.waitForTimeout(300);
+
+const skoreSetu4 = () => page.evaluate(() => skoreSetu(100, state.liveSet));
+const s0 = await skoreSetu4();
+pass &= ok('T48a0 set je rozehraný, jinak by se měřil dohraný (#84)',
+  s0.nase < 24 && s0.jejich <= 22 &&
+  await page.evaluate(() => setRozhodnuty(100, 4)) === null);
+
+// doplnit na 24:22 jedním zápisem na každé straně
+await page.evaluate(s => {
+  bumpSouper(100, 'pocet', 24 - s.nase);
+  bumpSouper(100, 'body', 22 - s.jejich);
+}, s0);
+await page.waitForTimeout(600);
+
+pass &= ok('T48a při 24:22 se nic nenabízí, hraje se dál (#84)',
+  JSON.stringify(await skoreSetu4()) === JSON.stringify({ nase: 24, jejich: 22 }) &&
+  await page.$('.konec-setu') === null);
+
+// 25. bod set rozhodne
+let dialog = null;
+page.once('dialog', d => { dialog = d.message(); d.dismiss(); });
+await page.evaluate(() => bump(10, 100, 'utok_plus', 1));
+await page.waitForTimeout(700);
+
+pass &= ok('T48b po 25. bodu se appka zeptá na další set (#84)',
+  !!dialog && /4\. set končí 25:22/.test(dialog) && /5\. set/.test(dialog));
+pass &= ok('T48c zamítnutí nechá nabídku u skóre, ať jde přepnout i později (#84)',
+  await page.evaluate(() => state.liveSet) === 4 &&
+  /5\. set/.test(await page.textContent('.konec-setu')));
+
+otherWrites = [];
+await page.click('.konec-setu button');
+await page.waitForTimeout(600);
+pass &= ok('T48d přepnutím začne další set od nuly (#84)',
+  await page.evaluate(() => state.liveSet) === 5 &&
+  JSON.stringify(await skoreSetu4()) === JSON.stringify({ nase: 0, jejich: 0 }));
+pass &= ok('T48e 4. set zůstal zapsaný tak, jak byl (#84)',
+  JSON.stringify(await page.evaluate(() => skoreSetu(100, 4))) ===
+  JSON.stringify({ nase: 25, jejich: 22 }));
+pass &= ok('T48f výsledek setu si appka do zápasu nepíše sama (#84)',
+  await page.evaluate(() => state.zapasy.find(z => z.id === 100).set4_my) == null &&
+  !otherWrites.some(w => w.table === 'vb_zapasy'));
+
+// zpět pod hranici nabídku sundá a po dalším bodu se appka zeptá znovu
+await page.evaluate(() => { state.liveSet = 4; renderLive2(100); });
+await page.waitForTimeout(300);
+await page.evaluate(() => bump(10, 100, 'utok_plus', -1));
+await page.waitForTimeout(600);
+pass &= ok('T48g vzetí bodu zpět nabídku sundá (#84)',
+  await page.$('.konec-setu') === null &&
+  await page.evaluate(() => setRozhodnuty(100, 4)) === null);
+
+// 25:24 není rozhodnuto — musí se hrát o dva
+await page.evaluate(() => { bumpSouper(100, 'body', 2); });
+await page.waitForTimeout(500);
+await page.evaluate(() => bump(10, 100, 'utok_plus', 1));
+await page.waitForTimeout(600);
+pass &= ok('T48h při 25:24 se pořád hraje, o dva body (#84)',
+  JSON.stringify(await skoreSetu4()) === JSON.stringify({ nase: 25, jejich: 24 }) &&
+  await page.$('.konec-setu') === null);
+
+dialog = null;
+page.once('dialog', d => { dialog = d.message(); d.dismiss(); });
+await page.evaluate(() => bump(11, 100, 'utok_plus', 1));
+await page.waitForTimeout(700);
+pass &= ok('T48i po 26:24 se appka zeptá znovu (#84)',
+  !!dialog && /26:24/.test(dialog) && !!await page.$('.konec-setu'));
+
+// rozhodnutý zápas: nabídka je ukončit, ne přepnout
+await page.evaluate(() => {
+  const z = state.zapasy.find(x => x.id === 100);
+  z.set1_my = 25; z.set1_oni = 20; z.set2_my = 25; z.set2_oni = 18;
+  renderLive2(100);
+});
+await page.waitForTimeout(400);
+pass &= ok('T48j třetí vyhraný set nabídne ukončení zápasu (#84)',
+  await page.evaluate(() => stavUtkani(100).my) >= 3 &&
+  /Ukončit/.test(await page.textContent('.konec-setu')));
+await page.click('.konec-setu button');
+await page.waitForTimeout(500);
+pass &= ok('T48k a otevře rovnou výsledek zápasu (#84)',
+  await page.isVisible('#modal-vysledek'));
+await page.click('#modal-vysledek .modal-footer .btn-secondary');
+await page.waitForTimeout(300);
+
+// dopisování k odehranému zápasu nabídku nespouští
+await page.evaluate(() => {
+  const z = state.zapasy.find(x => x.id === 100);
+  z.stav = 'dokonceny';
+});
+let dialog2 = null;
+page.once('dialog', d => { dialog2 = d.message(); d.dismiss(); });
+await page.evaluate(() => bump(11, 100, 'utok_plus', 1));
+await page.waitForTimeout(700);
+pass &= ok('T48l u dokončeného zápasu se appka neptá (#84)', dialog2 === null);
+await page.evaluate(() => {
+  const z = state.zapasy.find(x => x.id === 100);
+  z.stav = 'probiha'; delete z.set1_my; delete z.set1_oni; delete z.set2_my; delete z.set2_oni;
+  state.liveSet = 1; renderLive2(100);
+});
+await page.waitForTimeout(300);
+
 await b.close();
 console.log(pass ? '\nVŠE PROŠLO' : '\nNĚCO SELHALO');
 process.exit(pass ? 0 : 1);
