@@ -1356,7 +1356,7 @@ function seradStatistiky(sloupec){
   renderStatistiky();
 }
 
-function spocitejStatistiky(){
+function spocitejStatistiky(prepis=null){
   const sid=currentSeasonId();
   if(!sid)return{stav:'bez-sezony'};
   const vsechnyHraci=hraciVSezoně(sid);
@@ -1364,18 +1364,26 @@ function spocitejStatistiky(){
   const vsechnyZapasy=state.zapasy.filter(z=>z.sezona_id===sid&&(z.stav==='dokonceny'||z.stav==='probihajici'));
   if(!vsechnyZapasy.length)return{stav:'zadne-zapasy'};
 
-  const selTym=parseInt(document.getElementById('stats-tym-sel')?.value)||0;
-  const selSoutez=parseInt(document.getElementById('stats-soutez-sel')?.value)||0;
-  const selZapas=parseInt(document.getElementById('stats-zapas-sel')?.value)||0;
-  const selHrac=parseInt(document.getElementById('stats-hrac-sel')?.value)||0;
-  const selSet=parseInt(document.getElementById('stats-set-sel')?.value)||0;
+  // Detail týmu ani profil za celou sezónu nestojí na selectech ve
+  // Statistikách, ale počítat musí touhle funkcí — dvě cesty k týmž číslům
+  // je přesně to, kde čísla začnou utíkat (#71).
+  const zDom=id=>parseInt(document.getElementById(id)?.value)||0;
+  const selTym=prepis?0:zDom('stats-tym-sel');
+  const selSoutez=prepis?0:zDom('stats-soutez-sel');
+  const selZapas=prepis?0:zDom('stats-zapas-sel');
+  const selHrac=prepis?0:zDom('stats-hrac-sel');
+  const selSet=prepis?(prepis.set||0):zDom('stats-set-sel');
 
   let hraci=vsechnyHraci;
   if(selTym){const ids=state.hraciTymy.filter(ht=>ht.tym_id===selTym).map(ht=>ht.hrac_id);hraci=hraci.filter(h=>ids.includes(h.id));}
   if(selHrac)hraci=hraci.filter(h=>h.id===selHrac);
 
   const zapasyPoCsoutezi=selSoutez?vsechnyZapasy.filter(z=>z.soutez_id===selSoutez):vsechnyZapasy;
-  const zapasIds=(selZapas?zapasyPoCsoutezi.filter(z=>z.id===selZapas):zapasyPoCsoutezi).map(z=>z.id);
+  // Vlastní výběr zápasů schválně nefiltruje hráčky podle členství v týmu:
+  // do součtu týmu patří i ta, co v zápase hrála a dnes už v něm není.
+  const zapasIds=prepis&&prepis.zapasIds
+    ? prepis.zapasIds.filter(id=>vsechnyZapasy.some(z=>z.id===id))
+    : (selZapas?zapasyPoCsoutezi.filter(z=>z.id===selZapas):zapasyPoCsoutezi).map(z=>z.id);
   const seasonSouteze=state.souteze.filter(s=>!s.sezona_id||s.sezona_id===sid);
 
   const neserazene=hraci.map(h=>{
@@ -1607,14 +1615,18 @@ function renderStatistiky(){
 // to člověk čeká), nebo za celou sezónu (otevřený ze soupisky, kde žádný filtr
 // nenastavoval). Z čeho to je, se vždycky napíše do hlavičky (#71).
 function rozsahProfilu(celaSezona){
-  const d=spocitejStatistiky();
-  if(d.stav!=='ok')return null;
-  if(!celaSezona)return d;
-  const sid=d.sid;
+  if(!celaSezona){
+    const d=spocitejStatistiky();
+    return d.stav==='ok'?d:null;
+  }
+  const sid=currentSeasonId();
   const zapasIds=state.zapasy
     .filter(z=>z.sezona_id===sid&&(z.stav==='dokonceny'||z.stav==='probihajici'))
     .map(z=>z.id);
-  return {...d,zapasIds,celaSezona:true,selSet:0};
+  // přes prepis, ne slepováním výsledku: jinak by rows zůstaly podle filtru
+  // a kostky by nesouhlasily s tabulkou pod nimi
+  const d=spocitejStatistiky({zapasIds});
+  return d.stav==='ok'?{...d,celaSezona:true}:null;
 }
 
 function popisRozsahu(d){
@@ -1657,18 +1669,8 @@ function profilHracky(hracId,celaSezona=false){
       total:v('servis_plus')+v('utok_plus')+v('blok_plus')
             -v('servis_minus')-v('prijem_minus')-v('utok_minus')-v('chyba_minus')};
   });
-  // souhrn v d.rows je počítaný podle filtru ve Statistikách, takže za celou
-  // sezónu se musí sečíst znovu — jinak by kostky nesouhlasily s tabulkou pod nimi
-  const souhrn=d.celaSezona?souhrnZRadku(h,radky):d.rows.find(r=>r.h.id===hracId);
-  return {h,radky,souhrn,rozsah:popisRozsahu(d)};
-}
-
-function souhrnZRadku(h,radky){
-  if(!radky.length)return null;
-  const v=f=>radky.reduce((a,r)=>a+r[f],0);
-  return {h,zapasy:radky.length,
-    sp:v('sp'),sm:v('sm'),pp:v('pp'),pm:v('pm'),pn:v('pn'),
-    up:v('up'),um:v('um'),un:v('un'),bp:v('bp'),cm:v('cm'),total:v('total')};
+  // d.rows už je spočítané ve zvoleném rozsahu, takže se nic nesčítá podruhé
+  return {h,radky,souhrn:d.rows.find(r=>r.h.id===hracId),rozsah:popisRozsahu(d)};
 }
 
 // Malý spojnicový graf, jedna série. Tři veličiny jsou schválně tři grafy:
@@ -1801,11 +1803,96 @@ function renderTymy(){
     return `<div class="tym-card">
       <div class="tym-card-header">
         <div class="tym-card-title">${esc(t.nazev)}</div>
+        <button class="btn btn-sm btn-secondary" title="Bilance, statistiky a odehrané zápasy" onclick="otevriTymDetail(${t.id})">📊 Detail</button>
         <button class="btn btn-sm btn-secondary" onclick="openTymManage(${t.id})">✏️ Spravovat</button>
       </div>
       <div class="tym-members">${playerChips||'<span style="color:var(--muted)">Prázdný tým</span>'}</div>
     </div>`;
   }).join('')}</div>`;
+}
+
+/* ─── DETAIL TÝMU ───
+   Správa týmu uměla jedinou věc: zaškrtat členství. Co ten tým odehrál, se
+   z appky nedalo zjistit, přestože zápasy na něj navázané jsou (#71). */
+function detailTymu(tymId){
+  const t=state.tymy.find(t=>t.id===tymId);
+  if(!t)return null;
+  const zapasy=state.zapasy.filter(z=>z.tym_id===tymId)
+    .sort((a,b)=>(b.datum||'').localeCompare(a.datum||'')||b.id-a.id);
+  const done=zapasy.filter(z=>z.stav==='dokonceny'&&z.sety_my!=null&&z.sety_oni!=null);
+  const vyhry=done.filter(z=>z.sety_my>z.sety_oni).length;
+  const prohry=done.filter(z=>z.sety_my<z.sety_oni).length;
+  const setyMy=done.reduce((n,z)=>n+z.sety_my,0);
+  const setyOni=done.reduce((n,z)=>n+z.sety_oni,0);
+  // Statistiky přes tutéž funkci jako tabulka i CSV — vlastní sčítání by byla
+  // druhá cesta k týmž číslům a ta dřív nebo později uteče.
+  const d=spocitejStatistiky({zapasIds:zapasy.map(z=>z.id)});
+  const rows=d.stav==='ok'
+    ? [...d.rows].sort((a,b)=>b.total-a.total||(a.h.jmeno||'').localeCompare(b.h.jmeno||'','cs'))
+    : [];
+  return {t,zapasy,done,vyhry,prohry,setyMy,setyOni,
+          rows,tot:d.stav==='ok'?d.tot:null,
+          chyby:zapasy.reduce((n,z)=>n+chybySouperuZapas(z.id),0)};
+}
+
+function otevriTymDetail(tymId){
+  const p=detailTymu(tymId);
+  if(!p){toast('Detail týmu se nepodařilo sestavit','error');return;}
+  const {t,zapasy,done,vyhry,prohry,setyMy,setyOni,rows,tot,chyby}=p;
+  const sez=state.sezony.find(s=>s.id===t.sezona_id);
+  document.getElementById('tym-detail-title').textContent=
+    `${t.nazev}${sez?' · '+sez.nazev:''}`;
+
+  const kostka=(val,lbl,barva)=>`<div class="profil-kostka">
+    <div class="profil-kostka-val"${barva?` style="color:${barva}"`:''}>${val}</div>
+    <div class="profil-kostka-lbl">${lbl}</div></div>`;
+
+  const bilance=`<div class="profil-souhrn">
+    ${kostka(zapasy.length,'Zápasů')}
+    ${kostka(vyhry,'Výher','var(--green)')}
+    ${kostka(prohry,'Proher','var(--red)')}
+    ${kostka(done.length?Math.round(vyhry/done.length*100)+'%':'—','Úspěšnost')}
+    ${kostka(`${setyMy}:${setyOni}`,'Sety')}
+  </div>`;
+
+  const statHtml=tot&&tot.zapasy?`<div class="section-title">Týmové statistiky</div>
+    <div class="profil-souhrn">
+      ${kostka(tot.total,'Celkem','var(--accent)')}
+      ${kostka(tot.sp,'Esa','var(--green)')}
+      ${kostka((pctCislo(tot.up,tot.um,tot.un)??'—')+(pctCislo(tot.up,tot.um,tot.un)==null?'':'%'),'Útok % výb.')}
+      ${kostka(sZnamenkem(uspesnost(tot.up,tot.um,tot.un)),'Útok úsp.')}
+      ${kostka((pctCislo(tot.pp,tot.pm,tot.pn)??'—')+(pctCislo(tot.pp,tot.pm,tot.pn)==null?'':'%'),'Příjem % výb.')}
+      ${kostka(sZnamenkem(uspesnost(tot.pp,tot.pm,tot.pn)),'Příjem úsp.')}
+      ${kostka(tot.bp,'Bloky','var(--accent2)')}
+      ${kostka(tot.cm,'Chyb','var(--red)')}
+      ${kostka(chyby,'Chyb soupeře','var(--accent2)')}
+    </div>
+    <div class="profil-legenda">Úspěšnost je (výborné − chyby) / pokusy. Sečteno přes všechny sety zápasů tohoto týmu.</div>`
+    :'<div class="profil-prazdno">Z tohohle týmu zatím nejsou žádné zapsané akce.</div>';
+
+  // Nejlepší hráčky — ne proto, aby se soutěžilo, ale ať je vidět, o koho se tým opírá.
+  const top=rows.slice(0,5);
+  const topHtml=top.length?`<div class="section-title">Nejvíc bodů v týmu</div>
+    <div class="tym-top">${top.map((r,i)=>`<button class="tym-top-radek" onclick="otevriProfilZTymu(${r.h.id})">
+      <span class="tym-top-poradi">${i+1}.</span>
+      <span class="tym-top-jmeno">${esc(r.h.jmeno)}${r.h.cislo?` <span style="color:var(--muted)">#${r.h.cislo}</span>`:''}</span>
+      <span class="tym-top-zapasy">${r.zapasy} záp.</span>
+      <span class="tym-top-total">${r.total}</span>
+    </button>`).join('')}</div>`:'';
+
+  const zapasyHtml=zapasy.length?`<div class="section-title">Odehrané zápasy</div>
+    ${zapasy.map(z=>matchHtml(z,false,true)).join('')}`
+    :'<div class="profil-prazdno">K tomuhle týmu zatím není přiřazený žádný zápas.</div>';
+
+  document.getElementById('tym-detail-obsah').innerHTML=bilance+statHtml+topHtml+zapasyHtml;
+  openModal('modal-tym-detail');
+}
+
+// Z detailu týmu se profil počítá za celou sezónu, stejně jako ze soupisky —
+// ani tady žádný filtr nikdo nenastavoval.
+function otevriProfilZTymu(hracId){
+  closeModal('modal-tym-detail');
+  otevriProfil(hracId,true);
 }
 
 function openTymManage(tymId){
