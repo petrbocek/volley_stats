@@ -14,7 +14,7 @@ const VARIANTS=[
   {suf:'minus',sym:'−',cls:'minus'},
 ];
 
-const state={sezony:[],activeSeason:null,hraci:[],hraciSezony:[],zapasy:[],statistiky:[],tymy:[],hraciTymy:[],souteze:[],zapasHraci:[],chybySouperu:[],postaveni:[],setInfo:[],liveZapasId:null,liveSet:1};
+const state={sezony:[],activeSeason:null,hraci:[],hraciSezony:[],zapasy:[],statistiky:[],tymy:[],hraciTymy:[],souteze:[],zapasHraci:[],chybySouperu:[],postaveni:[],setInfo:[],udalosti:[],liveZapasId:null,liveSet:1};
 
 // Rozepsaný set si pamatujeme podle zápasu: po reloadu uprostřed třetího setu
 // by skok zpátky na první znamenal zapisovat do špatného setu.
@@ -191,7 +191,7 @@ async function apiPatch(table,id,body){
 
 async function init(){
   try{
-    const [sez,hr,hs,zap,stat,tym,ht,sout,zh,chyby,post,setinfo]=await Promise.all([
+    const [sez,hr,hs,zap,stat,tym,ht,sout,zh,chyby,post,setinfo,udal]=await Promise.all([
       // Řazení musí být jednoznačné, jinak může stránkování řádky přeskočit
       // nebo zopakovat — proto všude rozhodující sloupec navíc.
       apiAll('vb_sezony?order=id.desc'),
@@ -206,6 +206,7 @@ async function init(){
       apiAll('vb_chyby_souperu?order=zapas_id.asc,set_cislo.asc'),
       apiAll('vb_postaveni?order=zapas_id.asc,set_cislo.asc,zona.asc'),
       apiAll('vb_set_info?order=zapas_id.asc,set_cislo.asc'),
+      apiAll('vb_udalosti?order=id.asc'),
     ]);
     state.sezony=sez||[];
     state.hraci=hr||[];
@@ -219,6 +220,7 @@ async function init(){
     state.chybySouperu=chyby||[];
     state.postaveni=post||[];
     state.setInfo=setinfo||[];
+    state.udalosti=udal||[];
     state.activeSeason=(sez||[]).find(s=>s.aktivni)||null;
     renderSeasonSelect();
     renderAll();
@@ -697,6 +699,9 @@ function bumpSouper(zapasId,pole,delta=1,opts={}){
   clearTimeout(souperDebounce[k]);
   souperDebounce[k]=setTimeout(()=>flushSouper(k),STAT_FLUSH_MS);
   prekresliSouper();
+  const poleLogu=pole==='pocet'?'souper_chyba':'souper_bod';
+  if(delta>0)zalogujUdalost(zapasId,set,null,poleLogu);
+  else odlogujUdalost(zapasId,set,null,poleLogu);
   if(!opts.bezUndo){
     if(delta>0){
       undoStack.push({typ:'souper',zapasId,set,pole});
@@ -1201,6 +1206,125 @@ function v2OddechovyZpet(){
   bumpSetInfo(zapasId,'oddechove_casy',-1);
 }
 
+/* ─── LOG VÝMĚN ───
+   Počítadla nemají pořadí, takže z nich nejde poznat, kdo výměnu uhrál ani
+   v jakém sledu body padaly. Log je doplněk vedle nich, ne náhrada: statistiky
+   dál stojí na počítadlech, log pohání jen nové metriky (#84).
+
+   Nestojí to ani jeden klik navíc — loguje se to, co se stejně kliká. */
+const POLE_BOD_MY=['servis_plus','utok_plus','blok_plus'];
+const POLE_BOD_ONI=['servis_minus','prijem_minus','utok_minus','chyba_minus'];
+
+function komuBod(pole){
+  if(pole==='souper_chyba')return 'my';
+  if(pole==='souper_bod')return 'oni';
+  if(POLE_BOD_MY.includes(pole))return 'my';
+  if(POLE_BOD_ONI.includes(pole))return 'oni';
+  return null;                       // neutral: výměna pokračuje
+}
+
+async function zalogujUdalost(zapasId,set,hracId,pole){
+  // neutrální akce do logu patří taky: bez nich by „série" počítala výměny,
+  // které nikdo nevyhrál, jako by se nestaly
+  const radek={zapas_id:zapasId,set_cislo:set,hrac_id:hracId||null,pole,
+               zona1_hrac_id:postaveniSetu(zapasId,set).get(1)||null};
+  // do stavu hned, ať metriky nečekají na server
+  const docasne={...radek,id:Number.MAX_SAFE_INTEGER};
+  state.udalosti.push(docasne);
+  prekresliInfo();
+  try{
+    const r=await api('POST','vb_udalosti',radek);
+    const i=state.udalosti.indexOf(docasne);
+    if(i>=0){if(r&&r[0])state.udalosti[i]=r[0];else state.udalosti.splice(i,1);}
+    prekresliInfo();
+  }catch(e){
+    const i=state.udalosti.indexOf(docasne);
+    if(i>=0)state.udalosti.splice(i,1);
+    // log je doplněk — statistiky se tím nerozbijí, tak tím nebudíme paniku
+  }
+}
+
+async function odlogujUdalost(zapasId,set,hracId,pole){
+  for(let i=state.udalosti.length-1;i>=0;i--){
+    const u=state.udalosti[i];
+    if(u.zapas_id===zapasId&&(u.set_cislo||1)===set&&u.pole===pole
+       &&(u.hrac_id||null)===(hracId||null)){state.udalosti.splice(i,1);break;}
+  }
+  prekresliInfo();
+  try{
+    await apiRpc('vb_smaz_posledni_udalost',
+      {p_zapas:zapasId,p_set:set,p_hrac:hracId||null,p_pole:pole});
+  }catch(e){/* doplněk, viz výše */}
+}
+
+/* ─── PRŮBĚH SETU Z LOGU ───
+   Podání přechází, když bod získá ten, kdo nepodával. Z toho a z prvního
+   podání plyne u každé výměny, kdo podával — a tedy co byl side-out. */
+function prubehSetu(zapasId,set){
+  const info=setInfo(zapasId,set);
+  const udalosti=state.udalosti
+    .filter(u=>u.zapas_id===zapasId&&(u.set_cislo||1)===set)
+    .sort((a,b)=>a.id-b.id);
+  const prvni=info.prvni_podani||null;
+  let podava=prvni;
+  let serie={kdo:null,delka:0},nejdelsi={my:0,oni:0};
+  const vymeny=[];
+  udalosti.forEach(u=>{
+    const bod=komuBod(u.pole);
+    if(!bod)return;                        // výměna pokračovala
+    vymeny.push({podaval:podava,bod,zona1:u.zona1_hrac_id||null,pole:u.pole,hrac_id:u.hrac_id});
+    if(serie.kdo===bod)serie.delka++;else serie={kdo:bod,delka:1};
+    if(serie.delka>nejdelsi[bod])nejdelsi[bod]=serie.delka;
+    if(podava&&bod!==podava)podava=bod;    // ztráta podání
+    else if(!podava)podava=bod;            // bez prvního podání se aspoň chytneme
+  });
+  return {vymeny,serie,nejdelsi,podavaTed:podava,znamePrvni:!!prvni};
+}
+
+// Jak často uhrajeme výměnu, když podává soupeř. Podle prohlížených appek
+// je to hlavní živá metrika; dobrá hodnota startuje kolem 60 %.
+function sideOut(zapasId,set){
+  const {vymeny,znamePrvni}=prubehSetu(zapasId,set);
+  if(!znamePrvni)return null;
+  const prijem=vymeny.filter(v=>v.podaval==='oni');
+  if(!prijem.length)return {pct:null,uhrano:0,celkem:0};
+  const uhrano=prijem.filter(v=>v.bod==='my').length;
+  return {pct:Math.round(uhrano/prijem.length*100),uhrano,celkem:prijem.length};
+}
+
+// Rozpad podle rotací. Rotace se pozná podle podávající, ne podle pořadového
+// čísla — tak o ní trenér uvažuje („rotace s Alfou na podání").
+function rotacePrehled(zapasId,set){
+  const {vymeny,znamePrvni}=prubehSetu(zapasId,set);
+  if(!znamePrvni)return [];
+  const podle=new Map();
+  vymeny.forEach(v=>{
+    if(!v.zona1)return;
+    const r=podle.get(v.zona1)||{hrac_id:v.zona1,nase:0,jejich:0,prijem:0,sideOut:0};
+    if(v.bod==='my')r.nase++;else r.jejich++;
+    if(v.podaval==='oni'){r.prijem++;if(v.bod==='my')r.sideOut++;}
+    podle.set(v.zona1,r);
+  });
+  return [...podle.values()]
+    .map(r=>({...r,rozdil:r.nase-r.jejich,
+              pct:r.prijem?Math.round(r.sideOut/r.prijem*100):null}))
+    .sort((a,b)=>a.rozdil-b.rozdil);       // nejhorší první, tam se hledá problém
+}
+
+async function nastavPrvniPodani(kdo){
+  const zapasId=state.liveZapasId;if(!zapasId)return;
+  if(!isLoggedIn()){toast('Na změny se přihlas (🔒 nahoře)','error');return;}
+  const set=state.liveSet;
+  const info=setInfo(zapasId,set);
+  const i=state.setInfo.findIndex(x=>x.zapas_id===zapasId&&(x.set_cislo||1)===set);
+  const novy={...info,prvni_podani:kdo};
+  if(i>=0)state.setInfo[i]=novy;else state.setInfo.push(novy);
+  prekresliLive(zapasId);
+  try{
+    await apiUpsert('vb_set_info',{zapas_id:zapasId,set_cislo:set,prvni_podani:kdo},'zapas_id,set_cislo');
+  }catch(e){toast('Chyba: '+e.message,'error');}
+}
+
 /* ─── KDO PODÁVÁ A KDO PO NÍ ───
    Podává zóna 1, příště ta ze dvojky — po zisku podání se rotuje a dvojka
    jde do jedničky. Má to každé zapisovátko skóre a při začátku výměny to
@@ -1227,6 +1351,47 @@ function bodyPoHrackach(zapasId,set){
     return s.length?s[0]:null;
   };
   return {dela:nej('ziskane'),dava:nej('ztracene')};
+}
+
+// Side-out %, série a rotace — všechno z logu výměn. Bez prvního podání se
+// nedá určit, kdo podával, takže se místo čísel nabídne ho zadat.
+// Jen pruh informací, ne celá tabulka: log se zapisuje při každé akci
+// a překreslení mřížky uprostřed dlouhého stisku by ho rozbilo.
+function prekresliInfo(){
+  const zapasId=state.liveZapasId;
+  if(!zapasId)return;
+  const el=document.querySelector('.hriste-info');
+  if(el)el.outerHTML=hristeInfoHtml(zapasId);
+}
+
+function prubehHtml(zapasId,set){
+  const info=setInfo(zapasId,set);
+  if(!info.prvni_podani)return `<div class="hriste-info-radek">
+    <span class="hriste-info-nazev">Podání na začátku</span>
+    <button class="btn btn-sm btn-secondary" onclick="nastavPrvniPodani('my')">Naše</button>
+    <button class="btn btn-sm btn-secondary" onclick="nastavPrvniPodani('oni')">Soupeře</button>
+    <span class="info-proc">bez toho se nepočítá side-out</span>
+  </div>`;
+
+  const so=sideOut(zapasId,set);
+  const p=prubehSetu(zapasId,set);
+  const rot=rotacePrehled(zapasId,set);
+  const serie=p.serie.delka>1
+    ? `<span class="info-serie ${p.serie.kdo==='my'?'plus':'minus'}">${p.serie.kdo==='my'?'my':'oni'} ${p.serie.delka}×</span>`
+    : '<span class="info-serie">—</span>';
+  // nejhorší rotace první: tam se hledá problém
+  const nejhorsi=rot.length?rot[0]:null;
+  const jmeno=id=>{const h=state.hraci.find(x=>x.id===id);return h?h.jmeno:'—';};
+
+  return `<div class="hriste-info-radek">
+      <span class="hriste-info-nazev">Side-out</span>
+      <span class="info-hodnota ${so&&so.pct!=null&&so.pct<60?'slabe':''}"
+        title="Uhrané výměny při soupeřově podání">${so&&so.pct!=null?so.pct+'%':'—'}</span>
+      ${so&&so.celkem?`<span class="info-proc">${so.uhrano}/${so.celkem}</span>`:''}
+      <span class="hriste-info-nazev">Série</span>${serie}
+      ${nejhorsi?`<span class="hriste-info-souper" title="Rotace s nejhorší bilancí, podle podávající">
+        Rotace ${esc(jmeno(nejhorsi.hrac_id))} ${sZnamenkem(nejhorsi.rozdil)}</span>`:''}
+    </div>`;
 }
 
 function hristeInfoHtml(zapasId){
@@ -1267,6 +1432,7 @@ function hristeInfoHtml(zapasId){
       ${b.dela?`<span class="info-body plus" title="Nejvíc získaných bodů v setu">${esc(b.dela.h.jmeno)} +${b.dela.ziskane}</span>`:''}
       ${b.dava?`<span class="info-body minus" title="Nejvíc ztracených bodů v setu">${esc(b.dava.h.jmeno)} −${b.dava.ztracene}</span>`:''}
     </div>`:''}
+    ${prubehHtml(zapasId,set)}
     <div class="hriste-info-radek">
       <span class="hriste-info-nazev">Sety</span>
       <span class="skore-sety">${sety.join('')}</span>
@@ -1672,6 +1838,8 @@ function bump(hracId,zapasId,field,delta=1,opts={}){
   prekresliV2Cisla();
   prekresliSkore();
   zaznamenejProZpet(hracId,zapasId,field,set,nova-puvodni,opts);
+  if(delta>0)zalogujUdalost(zapasId,set,hracId,field);
+  else odlogujUdalost(zapasId,set,hracId,field);
 
   // Zapsaný servis určuje postavení. Předchozí stav si schová záznam pro
   // „zpět" — jinak by vrácený servis nechal šestku otočenou a člověk by
@@ -2807,6 +2975,8 @@ async function deleteZapas(id){
     state.statistiky=state.statistiky.filter(s=>s.zapas_id!==id);
     state.zapasHraci=state.zapasHraci.filter(zh=>zh.zapas_id!==id);
     state.chybySouperu=state.chybySouperu.filter(c=>c.zapas_id!==id);
+    state.udalosti=state.udalosti.filter(u=>u.zapas_id!==id);
+    state.setInfo=state.setInfo.filter(x=>x.zapas_id!==id);
     for(let set=1;set<=SETU;set++){
       SOUPER_POLE.forEach(({pole})=>{
         const k=souperKey(id,set,pole);

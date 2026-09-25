@@ -478,3 +478,10 @@ button.hriste-dlazdice:focus-visible{outline:2px solid var(--accent);outline-off
 .info-body{font-size:11px;font-weight:600}
 .info-body.plus{color:var(--green)}
 .info-body.minus{color:var(--red)}
+
+/* průběh setu z logu výměn */
+.info-serie{font-family:'Oswald',sans-serif;font-size:13px;font-weight:700;color:var(--muted)}
+.info-serie.plus{color:var(--green)}
+.info-serie.minus{color:var(--red)}
+.info-proc{font-size:10px;color:var(--muted)}
+.info-hodnota.slabe{color:#ffc107}
