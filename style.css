@@ -374,7 +374,10 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 .hriste-napoveda{flex-shrink:0;font-size:12px;color:var(--muted);display:flex;
   align-items:center;gap:8px;flex-wrap:wrap}
 /* Síť vpravo: svislý pruh vedle plochy, ne vodorovný nad ní. */
-.hriste-plocha{flex:0 0 auto;display:flex;gap:6px;align-items:stretch}
+/* Hřiště roste do volné výšky (na tabletu jinak zůstane malé a karty
+   poloprázdné), ale do šířky se nerozteče — ze zón by byly billboardy. */
+.hriste-plocha{flex:1 1 auto;min-height:0;max-height:460px;max-width:720px;
+  display:flex;gap:6px;align-items:stretch}
 .hriste-sit{flex-shrink:0;width:18px;border-left:3px solid var(--muted);display:flex;
   align-items:center;justify-content:center}
 .hriste-sit span{font-size:10px;text-transform:uppercase;letter-spacing:2px;color:var(--muted);
@@ -390,12 +393,14 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 .hriste-zona:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .hriste-zona.podava{border-color:var(--accent);background:rgba(255,107,53,.08)}
 .hriste-zona.prazdna{align-items:center;justify-content:center;border-style:dashed;color:var(--muted)}
-.hriste-cislo-zony{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.hriste-cislo-zony{font-size:10px;line-height:1.4;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
 .hriste-zona.podava .hriste-cislo-zony{color:var(--accent)}
 .hriste-prazdno{font-size:24px;font-weight:700;line-height:1}
-.hriste-jmeno{font-size:13px;font-weight:700;max-width:100%;overflow:hidden;
-  text-overflow:ellipsis;white-space:nowrap}
-.hriste-dres{font-size:11px;color:var(--muted);font-family:'Oswald',sans-serif}
+/* line-height pod 1.3 uřízne háčky a čárky — „Beri Č." se v kartě libera
+   ořezávala právě tím, že overflow:hidden potkal příliš těsný řádek. */
+.hriste-jmeno{font-size:13px;line-height:1.4;font-weight:700;max-width:100%;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hriste-dres{font-size:11px;line-height:1.4;color:var(--muted);font-family:'Oswald',sans-serif}
 .hriste-skore{display:flex;gap:6px;font-family:'Oswald',sans-serif;font-size:13px;font-weight:700}
 .hriste-skore .plus{color:var(--green)}
 .hriste-skore .minus{color:var(--red)}
@@ -485,3 +490,26 @@ button.hriste-dlazdice:focus-visible{outline:2px solid var(--accent);outline-off
 .info-serie.minus{color:var(--red)}
 .info-proc{font-size:10px;color:var(--muted)}
 .info-hodnota.slabe{color:#ffc107}
+
+/* Na tabletu jsou karty násobně větší než na telefonu — text ať roste s nimi,
+   jinak zůstanou poloprázdné. */
+@media(min-width:700px){
+  .hriste-zona{min-height:96px;padding:10px 12px;gap:3px}
+  .hriste-jmeno{font-size:20px}
+  .hriste-dres{font-size:15px}
+  .hriste-skore{font-size:20px}
+  .hriste-cislo-zony{font-size:12px}
+  .dlazdice-sety,.dlazdice-hodnota{font-size:30px}
+  .hriste-mimo{flex:0 0 28%}
+}
+
+/* Nad 1000 px zůstávala vedle hřiště prázdná půlka obrazovky — informace
+   o zápase sednou vedle něj, ne pod něj, ať se na tabletu nescrolluje. */
+@media(min-width:1000px){
+  .hriste-wrap{display:grid;grid-template-columns:auto minmax(260px,1fr);
+    grid-template-rows:auto 1fr;gap:10px 16px;align-content:start}
+  .hriste-napoveda{grid-column:1/-1;grid-row:1}
+  .hriste-plocha{grid-column:1;grid-row:2}
+  .hriste-info{grid-column:2;grid-row:2;margin-top:0;padding-top:0;padding-left:14px;
+    border-top:0;border-left:1px solid var(--border)}
+}
