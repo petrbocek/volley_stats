@@ -644,54 +644,65 @@ function renderLiveTable(zapasId){
   if(hraci.length)napovedaZpet();
 }
 
-/* ─── CHYBY SOUPEŘE ───
-   Body z chyb soupeře nemají naši hráčku, takže mají vlastní tabulku a vlastní
-   RPC. Zapisuje se přírůstkově jako všechno ostatní, kvůli dvěma zapisovatelům
-   u jednoho zápasu (#74). */
-const chybyDirty={};          // `${zapasId}_${set}` -> zobrazená hodnota
-const chybyPending={};        // `${zapasId}_${set}` -> neodeslaná změna
-const chybyDebounce={};
+/* ─── SOUPEŘOVA STRANA ───
+   Co se stalo na druhé straně sítě: jeho chyba (náš bod) a jeho vlastní bod
+   (jejich bod). Nemá to naši hráčku, takže vlastní tabulka a vlastní RPC.
+   Zapisuje se přírůstkově jako všechno ostatní, kvůli dvěma zapisovatelům
+   u jednoho zápasu (#74).
 
-function chybyKey(zapasId,set){return `${zapasId}_${set}`;}
+   Bez „bodu soupeře" by odvozené skóre soupeře podhodnocovalo: jeho zakončení
+   v otevřené výměně se u nás neprojeví nijak — obrana ani přihrávka mezi
+   akcemi nejsou, takže tu výměnu nemá co zapsat. */
+const SOUPER_POLE=[
+  {pole:'pocet',label:'Chyba soupeře',znak:'+',cls:'plus',komu:'náš bod'},
+  {pole:'body', label:'Bod soupeře',  znak:'−',cls:'minus',komu:'jejich bod'},
+];
+const souperDirty={};         // `${zapasId}_${set}_${pole}` -> zobrazená hodnota
+const souperPending={};       // totéž -> neodeslaná změna
+const souperDebounce={};
 
-function chybySouperuUlozene(zapasId,set){
+function souperKey(zapasId,set,pole){return `${zapasId}_${set}_${pole}`;}
+
+function souperUlozene(zapasId,set,pole){
   const r=state.chybySouperu.find(c=>c.zapas_id===zapasId&&(c.set_cislo||1)===set);
-  return r?r.pocet||0:0;
+  return r?r[pole]||0:0;
 }
 
 // Zobrazená hodnota — tedy včetně toho, co ještě nedoletělo na server.
-function chybySouperuHodnota(zapasId,set){
-  const k=chybyKey(zapasId,set);
-  return k in chybyDirty?chybyDirty[k]:chybySouperuUlozene(zapasId,set);
+function souperHodnota(zapasId,set,pole){
+  const k=souperKey(zapasId,set,pole);
+  return k in souperDirty?souperDirty[k]:souperUlozene(zapasId,set,pole);
 }
 
-function chybySouperuZapas(zapasId){
+function souperZapas(zapasId,pole){
   let n=0;
-  for(let set=1;set<=SETU;set++)n+=chybySouperuHodnota(zapasId,set);
+  for(let set=1;set<=SETU;set++)n+=souperHodnota(zapasId,set,pole);
   return n;
 }
 
-function bumpChybaSouperu(zapasId,delta=1,opts={}){
+function bumpSouper(zapasId,pole,delta=1,opts={}){
   if(!isLoggedIn()){toast('Na zapisování se přihlas (🔒 nahoře)','error');return false;}
   const set=opts.set||state.liveSet;
-  const k=chybyKey(zapasId,set);
-  const puvodni=chybySouperuHodnota(zapasId,set);
+  const k=souperKey(zapasId,set,pole);
+  const puvodni=souperHodnota(zapasId,set,pole);
   const nova=Math.max(0,puvodni+delta);
   if(nova===puvodni)return false;
-  chybyDirty[k]=nova;
-  chybyPending[k]=(chybyPending[k]||0)+(nova-puvodni);
-  if(chybyPending[k]===0)delete chybyPending[k];
-  clearTimeout(chybyDebounce[k]);
-  chybyDebounce[k]=setTimeout(()=>flushChyby(k),STAT_FLUSH_MS);
-  prekresliChyby();
+  souperDirty[k]=nova;
+  souperPending[k]=(souperPending[k]||0)+(nova-puvodni);
+  if(souperPending[k]===0)delete souperPending[k];
+  clearTimeout(souperDebounce[k]);
+  souperDebounce[k]=setTimeout(()=>flushSouper(k),STAT_FLUSH_MS);
+  prekresliSouper();
   if(!opts.bezUndo){
     if(delta>0){
-      undoStack.push({typ:'souper',zapasId,set});
+      undoStack.push({typ:'souper',zapasId,set,pole});
       if(undoStack.length>UNDO_MAX)undoStack.shift();
     }else{
       for(let i=undoStack.length-1;i>=0;i--){
         const u=undoStack[i];
-        if(u.typ==='souper'&&u.zapasId===zapasId&&u.set===set){undoStack.splice(i,1);break;}
+        if(u.typ==='souper'&&u.zapasId===zapasId&&u.set===set&&u.pole===pole){
+          undoStack.splice(i,1);break;
+        }
       }
     }
     prekresliUndo();
@@ -699,41 +710,46 @@ function bumpChybaSouperu(zapasId,delta=1,opts={}){
   return true;
 }
 
-async function flushChyby(key,opts={}){
-  const delta=chybyPending[key];
+async function flushSouper(key,opts={}){
+  const delta=souperPending[key];
   if(!delta)return;
-  clearTimeout(chybyDebounce[key]);
-  delete chybyDebounce[key];
-  const [zapasId,set]=key.split('_').map(Number);
-  delete chybyPending[key];
+  clearTimeout(souperDebounce[key]);
+  delete souperDebounce[key];
+  const [zapasId,set,pole]=[...key.split('_').slice(0,2).map(Number),key.split('_')[2]];
+  delete souperPending[key];
   try{
-    const nova=await apiRpc('vb_zapis_chybu_souperu',
-      {p_zapas:zapasId,p_set:set,p_delta:delta},opts);
-    if(typeof nova==='number'){
-      // server vrací výslednou hodnotu včetně toho, co zapsal někdo druhý
+    const r=await apiRpc('vb_zapis_souper',
+      {p_zapas:zapasId,p_set:set,p_pole:pole,p_delta:delta},opts);
+    if(r&&typeof r==='object'){
+      // server vrací oba sloupce včetně toho, co zapsal někdo druhý
       const idx=state.chybySouperu.findIndex(c=>c.zapas_id===zapasId&&(c.set_cislo||1)===set);
-      if(idx>=0)state.chybySouperu[idx].pocet=nova;
-      else state.chybySouperu.push({zapas_id:zapasId,set_cislo:set,pocet:nova});
-      chybyDirty[chybyKey(zapasId,set)]=nova;
-      prekresliChyby();
+      const radek={zapas_id:zapasId,set_cislo:set,pocet:r.pocet||0,body:r.body||0};
+      if(idx>=0)state.chybySouperu[idx]=radek;else state.chybySouperu.push(radek);
+      SOUPER_POLE.forEach(({pole:p})=>{
+        const kk=souperKey(zapasId,set,p);
+        if(!(kk in souperPending))souperDirty[kk]=radek[p];
+      });
+      prekresliSouper();
     }
   }catch(e){
-    chybyPending[key]=(chybyPending[key]||0)+delta;   // vrátit do fronty, ať se to neztratí
+    souperPending[key]=(souperPending[key]||0)+delta;   // vrátit do fronty, ať se to neztratí
     toast('Chyba uložení: '+e.message,'error');
   }
 }
 
-function flushVsechnyChyby(opts={}){
-  return Promise.all(Object.keys(chybyPending).map(k=>flushChyby(k,opts)));
+function flushVsechnySouper(opts={}){
+  return Promise.all(Object.keys(souperPending).map(k=>flushSouper(k,opts)));
 }
 
-function prekresliChyby(){
+function prekresliSouper(){
   const zapasId=state.liveZapasId;
   if(!zapasId)return;
-  const el=document.getElementById('v2-chyby-cislo');
-  if(el)el.textContent=souhrnCelyZapas
-    ?chybySouperuZapas(zapasId)
-    :chybySouperuHodnota(zapasId,state.liveSet);
+  SOUPER_POLE.forEach(({pole})=>{
+    const el=document.getElementById(`v2-souper-${pole}`);
+    if(el)el.textContent=souhrnCelyZapas
+      ?souperZapas(zapasId,pole)
+      :souperHodnota(zapasId,state.liveSet,pole);
+  });
 }
 
 /* ─── LIVE V2 ───
@@ -784,11 +800,15 @@ function renderLive2(zapasId){
 
   // Chyba soupeře nepatří žádné hráčce, takže není v panelu akcí, ale je to
   // samostatné tlačítko s hodnotou — jak jsme se dohodli v #74.
-  const chyby=`<button class="v2-chyby" onclick="bumpChybaSouperu(${zapasId})"
-      title="Přičte bod z chyby soupeře; zpět přes lištu dole">
-    <span class="v2-chyby-nazev">🙅 Chyba soupeře</span>
-    <span class="v2-chyby-cislo" id="v2-chyby-cislo">${souhrnCelyZapas?chybySouperuZapas(zapasId):chybySouperuHodnota(zapasId,set)}</span>
-  </button>`;
+  // Dvě tlačítka, každé pojmenované. Samotné +/− by u soupeřovy strany nešlo
+  // přečíst: „+" je náš bod z jeho chyby, „−" jeho vlastní bod — dvě různé
+  // události, ne dvě kvality téže akce.
+  const chyby=`<div class="v2-souper">${SOUPER_POLE.map(sp=>`
+    <button class="v2-souper-btn ${sp.cls}" onclick="bumpSouper(${zapasId},'${sp.pole}')"
+        title="${sp.label} — ${sp.komu}; zpět přes lištu dole">
+      <span class="v2-souper-nazev">${sp.znak} ${sp.label}</span>
+      <span class="v2-souper-cislo" id="v2-souper-${sp.pole}">${souhrnCelyZapas?souperZapas(zapasId,sp.pole):souperHodnota(zapasId,set,sp.pole)}</span>
+    </button>`).join('')}</div>`;
 
   const seznam=hraci.map(h=>`<button class="v2-hrac" onclick="v2OtevriAkce(${zapasId},${h.id})">
     <span class="v2-cislo">${h.cislo?'#'+h.cislo:''}</span>
@@ -882,7 +902,7 @@ function statSoucetZive(zapasId,hracId,pole){
 
 function prepniSouhrn(){
   souhrnCelyZapas=!souhrnCelyZapas;
-  prekresliChyby();
+  prekresliSouper();
   prekresliLive(state.liveZapasId);
 }
 
@@ -1107,7 +1127,8 @@ function undoPopisek(){
   if(!u)return null;
   if(u.typ==='souper'){
     const jinySet=u.set!==state.liveSet?` · ${u.set}. set`:'';
-    return `Chyba soupeře${jinySet}`;
+    const sp=SOUPER_POLE.find(x=>x.pole===(u.pole||'pocet'));
+    return `${sp?sp.label:'Soupeř'}${jinySet}`;
   }
   const h=state.hraci.find(h=>h.id===u.hracId);
   const jmeno=h?h.jmeno:'hráčka';
@@ -1121,7 +1142,7 @@ function vratZpet(){
   if(!u)return;
   const popis=undoPopisek();
   const vratil=u.typ==='souper'
-    ? bumpChybaSouperu(u.zapasId,-1,{set:u.set,bezUndo:true})
+    ? bumpSouper(u.zapasId,u.pole||'pocet',-1,{set:u.set,bezUndo:true})
     : bump(u.hracId,u.zapasId,u.field,-1,{set:u.set,bezUndo:true});
   if(vratil){
     undoStack.pop();
@@ -1246,7 +1267,7 @@ function flushAllStats(opts={}){
 // Všechno rozepsané naráz. Odchod ze stránky si nesmí vybírat, co odešle —
 // zamčený telefon jinak o chyby soupeře přijde stejně jako o kliky.
 function flushVse(opts={}){
-  return Promise.all([flushAllStats(opts),flushVsechnyChyby(opts)]);
+  return Promise.all([flushAllStats(opts),flushVsechnySouper(opts)]);
 }
 
 // Dorovnání s druhým zařízením (#27). Realtime by byl elegantnější, ale
@@ -1281,12 +1302,14 @@ async function refreshLiveStats(){
       const set=row.set_cislo||1;
       const idx=state.chybySouperu.findIndex(c=>c.zapas_id===row.zapas_id&&(c.set_cislo||1)===set);
       if(idx>=0)state.chybySouperu[idx]=row;else state.chybySouperu.push(row);
-      const k=chybyKey(row.zapas_id,set);
-      if(k in chybyPending)return;              // tohle si drží uživatel
-      chybyDirty[k]=row.pocet||0;
+      SOUPER_POLE.forEach(({pole})=>{
+        const k=souperKey(row.zapas_id,set,pole);
+        if(k in souperPending)return;           // tohle si drží uživatel
+        souperDirty[k]=row[pole]||0;
+      });
     });
     prekresliV2Cisla();
-    prekresliChyby();
+    prekresliSouper();
   }catch(e){/* dorovnání je best effort, chybu netlačíme uživateli do obličeje */}
 }
 
@@ -1599,11 +1622,11 @@ function renderStatistiky(){
 
   // Do tabulky hráček to nepatří (není to čí), ale musí to být někde vidět,
   // jinak by šlo o číslo, které jde jen zapsat (#74).
-  const chybySoupere=d.zapasIds.reduce((n,zid)=>n+(selSet
-    ?chybySouperuHodnota(zid,selSet)
-    :chybySouperuZapas(zid)),0);
-  html+=`<div class="stats-chyby">🙅 Body z chyb soupeře${selSet?` (${selSet}. set)`:''}:
-    <strong>${chybySoupere}</strong></div>`;
+  const souper=pole=>d.zapasIds.reduce((n,zid)=>n+(selSet
+    ?souperHodnota(zid,selSet,pole)
+    :souperZapas(zid,pole)),0);
+  html+=`<div class="stats-chyby">Soupeř${selSet?` (${selSet}. set)`:''}:
+    ${SOUPER_POLE.map(sp=>`${sp.label} <strong>${souper(sp.pole)}</strong>`).join(' · ')}</div>`;
   el.innerHTML=html;
 }
 
@@ -1832,13 +1855,14 @@ function detailTymu(tymId){
     : [];
   return {t,zapasy,done,vyhry,prohry,setyMy,setyOni,
           rows,tot:d.stav==='ok'?d.tot:null,
-          chyby:zapasy.reduce((n,z)=>n+chybySouperuZapas(z.id),0)};
+          chyby:zapasy.reduce((n,z)=>n+souperZapas(z.id,'pocet'),0),
+          bodySoupere:zapasy.reduce((n,z)=>n+souperZapas(z.id,'body'),0)};
 }
 
 function otevriTymDetail(tymId){
   const p=detailTymu(tymId);
   if(!p){toast('Detail týmu se nepodařilo sestavit','error');return;}
-  const {t,zapasy,done,vyhry,prohry,setyMy,setyOni,rows,tot,chyby}=p;
+  const {t,zapasy,done,vyhry,prohry,setyMy,setyOni,rows,tot,chyby,bodySoupere}=p;
   const sez=state.sezony.find(s=>s.id===t.sezona_id);
   document.getElementById('tym-detail-title').textContent=
     `${t.nazev}${sez?' · '+sez.nazev:''}`;
@@ -1866,6 +1890,7 @@ function otevriTymDetail(tymId){
       ${kostka(tot.bp,'Bloky','var(--accent2)')}
       ${kostka(tot.cm,'Chyb','var(--red)')}
       ${kostka(chyby,'Chyb soupeře','var(--accent2)')}
+      ${kostka(bodySoupere,'Bodů soupeře','var(--red)')}
     </div>
     <div class="profil-legenda">Úspěšnost je (výborné − chyby) / pokusy. Sečteno přes všechny sety zápasů tohoto týmu.</div>`
     :'<div class="profil-prazdno">Z tohohle týmu zatím nejsou žádné zapsané akce.</div>';
@@ -2169,8 +2194,8 @@ async function deleteZapas(id){
 
   // Zápas mizí i s akcemi a sestavou (FK ON DELETE CASCADE) a zpátky to nejde,
   // takže to dialog musí říct číslem, ne jen „opravdu?".
-  const chyby=chybySouperuZapas(id);
-  const chybyText=chyby?` Zmizí i ${chyby} zapsaných chyb soupeře.`:'';
+  const chyby=souperZapas(id,'pocet')+souperZapas(id,'body');
+  const chybyText=chyby?` Zmizí i ${chyby} zapsaných akcí soupeře.`:'';
   const co=akci||vSestave
     ? `Smaže se i ${sklonujAkce(akci)} a sestava (${sklonujHracky(vSestave)}).${chybyText}`
     : (chyby?`Zápas nemá zapsanou akci hráček, ale${chybyText.replace(' Zmizí i','')}`
@@ -2185,8 +2210,10 @@ async function deleteZapas(id){
     state.zapasHraci=state.zapasHraci.filter(zh=>zh.zapas_id!==id);
     state.chybySouperu=state.chybySouperu.filter(c=>c.zapas_id!==id);
     for(let set=1;set<=SETU;set++){
-      const k=chybyKey(id,set);
-      delete chybyPending[k];clearTimeout(chybyDebounce[k]);delete chybyDirty[k];
+      SOUPER_POLE.forEach(({pole})=>{
+        const k=souperKey(id,set,pole);
+        delete souperPending[k];clearTimeout(souperDebounce[k]);delete souperDirty[k];
+      });
     }
     // Rozepsané kliky smazaného zápasu by flush poslal do neexistujícího řádku.
     Object.keys(pendingDeltas).forEach(k=>{if(k.startsWith(id+'_'))delete pendingDeltas[k];});
