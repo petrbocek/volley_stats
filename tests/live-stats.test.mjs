@@ -34,7 +34,7 @@ const FIX = {
             { id: 6, nazev: 'Loňský tým', sezona_id: 2 }],
   vb_hraci_tymy: [{ hrac_id: 12, tym_id: 5 }, { hrac_id: 10, tym_id: 6 }],
   vb_souteze: [{ id: 7, sezona_id: 1, nazev: SOUTEZ_S_XSS }],
-  vb_chyby_souperu: [{ zapas_id: 100, set_cislo: 1, pocet: 2 }],
+  vb_chyby_souperu: [{ zapas_id: 100, set_cislo: 1, pocet: 2, body: 0 }],
   vb_zapas_hraci: [{ zapas_id: 100, hrac_id: 10 }, { zapas_id: 100, hrac_id: 11 },
                    { zapas_id: 100, hrac_id: 12 }, { zapas_id: 100, hrac_id: 13 },
                    { zapas_id: 200, hrac_id: 10 }],
@@ -88,13 +88,13 @@ await page.route('**/rest/v1/rpc/vb_zapis_akce', async route => {
 });
 
 let chybyRpc = [];
-await page.route('**/rest/v1/rpc/vb_zapis_chybu_souperu', async route => {
-  const { p_zapas, p_set, p_delta } = route.request().postDataJSON();
-  chybyRpc.push({ p_zapas, p_set, p_delta });
+await page.route('**/rest/v1/rpc/vb_zapis_souper', async route => {
+  const { p_zapas, p_set, p_pole, p_delta } = route.request().postDataJSON();
+  chybyRpc.push({ p_zapas, p_set, p_pole, p_delta });
   let r = FIX.vb_chyby_souperu.find(c => c.zapas_id === p_zapas && c.set_cislo === p_set);
-  if (!r) { r = { zapas_id: p_zapas, set_cislo: p_set, pocet: 0 }; FIX.vb_chyby_souperu.push(r); }
-  r.pocet = Math.max(0, r.pocet + p_delta);
-  return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(r.pocet) });
+  if (!r) { r = { zapas_id: p_zapas, set_cislo: p_set, pocet: 0, body: 0 }; FIX.vb_chyby_souperu.push(r); }
+  r[p_pole] = Math.max(0, (r[p_pole] || 0) + p_delta);
+  return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(r) });
 });
 
 await page.route('**/rest/v1/**', async route => {
@@ -1486,7 +1486,7 @@ const v2Geometrie = () => page.evaluate(() => {
     // po sjetí dolů musí být „Přidat hráčku" vidět celé — jinak je useknuté
     pridatUseknuto: Math.round(pridat.getBoundingClientRect().bottom - seznam.getBoundingClientRect().bottom),
     listaMimo: Math.round(bar.getBoundingClientRect().bottom - wrap.getBoundingClientRect().bottom),
-    chybyMimo: Math.round(wrap.querySelector('.v2-chyby').getBoundingClientRect().bottom - wrap.getBoundingClientRect().bottom),
+    chybyMimo: Math.round(wrap.querySelector('.v2-souper').getBoundingClientRect().bottom - wrap.getBoundingClientRect().bottom),
     prescahuje: Math.round(document.documentElement.scrollWidth - document.documentElement.clientWidth),
   };
 });
@@ -1796,37 +1796,37 @@ await page.waitForTimeout(300);
 
 // ── #74: chyby soupeře ─────────────────────────────────────────────────────
 await page.click('.nav-tab:nth-child(6)');                 // Live V2
-await page.waitForSelector('#v2-chyby-cislo');
+await page.waitForSelector('#v2-souper-pocet');
 await page.click('#live2-wrap .set-prepinac button:nth-of-type(1)');
 await page.waitForTimeout(300);
 
-const chybyCislo = () => page.textContent('#v2-chyby-cislo').then(t => parseInt(t.trim()));
+const chybyCislo = () => page.textContent('#v2-souper-pocet').then(t => parseInt(t.trim()));
 // stub drží data v Node, ne ve stránce — tohle je most pro „zapsal někdo druhý"
-await page.exposeFunction('FIX_SET_CHYBY', (zapas, set, pocet) => {
+await page.exposeFunction('FIX_SET_CHYBY', (zapas, set, pole, hodnota) => {
   let r = FIX.vb_chyby_souperu.find(c => c.zapas_id === zapas && c.set_cislo === set);
-  if (!r) { r = { zapas_id: zapas, set_cislo: set, pocet: 0 }; FIX.vb_chyby_souperu.push(r); }
-  r.pocet = pocet;
+  if (!r) { r = { zapas_id: zapas, set_cislo: set, pocet: 0, body: 0 }; FIX.vb_chyby_souperu.push(r); }
+  r[pole] = hodnota;
 });
 pass &= ok('T33a chyby soupeře jsou tlačítko s hodnotou, ne sloupec (#74)',
   await page.evaluate(() => {
-    const b = document.querySelector('.v2-chyby');
+    const b = document.querySelector('.v2-souper-btn');
     const r = b.getBoundingClientRect();
     // v mřížce nemá co dělat — dohodnuto v #74. Hledá se ovládání, ne slovo
     // „chyba": mřížka má vlastní sloupec chyb NAŠICH hráček, to je něco jiného.
     return !!b && r.height >= 44 &&
-           !document.querySelector('#live-table-wrap .v2-chyby') &&
-           !document.getElementById('live-table-wrap').innerHTML.includes('bumpChybaSouperu');
+           !document.querySelector('#live-table-wrap .v2-souper') &&
+           !document.getElementById('live-table-wrap').innerHTML.includes('bumpSouper');
   }));
 pass &= ok('T33b hodnota se načte z databáze (#74)', await chybyCislo() === 2);
 
 chybyRpc = [];
 const predChyby = await chybyCislo();
-await page.click('.v2-chyby');
+await page.click('.v2-souper-btn.plus');
 await page.waitForTimeout(600);
 pass &= ok('T33c klepnutí přičte a rovnou je to vidět (#74)',
   await chybyCislo() === predChyby + 1);
 pass &= ok('T33d zapisuje se přírůstkem přes vlastní RPC, ne přepisem řádku (#74)',
-  chybyRpc.length === 1 && chybyRpc[0].p_delta === 1 && chybyRpc[0].p_set === 1);
+  chybyRpc.length === 1 && chybyRpc[0].p_delta === 1 && chybyRpc[0].p_set === 1 && chybyRpc[0].p_pole === 'pocet');
 pass &= ok('T33e nejde to přes vb_zapis_akce ani přímým zápisem do tabulky (#74)',
   !otherWrites.some(w => w.table === 'vb_chyby_souperu' && w.method !== 'GET'));
 
@@ -1844,27 +1844,27 @@ await page.click('#live2-wrap .set-prepinac button:nth-of-type(2)');
 await page.waitForTimeout(400);
 pass &= ok('T33i druhý set má vlastní počítadlo (#74)', await chybyCislo() === 0);
 chybyRpc = [];
-await page.click('.v2-chyby');
+await page.click('.v2-souper-btn.plus');
 await page.waitForTimeout(600);
 pass &= ok('T33j zápis jde do zobrazeného setu (#74)',
   chybyRpc.length === 1 && chybyRpc[0].p_set === 2);
 pass &= ok('T33k první set tím zůstal nedotčený (#74)',
-  await page.evaluate(() => chybySouperuHodnota(100, 1)) === predChyby);
+  await page.evaluate(() => souperHodnota(100, 1, 'pocet')) === predChyby);
 
 // přepnutí souhrnu na celý zápas sečte sety
 await page.click('#live2-wrap .v2-tym-prepinac');
 await page.waitForTimeout(300);
 // druhé zařízení: dorovnání musí chyby soupeře dotáhnout taky
 await page.evaluate(() => {
-  FIX_SET_CHYBY(100, 1, 42);          // „někdo druhý" zapsal
+  FIX_SET_CHYBY(100, 1, 'pocet', 42);          // „někdo druhý" zapsal
 });
 await page.evaluate(() => refreshLiveStats());
 await page.waitForTimeout(400);
 pass &= ok('T33l2 dorovnání dotáhne i zápis chyb z druhého zařízení (#74)',
-  await page.evaluate(() => chybySouperuHodnota(100, 1)) === 42);
+  await page.evaluate(() => souperHodnota(100, 1, 'pocet')) === 42);
 
 pass &= ok('T33l souhrn za celý zápas sečte sety (#74)',
-  await chybyCislo() === await page.evaluate(() => chybySouperuZapas(100)));
+  await chybyCislo() === await page.evaluate(() => souperZapas(100, 'pocet')));
 await page.click('#live2-wrap .v2-tym-prepinac');
 await page.waitForTimeout(300);
 
@@ -1872,17 +1872,17 @@ await page.waitForTimeout(300);
 await page.click('.nav-tab:nth-child(7)');
 await page.waitForSelector('.stats-chyby');
 pass &= ok('T33m chyby soupeře jsou vidět i ve Statistikách (#74)',
-  /Body z chyb soupeře/.test(await page.textContent('.stats-chyby')));
+  /Chyba soupeře/.test(await page.textContent('.stats-chyby')));
 pass &= ok('T33n číslo ve Statistikách sedí na data (#74)', await page.evaluate(() => {
   const d = spocitejStatistiky();
-  const ocekavano = d.zapasIds.reduce((n, z) => n + chybySouperuZapas(z), 0);
+  const ocekavano = d.zapasIds.reduce((n, z) => n + souperZapas(z, 'pocet'), 0);
   return parseInt(document.querySelector('.stats-chyby strong').textContent) === ocekavano;
 }));
 await page.selectOption('#stats-set-sel', '1');
 await page.waitForTimeout(300);
 pass &= ok('T33o filtr na set platí i pro ně (#74)', await page.evaluate(() => {
   const d = spocitejStatistiky();
-  const ocekavano = d.zapasIds.reduce((n, z) => n + chybySouperuHodnota(z, 1), 0);
+  const ocekavano = d.zapasIds.reduce((n, z) => n + souperHodnota(z, 1, 'pocet'), 0);
   return parseInt(document.querySelector('.stats-chyby strong').textContent) === ocekavano &&
          /1\. set/.test(document.querySelector('.stats-chyby').textContent);
 }));
@@ -1897,7 +1897,7 @@ page.once('dialog', d => { textMazani = d.message(); d.dismiss(); });
 await page.evaluate(() => deleteZapas(100));
 await page.waitForTimeout(300);
 pass &= ok('T33p dialog mazání zápasu přizná i chyby soupeře (#74)',
-  /chyb soupeře/.test(textMazani));
+  /akcí soupeře/.test(textMazani));
 
 await page.click('.nav-tab:nth-child(5)');
 await page.waitForTimeout(200);
@@ -1930,6 +1930,72 @@ pass &= ok('T15d řazení je jednoznačné, ať se řádky nepřeskočí (#28)',
 
 pass &= ok('žádná chyba v konzoli', errors.length === 0);
 if (errors.length) console.log(errors);
+
+// ── #84: bod soupeře jako druhé počítadlo vedle jeho chyby ─────────────────
+await page.click('.nav-tab:nth-child(6)');                  // Live V2
+await page.waitForSelector('#v2-souper-body');
+await page.click('#live2-wrap .set-prepinac button:nth-of-type(1)');
+await page.waitForTimeout(300);
+
+const souperCislo = pole => page.textContent('#v2-souper-' + pole).then(t => parseInt(t.trim()));
+
+pass &= ok('T37a soupeřova strana má dvě počítadla, ne jedno (#84)',
+  (await page.$$eval('#live2-wrap .v2-souper-btn', els => els.length)) === 2);
+pass &= ok('T37b obě jsou pojmenovaná, ne jen + a − (#84)',
+  await page.evaluate(() => {
+    const t = [...document.querySelectorAll('#live2-wrap .v2-souper-nazev')].map(e => e.textContent);
+    // dvě různé události, ne dvě kvality téže akce — samotné znaménko by se nedalo přečíst
+    return t.some(x => /Chyba soupeře/.test(x)) && t.some(x => /Bod soupeře/.test(x));
+  }));
+
+chybyRpc = [];
+const predBoduSoupere = await souperCislo('body');
+const predChybSoupere = await souperCislo('pocet');
+await page.click('#live2-wrap .v2-souper-btn.minus');
+await page.waitForTimeout(600);
+pass &= ok('T37c klepnutí na „bod soupeře" přičte jeho, ne chyby (#84)',
+  await souperCislo('body') === predBoduSoupere + 1 && await souperCislo('pocet') === predChybSoupere);
+pass &= ok('T37d zapisuje se do vlastního pole přes vb_zapis_souper (#84)',
+  chybyRpc.length === 1 && chybyRpc[0].p_pole === 'body' && chybyRpc[0].p_delta === 1);
+
+pass &= ok('T37e lišta zpět pozná, které z těch dvou vrací (#84)',
+  /Bod soupeře/.test(await page.textContent('#live2-wrap .undo-text')));
+await page.click('#btn-undo-v2');
+await page.waitForTimeout(600);
+pass &= ok('T37f zpět odečte bod soupeře a chyb se nedotkne (#84)',
+  await souperCislo('body') === predBoduSoupere && await souperCislo('pocet') === predChybSoupere);
+
+// obě pole musí přežít dorovnání z druhého zařízení
+await page.evaluate(() => FIX_SET_CHYBY(100, 1, 'body', 7));
+await page.evaluate(() => FIX_SET_CHYBY(100, 1, 'pocet', 5));
+await page.evaluate(() => refreshLiveStats());
+await page.waitForTimeout(500);
+pass &= ok('T37g dorovnání dotáhne obě pole, ne jen jedno (#84)',
+  await page.evaluate(() => souperHodnota(100, 1, 'body')) === 7 &&
+  await page.evaluate(() => souperHodnota(100, 1, 'pocet')) === 5);
+
+// a jsou vidět i mimo Live
+await page.click('.nav-tab:nth-child(7)');
+await page.waitForSelector('.stats-chyby');
+pass &= ok('T37h ve Statistikách jsou vidět obě (#84)', await page.evaluate(() => {
+  const t = document.querySelector('.stats-chyby').textContent;
+  const d = spocitejStatistiky();
+  const ocek = pole => d.zapasIds.reduce((n, z) => n + souperZapas(z, pole), 0);
+  return /Chyba soupeře/.test(t) && /Bod soupeře/.test(t) &&
+         t.includes(String(ocek('pocet'))) && t.includes(String(ocek('body')));
+}));
+
+// skóre setu z toho jde poskládat: každé minus je ztracený bod
+pass &= ok('T37i z dat jde poskládat skóre setu (#84)', await page.evaluate(() => {
+  const set = 1, zapas = 100;
+  const sum = f => state.hraci.reduce((n, h) => n + getStatVal(zapas, h.id, f, set), 0);
+  const nase = sum('servis_plus') + sum('utok_plus') + sum('blok_plus')
+             + souperHodnota(zapas, set, 'pocet');
+  const jejich = sum('servis_minus') + sum('prijem_minus') + sum('utok_minus')
+               + sum('chyba_minus') + souperHodnota(zapas, set, 'body');
+  // příjem: plus a neutral je kvalita, minus je ztracený bod
+  return Number.isInteger(nase) && Number.isInteger(jejich) && nase >= 0 && jejich > 0;
+}));
 
 await b.close();
 console.log(pass ? '\nVŠE PROŠLO' : '\nNĚCO SELHALO');
