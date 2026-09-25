@@ -2681,11 +2681,12 @@ pass &= ok('T42n2 oba sloupce gridu končí na stejné čáře (#84)', await pag
   const hriste = document.querySelector('.hriste').getBoundingClientRect();
   return Math.abs(mimo.bottom - hriste.bottom) <= 1 && Math.abs(mimo.top - hriste.top) <= 1;
 }));
-pass &= ok('T42n3 grid vyplní dostupnou výšku, nenechá pod sebou prázdno (#84)',
+pass &= ok('T42n3 hřiště si bere jen svoje a pod ním zbývá místo (#84)',
   await page.evaluate(() => {
     const seznam = document.querySelector('.v2-seznam').getBoundingClientRect();
     const plocha = document.querySelector('.hriste-plocha').getBoundingClientRect();
-    return plocha.bottom >= seznam.bottom - 24;
+    const info = document.querySelector('.hriste-info').getBoundingClientRect();
+    return plocha.height < seznam.height * 0.8 && info.top >= plocha.bottom - 1;
   }));
 
 pass &= ok('T42o všechno se pořád vejde na telefon (#84)', await page.evaluate(() => {
@@ -2696,6 +2697,86 @@ pass &= ok('T42o všechno se pořád vejde na telefon (#84)', await page.evaluat
          seznam.scrollWidth - seznam.clientWidth <= 0 &&
          zona.width >= 44 && zona.height >= 44 &&
          document.querySelector('.hriste-dlazdice.dl-skore').getBoundingClientRect().height >= 44;
+}));
+await page.setViewportSize({ width: 1100, height: 900 });
+await page.waitForTimeout(300);
+
+
+// ── #84 část 7: menší hřiště, víc informací o zápase ───────────────────────
+await page.click('.nav-tab:nth-child(6)');
+await page.waitForSelector('#live2-wrap');
+await page.evaluate(() => { if (!v2Hriste) v2PrepniHriste(); });
+await page.waitForSelector('.hriste-info');
+await page.setViewportSize({ width: 390, height: 844 });
+await page.waitForTimeout(400);
+
+pass &= ok('T43a dlaždice se sety je nižší než ta se skóre (#84)',
+  await page.evaluate(() => {
+    const sety = document.querySelector('.dl-sety').getBoundingClientRect();
+    const skore = document.querySelector('.dl-skore').getBoundingClientRect();
+    return sety.height < skore.height;
+  }));
+pass &= ok('T43b zóna zůstala použitelným cílem (#84)',
+  await page.evaluate(() => {
+    const z = document.querySelector('.hriste .hriste-zona').getBoundingClientRect();
+    return z.height >= 60 && z.width >= 44;
+  }));
+
+// řádek po setech a hlídání proti Výsledku v hřišti vypadly — musí být zpátky
+pass &= ok('T43c v hřišti je vidět průběh po setech (#84)',
+  await page.evaluate(() => {
+    const videt = [...document.querySelectorAll('.hriste-info .skore-set')]
+      .map(e => parseInt(e.textContent));
+    return videt.length > 0 && videt.includes(state.liveSet) &&
+           videt.every(i => setMaData(100, i) || i === state.liveSet);
+  }));
+pass &= ok('T43d a hodnoty soupeřovy strany taky (#84)',
+  await page.evaluate(() => {
+    const t = document.querySelector('.hriste-info-souper').textContent;
+    return t.includes(String(souperHodnota(100, state.liveSet, 'pocet'))) &&
+           t.includes(String(souperHodnota(100, state.liveSet, 'body')));
+  }));
+
+pass &= ok('T43e shodné skóre se v hřišti nehlásí (#84)', await page.evaluate(() => {
+  const z = state.zapasy.find(z => z.id === 100), s = skoreSetu(100, state.liveSet);
+  z[`set${state.liveSet}_my`] = s.nase; z[`set${state.liveSet}_oni`] = s.jejich;
+  renderLive2(100);
+  return !document.querySelector('.hriste-info .skore-nesedi');
+}));
+pass &= ok('T43f rozdíl proti Výsledku je vidět i v hřišti (#84)', await page.evaluate(() => {
+  const z = state.zapasy.find(z => z.id === 100), s = skoreSetu(100, state.liveSet);
+  z[`set${state.liveSet}_my`] = s.nase + 4;
+  renderLive2(100);
+  const el = document.querySelector('.hriste-info .skore-nesedi');
+  return !!el && el.textContent.includes(String(s.nase + 4)) &&
+         el.textContent.includes(String(s.nase));
+}));
+await page.evaluate(() => {
+  const z = state.zapasy.find(z => z.id === 100);
+  for (let i = 1; i <= 5; i++) { delete z[`set${i}_my`]; delete z[`set${i}_oni`]; }
+  renderLive2(100);
+});
+
+pass &= ok('T43h týmový souhrn je v hřišti dole u informací, ne dalším pruhem (#84)',
+  await page.evaluate(() => {
+    const w = document.getElementById('live2-wrap');
+    const vInfo = document.querySelector('.hriste-info .v2-tym');
+    const jakoPruh = [...w.children].some(e => e.classList.contains('v2-tym'));
+    return !!vInfo && !jakoPruh &&
+           vInfo.getBoundingClientRect().top > document.querySelector('.hriste').getBoundingClientRect().top;
+  }));
+pass &= ok('T43i v seznamu souhrn zůstává nahoře (#84)', await page.evaluate(() => {
+  v2PrepniHriste();                                  // přepnout na seznam
+  const w = document.getElementById('live2-wrap');
+  const jakoPruh = [...w.children].some(e => e.classList.contains('v2-tym'));
+  v2PrepniHriste();                                  // a zpátky
+  return jakoPruh;
+}));
+
+pass &= ok('T43g nic z toho stránku nepřetéká (#84)', await page.evaluate(() => {
+  const seznam = document.querySelector('.v2-seznam');
+  return document.documentElement.scrollWidth - document.documentElement.clientWidth <= 0 &&
+         seznam.scrollWidth - seznam.clientWidth <= 0;
 }));
 await page.setViewportSize({ width: 1100, height: 900 });
 await page.waitForTimeout(300);

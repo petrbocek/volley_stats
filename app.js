@@ -1098,9 +1098,9 @@ function hristeHtml(zapasId){
   // Stav a sety mají vlastní dlaždice v levém sloupci místo pruhu přes celou
   // šířku — ten bral 80px z 654, tedy víc než jedna řada hřiště (#84).
   const mimo=`<div class="hriste-mimo">
-    <div class="hriste-dlazdice dl-sety">
+    <div class="hriste-dlazdice dl-sety" title="Stav utkání v setech">
       <span class="hriste-cislo-zony">Sety</span>
-      <span class="dlazdice-hodnota">${u.my}:${u.oni}</span>
+      <span class="dlazdice-sety">${u.my}:${u.oni}</span>
     </div>
     <button class="hriste-dlazdice dl-skore" onclick="v2UpravSkore()"
         title="Klepnutím upravíš skóre mimo statistiku hráček">
@@ -1119,6 +1119,50 @@ function hristeHtml(zapasId){
         `<div class="hriste-rada">${rada.map(karta).join('')}</div>`).join('')}</div>
       <div class="hriste-sit"><span>síť</span></div>
     </div>
+    ${hristeInfoHtml(zapasId)}
+  </div>`;
+}
+
+// Řádek po setech a hlídání proti „Výsledku" žily v pruhu se skóre. Ten
+// v hřišti odpadl (#84), takže se sem musí vrátit — bez nich není vidět
+// průběh zápasu ani to, že v zápisu něco chybí.
+function tymSouhrnHtml(zapasId){
+  const set=state.liveSet;
+  const sid=currentSeasonId()||state.zapasy.find(z=>z.id===zapasId)?.sezona_id||0;
+  const hraci=serazenaSestava(zapasId,hraciVSezoně(sid));
+  if(!hraci.length)return '';
+  return `<div class="v2-tym">
+    <button class="v2-tym-prepinac" onclick="prepniSouhrn()" title="Přepnout mezi zapisovaným setem a celým zápasem">Tým · ${souhrnCelyZapas?'zápas':set+'. set'} ⇄</button>
+    <div class="v2-tym-cisla">${ACTIONS.map(a=>{
+      const variants=a.varianty?VARIANTS.filter(v=>a.varianty.includes(v.suf)):VARIANTS;
+      return `<span class="v2-chip" style="border-color:${a.color}">
+        <span class="v2-chip-nazev" style="color:${a.color}">${a.icon}</span>
+        ${variants.map(v=>`<span class="v2-chip-num ${v.cls}"><span class="v2-chip-sym">${v.sym}</span><span id="v2tym-${a.key}_${v.suf}">${tymSoucet(zapasId,hraci,`${a.key}_${v.suf}`)}</span></span>`).join('')}
+      </span>`;
+    }).join('')}</div>
+  </div>`;
+}
+
+function hristeInfoHtml(zapasId){
+  const set=state.liveSet;
+  const k=kontrolaSkore(zapasId,set);
+  const sety=[];
+  for(let i=1;i<=SETU;i++)if(setMaData(zapasId,i)||i===set){
+    const ss=skoreSetu(zapasId,i);
+    sety.push(`<span class="skore-set${i===set?' aktivni':''}">${i}. ${ss.nase}:${ss.jejich}</span>`);
+  }
+  const souper=SOUPER_POLE.map(sp=>
+    `<span class="info-souper ${sp.cls}" title="${sp.label} — ${sp.komu}">${sp.znak}${souperHodnota(zapasId,set,sp.pole)}</span>`).join('');
+  return `<div class="hriste-info">
+    <div class="hriste-info-radek">
+      <span class="hriste-info-nazev">Sety</span>
+      <span class="skore-sety">${sety.join('')}</span>
+      <span class="hriste-info-souper" title="Chyby a body soupeře v tomhle setu">Soupeř ${souper}</span>
+    </div>
+    ${k&&!k.sedi?`<div class="skore-nesedi" title="Odvozeno z akcí vs. zapsáno ve Výsledku">
+      ⚠ Zapsáno ${k.zapsane.nase}:${k.zapsane.jejich} — z akcí vychází ${k.odvozene.nase}:${k.odvozene.jejich}
+    </div>`:''}
+    ${tymSouhrnHtml(zapasId)}
   </div>`;
 }
 
@@ -1203,16 +1247,7 @@ function renderLive2(zapasId){
     }).join('')}
   </div>`;
 
-  const tym=hraci.length?`<div class="v2-tym">
-    <button class="v2-tym-prepinac" onclick="prepniSouhrn()" title="Přepnout mezi zapisovaným setem a celým zápasem">Tým · ${souhrnCelyZapas?'zápas':set+'. set'} ⇄</button>
-    <div class="v2-tym-cisla">${ACTIONS.map(a=>{
-      const variants=a.varianty?VARIANTS.filter(v=>a.varianty.includes(v.suf)):VARIANTS;
-      return `<span class="v2-chip" style="border-color:${a.color}">
-        <span class="v2-chip-nazev" style="color:${a.color}">${a.icon}</span>
-        ${variants.map(v=>`<span class="v2-chip-num ${v.cls}"><span class="v2-chip-sym">${v.sym}</span><span id="v2tym-${a.key}_${v.suf}">${tymSoucet(zapasId,hraci,`${a.key}_${v.suf}`)}</span></span>`).join('')}
-      </span>`;
-    }).join('')}</div>
-  </div>`:'';
+  const tym=hraci.length?tymSouhrnHtml(zapasId):'';
 
   // Chyba soupeře nepatří žádné hráčce, takže není v panelu akcí, ale je to
   // samostatné tlačítko s hodnotou — jak jsme se dohodli v #74.
@@ -1248,8 +1283,8 @@ function renderLive2(zapasId){
   const obsah=v2Hriste
     ? `<div class="v2-seznam">${hristeHtml(zapasId)}</div>`
     : `<div class="v2-seznam">${prazdno}${seznam}${pridat}</div>`;
-  el.innerHTML=prepinac+(v2Hriste?'':skoreHtml(zapasId))+prepinacZobrazeni+tym
-    +(v2Hriste?'':chyby)+obsah+undoBarHtml('btn-undo-v2');
+  el.innerHTML=prepinac+(v2Hriste?'':skoreHtml(zapasId))+prepinacZobrazeni
+    +(v2Hriste?'':tym)+(v2Hriste?'':chyby)+obsah+undoBarHtml('btn-undo-v2');
 }
 
 // Čísla se mění s každým klikem; překreslovat kvůli nim celý seznam by bylo

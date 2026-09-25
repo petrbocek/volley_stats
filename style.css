@@ -374,7 +374,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 .hriste-napoveda{flex-shrink:0;font-size:12px;color:var(--muted);display:flex;
   align-items:center;gap:8px;flex-wrap:wrap}
 /* Síť vpravo: svislý pruh vedle plochy, ne vodorovný nad ní. */
-.hriste-plocha{flex:1;min-height:0;display:flex;gap:6px;align-items:stretch}
+.hriste-plocha{flex:0 0 auto;display:flex;gap:6px;align-items:stretch}
 .hriste-sit{flex-shrink:0;width:18px;border-left:3px solid var(--muted);display:flex;
   align-items:center;justify-content:center}
 .hriste-sit span{font-size:10px;text-transform:uppercase;letter-spacing:2px;color:var(--muted);
@@ -382,7 +382,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 .hriste{flex:1;display:flex;flex-direction:column;gap:6px;min-width:0}
 .hriste-rada{flex:1}
 .hriste-rada{display:grid;grid-template-columns:repeat(2,1fr);gap:6px}
-.hriste-zona{min-height:64px;display:flex;flex-direction:column;align-items:flex-start;
+.hriste-zona{min-height:72px;display:flex;flex-direction:column;align-items:flex-start;
   justify-content:center;gap:1px;padding:6px 8px;border:1px solid var(--border);border-radius:10px;
   background:var(--surface2);cursor:pointer;color:var(--text);font-family:inherit;text-align:left;
   overflow:hidden}
@@ -403,10 +403,21 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
    Sety a skóre tu zabírají místo, které dřív bral pruh přes celou šířku. */
 .hriste-mimo{flex:0 0 33%;display:flex;flex-direction:column;gap:6px;min-width:0}
 .hriste-mimo>*{flex:1}
+.hriste-info{flex-shrink:0;margin-top:8px;border-top:1px solid var(--border);padding-top:6px}
+.hriste-info .v2-tym{margin-top:6px;border-bottom:none;background:none;padding:0}
+.hriste-info-radek{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.hriste-info-nazev{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:700}
+.hriste-info-souper{margin-left:auto;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:700}
+.info-souper{font-family:'Oswald',sans-serif;font-size:13px;margin-left:4px}
+.info-souper.plus{color:var(--green)}
+.info-souper.minus{color:var(--red)}
 .hriste-dlazdice{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;
   gap:1px;padding:6px 8px;border:1px solid var(--border);border-radius:10px;
   background:var(--surface2);color:var(--text);font-family:inherit;text-align:left;
   min-height:44px;overflow:hidden}
+/* Sety jsou jen dvě číslice — nemusí dostat tolik místa jako cíl na klepnutí. */
+.hriste-mimo>.dl-sety{flex:0 0 auto;flex-direction:row;align-items:baseline;gap:6px;min-height:32px}
+.dlazdice-sety{font-family:'Oswald',sans-serif;font-size:17px;font-weight:700;color:var(--accent2)}
 button.hriste-dlazdice{cursor:pointer}
 button.hriste-dlazdice:active{background:var(--surface)}
 button.hriste-dlazdice:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
