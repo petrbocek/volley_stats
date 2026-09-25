@@ -3041,6 +3041,87 @@ pass &= ok('T45m slabý side-out je odlišený (#84)', await page.evaluate(() =>
 await page.evaluate(() => { state.liveSet = 1; renderLive2(100); });
 await page.waitForTimeout(200);
 
+
+// ── #84 část 10: hřiště na tabletu ─────────────────────────────────────────
+// Ze screenshotu z iPadu: karty zón byly široké a nízké (363×81), takže uvnitř
+// zbývalo poloprázdné místo, a v kartě libera se dlouhé jméno ořízlo.
+await page.evaluate(() => {
+  state.postaveni = state.postaveni.filter(p => !(p.zapas_id === 100 && p.set_cislo === 4));
+  const vSestave = state.zapasHraci.filter(zh => zh.zapas_id === 100);
+  vSestave.forEach(zh => { zh.libero = false; });
+  // libero na hřišti nestojí — jinak by se stejné jméno ukázalo dvakrát
+  vSestave.slice(0, -1).forEach((zh, i) => state.postaveni.push(
+    { zapas_id: 100, set_cislo: 4, zona: i + 1, hrac_id: zh.hrac_id }));
+  const lib = vSestave.at(-1);
+  lib.libero = true;
+  state.hraci.find(h => h.id === lib.hrac_id).jmeno = 'Beránková Č.';
+  state.liveSet = 4;
+  renderLive2(100);
+});
+await page.setViewportSize({ width: 1390, height: 1800 });
+await page.waitForTimeout(500);
+
+pass &= ok('T46a0 na tabletu je libero v kartě, jinak by se měřilo prázdno (#84)',
+  await page.evaluate(() =>
+    (document.querySelector('.hriste-mimo .hriste-zona.libero .hriste-jmeno') || {})
+      .textContent === 'Beránková Č.'));
+
+pass &= ok('T46a zóny na tabletu nejsou ploché billboardy (#84)', await page.evaluate(() => {
+  const z = [...document.querySelectorAll('.hriste .hriste-zona')]
+    .map(e => e.getBoundingClientRect());
+  // na telefonu vychází poměr kolem 1,5; ze screenshotu to bylo 363×81 = 4,5
+  return z.length === 6 && z.every(r => r.height >= 120 && r.width / r.height <= 2.5);
+}));
+
+pass &= ok('T46b obsah kartu vyplní, nezůstane v ní prázdná polovina (#84)',
+  await page.evaluate(() => {
+    const zona = [...document.querySelectorAll('.hriste .hriste-zona')]
+      .find(e => e.querySelector('.hriste-jmeno'));
+    const r = zona.getBoundingClientRect();
+    const deti = [...zona.children].map(e => e.getBoundingClientRect());
+    const obsah = Math.max(...deti.map(d => d.bottom)) - Math.min(...deti.map(d => d.top));
+    return obsah >= r.height * 0.6;
+  }));
+
+pass &= ok('T46c dlouhé jméno libera se neořízne (#84)', await page.evaluate(() => {
+  const el = document.querySelector('.hriste-mimo .hriste-zona.libero .hriste-jmeno');
+  const px = parseFloat(getComputedStyle(el).fontSize);
+  // háčky a čárky potřebují řádek vyšší než písmo; při 1,0 je overflow ukousne
+  return el.scrollHeight <= el.clientHeight && el.clientHeight >= px * 1.3;
+}));
+
+pass &= ok('T46d hřiště se do šířky nerozteče přes celou stránku (#84)',
+  await page.evaluate(() => {
+    const p = document.querySelector('.hriste-plocha').getBoundingClientRect();
+    return p.width <= 800 && p.width <= document.documentElement.clientWidth * 0.7;
+  }));
+
+pass &= ok('T46e a nic z toho stránku nepřetéká (#84)', await page.evaluate(() =>
+  document.documentElement.scrollWidth - document.documentElement.clientWidth <= 0 &&
+  [...document.querySelectorAll('#live2-wrap .hriste-zona')].every(e =>
+    e.scrollWidth - e.clientWidth <= 1 && e.scrollHeight - e.clientHeight <= 1)));
+
+pass &= ok('T46g na široké obrazovce jsou informace vedle hřiště, ne pod ním (#84)',
+  await page.evaluate(() => {
+    const p = document.querySelector('.hriste-plocha').getBoundingClientRect();
+    const i = document.querySelector('.hriste-info').getBoundingClientRect();
+    return i.left >= p.right - 1 && i.top < p.bottom &&
+           i.right <= document.documentElement.clientWidth &&
+           document.querySelector('.hriste-info').scrollWidth -
+           document.querySelector('.hriste-info').clientWidth <= 1;
+  }));
+
+await page.setViewportSize({ width: 390, height: 844 });
+await page.waitForTimeout(400);
+pass &= ok('T46f na telefonu zůstalo hřiště kompaktní (#84)', await page.evaluate(() => {
+  const plocha = document.querySelector('.hriste-plocha').getBoundingClientRect();
+  const zona = document.querySelector('.hriste .hriste-zona').getBoundingClientRect();
+  return document.documentElement.scrollWidth - document.documentElement.clientWidth <= 0 &&
+         zona.height >= 44 && plocha.height <= 320;
+}));
+await page.setViewportSize({ width: 1100, height: 900 });
+await page.waitForTimeout(300);
+
 await b.close();
 console.log(pass ? '\nVŠE PROŠLO' : '\nNĚCO SELHALO');
 process.exit(pass ? 0 : 1);
