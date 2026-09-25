@@ -3297,6 +3297,131 @@ await page.evaluate(() => {
 });
 await page.waitForTimeout(300);
 
+
+// ── #84 část 13: formát zápasu na 2 nebo 3 vítězné sety ───────────────────
+// Turnaj se hraje na dva vítězné sety, liga na tři. Dřív to bylo natvrdo na
+// tři, takže u turnaje se konec zápasu nabídl o set později a zkrácený set
+// se hledal v pátém místo ve třetím.
+const format = n => page.evaluate(v => {
+  const z = state.zapasy.find(x => x.id === 100);
+  z.vitezne_sety = v;
+  [1, 2, 3, 4, 5].forEach(i => { delete z[`set${i}_my`]; delete z[`set${i}_oni`]; });
+  // 4. a 5. set mají z dřívějších testů odehrané body — počítaly by se do
+  // stavu utkání a měřilo by se něco jiného, než co test nastavuje
+  state.statistiky = state.statistiky.filter(x => !(x.zapas_id === 100 && (x.set_cislo || 1) >= 4));
+  state.chybySouperu = state.chybySouperu.filter(x => !(x.zapas_id === 100 && (x.set_cislo || 1) >= 4));
+  Object.keys(dirtyStats).forEach(k => {
+    const [zap, , set] = k.split('_');
+    if (zap === '100' && +set >= 4) delete dirtyStats[k];
+  });
+  Object.keys(souperDirty).forEach(k => {
+    const [zap, set] = k.split('_');
+    if (zap === '100' && +set >= 4) delete souperDirty[k];
+  });
+  state.liveSet = 1;
+  renderLive2(100);
+}, n);
+const vysledkySetu = o => page.evaluate(v => {
+  const z = state.zapasy.find(x => x.id === 100);
+  Object.entries(v).forEach(([k, hodnota]) => { z[k] = hodnota; });
+  renderLive2(100);
+}, o);
+
+await format(3);
+await page.waitForTimeout(300);
+pass &= ok('T50a0 bez volby se hraje na tři vítězné jako doteď (#84)',
+  await page.evaluate(() => {
+    const z = state.zapasy.find(x => x.id === 100);
+    delete z.vitezne_sety;
+    return viteznychSetu(100) === 3 && setuVZapase(100) === 5;
+  }));
+
+await format(2);
+await page.waitForTimeout(300);
+pass &= ok('T50a na dva vítězné se nabízejí tři sety, ne pět (#84)',
+  await page.evaluate(() => viteznychSetu(100) === 2 && setuVZapase(100) === 3) &&
+  await page.$$eval('#live2-wrap .set-btn', e => e.map(x => x.textContent.trim()))
+    .then(v => JSON.stringify(v) === JSON.stringify(['1', '2', '3'])));
+
+pass &= ok('T50b zkrácený set je ten poslední — na dva vítězné třetí (#84)', await (async () => {
+  await vysledkySetu({ set1_my: 15, set1_oni: 13, set3_my: 15, set3_oni: 13 });
+  return await page.evaluate(() => setRozhodnuty(100, 3)) === 'my' &&
+         await page.evaluate(() => setRozhodnuty(100, 1)) === null;   // první se hraje na 25
+})());
+
+await format(3);
+await page.waitForTimeout(300);
+pass &= ok('T50c na tři vítězné je zkrácený až pátý set (#84)', await (async () => {
+  await vysledkySetu({ set3_my: 15, set3_oni: 13, set5_my: 15, set5_oni: 13 });
+  return await page.evaluate(() => setRozhodnuty(100, 3)) === null &&
+         await page.evaluate(() => setRozhodnuty(100, 5)) === 'my';
+})());
+
+// konec zápasu: dva vyhrané sety stačí jen v turnajovém formátu
+await format(2);
+await vysledkySetu({ set1_my: 25, set1_oni: 20, set2_my: 25, set2_oni: 18 });
+await page.waitForTimeout(400);
+pass &= ok('T50d na dva vítězné končí zápas po druhém setu (#84)',
+  await page.evaluate(() => konecZapasu(100)) === true &&
+  /Ukončit/.test(await page.textContent('.konec-setu')));
+
+await format(3);
+await vysledkySetu({ set1_my: 25, set1_oni: 20, set2_my: 25, set2_oni: 18 });
+await page.evaluate(() => { state.liveSet = 2; renderLive2(100); });
+await page.waitForTimeout(400);
+pass &= ok('T50e na tři vítězné se po druhém setu hraje dál (#84)',
+  await page.evaluate(() => konecZapasu(100)) === false &&
+  /3\. set/.test(await page.textContent('.konec-setu')));
+
+// výsledek zápasu nabídne políčka jen pro sety, které se hrají
+await format(2);
+await page.waitForTimeout(300);
+await page.evaluate(() => editVysledek(100));
+await page.waitForTimeout(300);
+pass &= ok('T50f výsledek nabídne tři sety, ne pět (#84)',
+  await page.$$eval('#sets-detail-form .form-row', e => e.length) === 3 &&
+  await page.$('#in-set4-my') === null);
+
+// uložení nesmí přepsat sety, na které se neptalo
+await page.evaluate(() => { state.zapasy.find(z => z.id === 100).set4_my = 25; });
+otherWrites = [];
+await page.fill('#in-set1-my', '25');
+await page.fill('#in-set1-oni', '21');
+await page.click('#modal-vysledek .btn-green');
+await page.waitForTimeout(500);
+const ulozeny = otherWrites.find(w => w.table === 'vb_zapasy' && w.method === 'PATCH');
+pass &= ok('T50g uložení sáhne jen na hrané sety (#84)',
+  !!ulozeny && ulozeny.body.set1_my === 25 && !('set4_my' in ulozeny.body) &&
+  await page.evaluate(() => state.zapasy.find(z => z.id === 100).set4_my) === 25);
+
+// formulář zápasu formát posílá i předvyplňuje
+await page.click('.nav-tab:nth-child(2)');
+await page.waitForTimeout(300);
+await page.evaluate(() => editZapas(100));
+await page.waitForTimeout(300);
+pass &= ok('T50h úprava zápasu ukáže jeho formát (#84)',
+  await page.inputValue('#in-zapas-format') === '2');
+otherWrites = [];
+await page.selectOption('#in-zapas-format', '3');
+await page.click('#btn-save-zapas');
+await page.waitForTimeout(500);
+pass &= ok('T50i změna formátu se uloží (#84)',
+  otherWrites.some(w => w.table === 'vb_zapasy' && w.method === 'PATCH' &&
+    w.body.vitezne_sety === 3) &&
+  await page.evaluate(() => viteznychSetu(100)) === 3);
+
+await page.click('#tab-zapasy button:has-text("Nový zápas")');
+await page.waitForTimeout(300);
+pass &= ok('T50j nový zápas začíná na třech vítězných (#84)',
+  await page.inputValue('#in-zapas-format') === '3');
+await page.click('#modal-zapas .modal-footer .btn-secondary');
+await page.waitForTimeout(200);
+await page.evaluate(() => {
+  const z = state.zapasy.find(x => x.id === 100);
+  [1, 2, 3, 4, 5].forEach(i => { delete z[`set${i}_my`]; delete z[`set${i}_oni`]; });
+  state.liveSet = 1;
+});
+
 await b.close();
 console.log(pass ? '\nVŠE PROŠLO' : '\nNĚCO SELHALO');
 process.exit(pass ? 0 : 1);

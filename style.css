@@ -534,3 +534,7 @@ button.hriste-dlazdice:focus-visible{outline:2px solid var(--accent);outline-off
   background:rgba(249,115,22,.12)}
 .konec-setu-popis{font-size:11px;text-transform:uppercase;letter-spacing:.5px;
   color:var(--accent);font-weight:700}
+
+/* Formát zápasu u přepínače setů — jen když se nehraje na tři vítězné. */
+.set-format{font-size:10px;color:var(--accent);border:1px solid var(--accent);
+  border-radius:6px;padding:1px 4px;margin-left:4px;letter-spacing:.5px}

@@ -37,7 +37,19 @@ const dirtyStats={};
 // Posílají se změny (±1), ne absolutní hodnoty: při dvou zapisovatelích
 // u jednoho zápasu by upsert celého řádku přebil kliky toho druhého (#27).
 const pendingDeltas={};          // `${zapasId}_${hracId}_${set}` -> { pole: delta }
-const SETU=5;
+const SETU=5;                    // strop: víc setů se neodehraje ani na tři vítězné
+
+/* ─── FORMÁT ZÁPASU ───
+   Turnaj se hraje na dva vítězné sety, liga na tři. Z toho plyne, kdy zápas
+   končí a který set je zkrácený tiebreak — dřív to bylo natvrdo na tři, takže
+   u turnaje appka nabídla konec o set později a zkrácený set hledala v pátém
+   místo ve třetím (#84). Zápasy bez volby zůstávají na třech. */
+function viteznychSetu(zapasId){
+  return state.zapasy.find(z=>z.id===zapasId)?.vitezne_sety===2?2:3;
+}
+
+// Kolik setů se v zápase nanejvýš odehraje; poslední z nich je tiebreak.
+function setuVZapase(zapasId){return viteznychSetu(zapasId)*2-1;}
 const STAT_FLUSH_MS=300;
 const LIVE_REFRESH_MS=10000;     // dorovnání s druhým zařízením
 let souhrnCelyZapas=false;       // souhrn v Live: aktuální set vs celý zápas
@@ -621,8 +633,8 @@ function renderLiveTable(zapasId){
   </td></tr>`;
 
   const prepinac=`<div class="set-prepinac">
-    <span class="set-label">Set</span>
-    ${Array.from({length:SETU},(_,i)=>i+1).map(n=>{
+    <span class="set-label" title="Formát zápasu">Set${viteznychSetu(zapasId)===2?' <span class="set-format">na 2</span>':''}</span>
+    ${Array.from({length:setuVZapase(zapasId)},(_,i)=>i+1).map(n=>{
       const zapsano=hraci.some(h=>ACTIONS.some(a=>VARIANTS.some(v=>getStatVal(zapasId,h.id,`${a.key}_${v.suf}`,n))));
       return `<button class="set-btn${n===set?' aktivni':''}${zapsano?' zapsany':''}" onclick="prepniSet(${n})">${n}</button>`;
     }).join('')}
@@ -906,14 +918,14 @@ function setRozhodnuty(zapasId,set){
   const z=state.zapasy.find(z=>z.id===zapasId);
   const my=z?.[`set${set}_my`],oni=z?.[`set${set}_oni`];
   const s=(my!=null&&oni!=null)?{nase:my,jejich:oni}:skoreSetu(zapasId,set);
-  const cil=set===5?15:25;
+  const cil=set===setuVZapase(zapasId)?15:25;   // tiebreak se hraje na 15
   if(Math.max(s.nase,s.jejich)<cil||Math.abs(s.nase-s.jejich)<2)return null;
   return s.nase>s.jejich?'my':'oni';
 }
 
 function stavUtkani(zapasId){
   let my=0,oni=0;
-  for(let set=1;set<=SETU;set++){
+  for(let set=1;set<=setuVZapase(zapasId);set++){
     const v=setRozhodnuty(zapasId,set);
     if(v==='my')my++;else if(v==='oni')oni++;
   }
@@ -933,7 +945,7 @@ const nabidnutyKonec=new Set();          // zápas:set, na který už se appka p
 
 function konecZapasu(zapasId){
   const u=stavUtkani(zapasId);
-  return Math.max(u.my,u.oni)>Math.floor(SETU/2);
+  return Math.max(u.my,u.oni)>=viteznychSetu(zapasId);
 }
 
 function zkontrolujKonecSetu(zapasId,set){
@@ -952,7 +964,7 @@ function zkontrolujKonecSetu(zapasId,set){
   if(nabidnutyKonec.has(klic))return;   // ptát se po každém dalším bodu je obtěžování
   nabidnutyKonec.add(klic);
   const s=skoreSetu(zapasId,set);
-  const hotovo=konecZapasu(zapasId)||set>=SETU;
+  const hotovo=konecZapasu(zapasId)||set>=setuVZapase(zapasId);
   const otazka=hotovo
     ?`${set}. set končí ${s.nase}:${s.jejich}. Ukončit zápas?`
     :`${set}. set končí ${s.nase}:${s.jejich}. Přepnout na ${set+1}. set?`;
@@ -964,7 +976,7 @@ function zkontrolujKonecSetu(zapasId,set){
 // dalo přepnout i později (třeba po opravě překliku).
 function dalsiSet(zapasId){
   const set=state.liveSet;
-  if(konecZapasu(zapasId)||set>=SETU){editVysledek(zapasId,true);return;}
+  if(konecZapasu(zapasId)||set>=setuVZapase(zapasId)){editVysledek(zapasId,true);return;}
   prepniSet(set+1);
 }
 
@@ -972,7 +984,7 @@ function dalsiSet(zapasId){
 function konecSetuHtml(zapasId){
   const set=state.liveSet;
   if(!setRozhodnuty(zapasId,set))return '';
-  const hotovo=konecZapasu(zapasId)||set>=SETU;
+  const hotovo=konecZapasu(zapasId)||set>=setuVZapase(zapasId);
   return `<div class="konec-setu">
     <span class="konec-setu-popis">${set}. set rozhodnutý</span>
     <button class="btn btn-sm btn-primary" onclick="dalsiSet(${zapasId})">
@@ -986,7 +998,7 @@ function skoreHtml(zapasId){
   const k=kontrolaSkore(zapasId,set);
   // po setech, ať je vidět i průběh zápasu, ne jen ten rozehraný
   const sety=[];
-  for(let i=1;i<=SETU;i++)if(setMaData(zapasId,i)||i===set){
+  for(let i=1;i<=setuVZapase(zapasId);i++)if(setMaData(zapasId,i)||i===set){
     const ss=skoreSetu(zapasId,i);
     sety.push(`<span class="skore-set${i===set?' aktivni':''}">${i}. ${ss.nase}:${ss.jejich}</span>`);
   }
@@ -1460,7 +1472,7 @@ function hristeInfoHtml(zapasId){
   const set=state.liveSet;
   const k=kontrolaSkore(zapasId,set);
   const sety=[];
-  for(let i=1;i<=SETU;i++)if(setMaData(zapasId,i)||i===set){
+  for(let i=1;i<=setuVZapase(zapasId);i++)if(setMaData(zapasId,i)||i===set){
     const ss=skoreSetu(zapasId,i);
     sety.push(`<span class="skore-set${i===set?' aktivni':''}">${i}. ${ss.nase}:${ss.jejich}</span>`);
   }
@@ -1581,8 +1593,8 @@ function renderLive2(zapasId){
   hraci.forEach(h=>ensureStat(zapasId,h.id,set));
 
   const prepinac=`<div class="set-prepinac">
-    <span class="set-label">Set</span>
-    ${Array.from({length:SETU},(_,i)=>i+1).map(n=>{
+    <span class="set-label" title="Formát zápasu">Set${viteznychSetu(zapasId)===2?' <span class="set-format">na 2</span>':''}</span>
+    ${Array.from({length:setuVZapase(zapasId)},(_,i)=>i+1).map(n=>{
       const zapsano=hraci.some(h=>ACTIONS.some(a=>VARIANTS.some(v=>getStatVal(zapasId,h.id,`${a.key}_${v.suf}`,n))));
       return `<button class="set-btn${n===set?' aktivni':''}${zapsano?' zapsany':''}" onclick="prepniSet(${n})">${n}</button>`;
     }).join('')}
@@ -2833,6 +2845,7 @@ function openZapasModal(){
   document.getElementById('in-zapas-cas').value='';
   document.getElementById('in-zapas-soupet').value='';
   document.getElementById('in-zapas-misto').value='doma';
+  document.getElementById('in-zapas-format').value='3';
   document.getElementById('in-zapas-soutez').value='';
   document.getElementById('in-zapas-tym').value='';
   openModal('modal-zapas');
@@ -2857,6 +2870,7 @@ function editZapas(id){
   document.getElementById('in-zapas-cas').value=z.cas?z.cas.slice(0,5):'';
   document.getElementById('in-zapas-soupet').value=z.soupet||'';
   document.getElementById('in-zapas-misto').value=z.misto||'doma';
+  document.getElementById('in-zapas-format').value=String(z.vitezne_sety===2?2:3);
   // Soutěž ani tým z cizí sezóny v nabídce nejsou; kdyby tam zápas odkazoval,
   // prázdná hodnota by je při uložení tiše zahodila, tak je tam doplníme.
   doplnChybejiciVolbu('in-zapas-soutez',z.soutez_id,state.souteze);
@@ -2973,7 +2987,9 @@ async function saveZapas(){
   const sid=currentSeasonId();
   // Při úpravě se posílá i prázdná soutěž/tým, ať jde volba odebrat; při
   // zakládání by null jen zbytečně přepisoval default.
-  const body={datum,soupet,cas:document.getElementById('in-zapas-cas').value||null,misto:document.getElementById('in-zapas-misto').value};
+  const body={datum,soupet,cas:document.getElementById('in-zapas-cas').value||null,
+              misto:document.getElementById('in-zapas-misto').value,
+              vitezne_sety:parseInt(document.getElementById('in-zapas-format').value)===2?2:3};
   const soutezId=parseInt(document.getElementById('in-zapas-soutez').value)||null;
   const tymId=parseInt(document.getElementById('in-zapas-tym').value)||null;
   if(id){
@@ -3173,7 +3189,7 @@ function editVysledek(zapasId,finish=false){
   document.getElementById('in-vysledek-poznamka').value=z.poznamka||'';
   // sets detail
   let html='';
-  for(let i=1;i<=5;i++){
+  for(let i=1;i<=setuVZapase(zapasId);i++){
     // Co vychází z akcí, ať je vidět přímo u políčka. Rozdíl neznamená chybu
     // ve skóre, ale že v zápisu něco chybí — a tady si toho člověk všimne.
     const odv=skoreSetu(zapasId,i);
@@ -3195,11 +3211,14 @@ async function saveVysledek(){
   const setyMy=document.getElementById('in-sety-my').value;
   const setyOni=document.getElementById('in-sety-oni').value;
   const body={stav:'dokonceny',sety_my:setyMy!==''?parseInt(setyMy):null,sety_oni:setyOni!==''?parseInt(setyOni):null,poznamka:document.getElementById('in-vysledek-poznamka').value||null};
+  // Sety, které se v daném formátu nehrají, nemají v modalu políčko —
+  // přepisovat je naslepo by z uloženého výsledku udělalo prázdno.
   for(let i=1;i<=5;i++){
-    const my=document.getElementById(`in-set${i}-my`).value;
-    const oni=document.getElementById(`in-set${i}-oni`).value;
-    body[`set${i}_my`]=my!==''?parseInt(my):null;
-    body[`set${i}_oni`]=oni!==''?parseInt(oni):null;
+    const elMy=document.getElementById(`in-set${i}-my`);
+    const elOni=document.getElementById(`in-set${i}-oni`);
+    if(!elMy||!elOni)continue;
+    body[`set${i}_my`]=elMy.value!==''?parseInt(elMy.value):null;
+    body[`set${i}_oni`]=elOni.value!==''?parseInt(elOni.value):null;
   }
   try{
     const res=await apiPatch('vb_zapasy',id,body);
