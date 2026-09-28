@@ -1751,7 +1751,37 @@ function prubehHtml(zapasId,set){
       <span class="hriste-info-nazev">Série</span>${serie}
       ${nejhorsi?`<span class="hriste-info-souper" title="Rotace s nejhorší bilancí, podle podávající">
         Rotace ${esc(jmeno(nejhorsi.hrac_id))} ${sZnamenkem(nejhorsi.rozdil)}</span>`:''}
-    </div>`;
+    </div>
+    ${prubehStavuHtml(zapasId,set)}`;
+}
+
+/* ─── PRŮBĚH STAVU ───
+   Kde se set lámal. Každá výměna je jeden proužek s tím, jak po ní stálo
+   skóre; sytá barva znamená zisk podání (break), bledá bod při vlastním
+   podání. Ze sloupce bledých červených je vidět série na soupeřově podání,
+   ze sytých zelených naopak povedený příjem (#84). */
+function prubehStavu(zapasId,set){
+  let my=0,oni=0;
+  return prubehSetu(zapasId,set).vymeny.map(v=>{
+    if(v.bod==='my')my++;else oni++;
+    // break = bod získaný při podání toho druhého; bez známého prvního podání
+    // se to nepozná, tak se nic nehádá
+    return {bod:v.bod,my,oni,break:!!v.podaval&&v.podaval!==v.bod};
+  });
+}
+
+function prubehStavuHtml(zapasId,set){
+  const kroky=prubehStavu(zapasId,set);
+  if(!kroky.length)return '';
+  const naseBreaky=kroky.filter(k=>k.bod==='my'&&k.break).length;
+  const naseZPodani=kroky.filter(k=>k.bod==='my'&&!k.break).length;
+  return `<div class="hriste-info-radek">
+    <span class="hriste-info-nazev" title="Sytě = zisk podání, bledě = bod při vlastním podání">Průběh</span>
+    <span class="prubeh-pas">${kroky.map(k=>
+      `<span class="prubeh-tik ${k.bod}${k.break?' break':''}"
+        title="${k.my}:${k.oni} — ${k.bod==='my'?'náš bod':'bod soupeře'}${k.break?' (zisk podání)':''}"></span>`).join('')}</span>
+    <span class="info-proc" title="Naše body: ze side-outu a při vlastním podání">${naseBreaky} + ${naseZPodani}</span>
+  </div>`;
 }
 
 function hristeInfoHtml(zapasId){
