@@ -10,6 +10,16 @@ const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZ
    Jsou to čisté funkce nad předanými daty — žádné sahání do stavu appky,
    žádné DOM. Kdo chce pracovat se `state`, obalí si je u sebe. */
 
+/* Slovník stavů zápasu. Psát si ho po paměti znamená přehlédnout, že
+   „probíhající" je v datech `probihajici` — divácká stránka se přesně na tom
+   utkala a testy to nechytily, protože měly v fixture tutéž vymyšlenou
+   hodnotu (#102). */
+const STAV={PLANOVANY:'planovany',PROBIHA:'probihajici',DOKONCENY:'dokonceny'};
+
+function stavLabel(s){
+  return s===STAV.PLANOVANY?'Plánovaný':s===STAV.PROBIHA?'Probíhá':'Dokončený';
+}
+
 const SETU=5;                    // strop: víc setů se neodehraje ani na tři vítězné
 const ODDECHOVE_NA_SET=2;
 const STRIDANI_NA_SET=8;         // nové pravidlo, dřív šest

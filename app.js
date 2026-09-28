@@ -280,7 +280,7 @@ function renderPrehled(){
   const el=document.getElementById('prehled-content');
   if(!sid){el.innerHTML='<div class="empty"><span class="empty-icon">📊</span><div class="empty-text">Vyberte sezónu nahoře</div></div>';return;}
   const zapasy=state.zapasy.filter(z=>z.sezona_id===sid);
-  const done=zapasy.filter(z=>z.stav==='dokonceny');
+  const done=zapasy.filter(z=>z.stav===STAV.DOKONCENY);
   const wins=done.filter(z=>z.sety_my>z.sety_oni).length;
   const losses=done.filter(z=>z.sety_my<z.sety_oni).length;
   const sezNazev=state.sezony.find(s=>s.id===sid)?.nazev||'—';
@@ -305,14 +305,14 @@ function renderPrehled(){
 // se zrovna hraje — jen dokončené by tu funkci minuly.
 const PREHLED_MAX=6;
 function prehledSeznam(zapasy){
-  const probiha=zapasy.filter(z=>z.stav==='probihajici');
-  const planovane=zapasy.filter(z=>z.stav==='planovany')
+  const probiha=zapasy.filter(z=>z.stav===STAV.PROBIHA);
+  const planovane=zapasy.filter(z=>z.stav===STAV.PLANOVANY)
     .sort((a,b)=>(a.datum||'').localeCompare(b.datum||'')||(a.cas||'').localeCompare(b.cas||''));
   // Turnaj je několik zápasů v jeden den. Nejbližší plánovaný by ten zbytek dne
   // schoval a proklik do Live by na ně nevedl, tak se bere celý ten den (#68).
   const nejblizsiDen=planovane.length?planovane[0].datum:null;
   const denniDavka=planovane.filter(z=>z.datum===nejblizsiDen);
-  const done=zapasy.filter(z=>z.stav==='dokonceny');
+  const done=zapasy.filter(z=>z.stav===STAV.DOKONCENY);
   // Strop je na dokončené, ať Přehled nenaroste přes celou sezónu. Rozehrané
   // a dnešní zápasy se neodřezávají — přesně ty totiž člověk hledá.
   const zaklad=[...probiha,...denniDavka];
@@ -329,10 +329,10 @@ function renderZapasy(){
 }
 
 function matchHtml(z,withActions=false,klikDoLive=false){
-  const win=z.stav==='dokonceny'&&z.sety_my>z.sety_oni;
-  const lose=z.stav==='dokonceny'&&z.sety_my<z.sety_oni;
-  const score=z.stav==='dokonceny'&&z.sety_my!=null?`<span class="match-score ${win?'win':lose?'lose':''}">${z.sety_my}:${z.sety_oni}</span>`:'<span class="match-score" style="color:var(--muted)">—:—</span>';
-  const badge=`<span class="match-badge badge-${z.stav==='probihajici'?'probiha':z.stav==='dokonceny'?'dokonceny':'planovany'}">${stavLabel(z.stav)}</span>`;
+  const win=z.stav===STAV.DOKONCENY&&z.sety_my>z.sety_oni;
+  const lose=z.stav===STAV.DOKONCENY&&z.sety_my<z.sety_oni;
+  const score=z.stav===STAV.DOKONCENY&&z.sety_my!=null?`<span class="match-score ${win?'win':lose?'lose':''}">${z.sety_my}:${z.sety_oni}</span>`:'<span class="match-score" style="color:var(--muted)">—:—</span>';
+  const badge=`<span class="match-badge badge-${z.stav===STAV.PROBIHA?'probiha':z.stav===STAV.DOKONCENY?'dokonceny':'planovany'}">${stavLabel(z.stav)}</span>`;
   const misto=z.misto==='doma'?'🏠 Doma':z.misto==='venku'?'✈️ Venku':'⚖️ Neutrál';
   const soutez=state.souteze.find(s=>s.id===z.soutez_id);
   const tym=state.tymy.find(t=>t.id===z.tym_id);
@@ -343,8 +343,8 @@ function matchHtml(z,withActions=false,klikDoLive=false){
     // úpravy pod jedním jménem se pletly, tak je odděluje ikona i popisek.
     const upravit=`<button class="btn btn-sm btn-secondary" onclick="editZapas(${z.id})" title="Upravit soupeře, datum, soutěž a tým">✏️</button>`;
     const smazat=`<button class="btn btn-sm btn-red" onclick="deleteZapas(${z.id})" title="Smazat zápas">🗑️</button>`;
-    if(z.stav==='planovany')actions=`<button class="btn btn-sm btn-primary" onclick="goLive(${z.id})">⚡ Live</button>${upravit}<button class="btn btn-sm btn-secondary" onclick="editVysledek(${z.id})">📝 Výsledek</button>${smazat}`;
-    else if(z.stav==='probihajici')actions=`<button class="btn btn-sm btn-primary" onclick="goLive(${z.id})">⚡ Live</button>${upravit}<button class="btn btn-sm btn-green" onclick="editVysledek(${z.id})">✓ Ukončit</button>${smazat}`;
+    if(z.stav===STAV.PLANOVANY)actions=`<button class="btn btn-sm btn-primary" onclick="goLive(${z.id})">⚡ Live</button>${upravit}<button class="btn btn-sm btn-secondary" onclick="editVysledek(${z.id})">📝 Výsledek</button>${smazat}`;
+    else if(z.stav===STAV.PROBIHA)actions=`<button class="btn btn-sm btn-primary" onclick="goLive(${z.id})">⚡ Live</button>${upravit}<button class="btn btn-sm btn-green" onclick="editVysledek(${z.id})">✓ Ukončit</button>${smazat}`;
     else actions=`${upravit}<button class="btn btn-sm btn-secondary" onclick="editVysledek(${z.id})">📝 Výsledek</button>${smazat}`;
   }
   const klik=klikDoLive
@@ -362,13 +362,12 @@ function matchHtml(z,withActions=false,klikDoLive=false){
 
 // V profilu byly jen čísla — z „14.05." se nepozná, jestli to vyhrály.
 function vysledekZnacka(z){
-  if(z.stav!=='dokonceny'||z.sety_my==null||z.sety_oni==null)return '';
+  if(z.stav!==STAV.DOKONCENY||z.sety_my==null||z.sety_oni==null)return '';
   if(z.sety_my>z.sety_oni)return `<span class="profil-vysl win" title="Výhra ${z.sety_my}:${z.sety_oni}">V ${z.sety_my}:${z.sety_oni}</span>`;
   if(z.sety_my<z.sety_oni)return `<span class="profil-vysl lose" title="Prohra ${z.sety_my}:${z.sety_oni}">P ${z.sety_my}:${z.sety_oni}</span>`;
   return `<span class="profil-vysl">${z.sety_my}:${z.sety_oni}</span>`;
 }
 
-function stavLabel(s){return s==='planovany'?'Plánovaný':s==='probihajici'?'Probíhá':'Dokončený';}
 function fmtDate(d){if(!d)return'—';const p=d.split('-');return`${p[2]}.${p[1]}.${p[0]}`;}
 
 /* ─── TÝM ─── */
@@ -477,8 +476,8 @@ async function toggleHracSezona(hracId,sezonaId,inSeason){
 /* ─── LIVE ─── */
 function liveSelecty(){return [...document.querySelectorAll('.live-zapas-select')];}
 function zobrazStavTlacitka(z){
-  document.querySelectorAll('.js-btn-start').forEach(b=>b.style.display=z?.stav==='planovany'?'':'none');
-  document.querySelectorAll('.js-btn-end').forEach(b=>b.style.display=z?.stav==='probihajici'?'':'none');
+  document.querySelectorAll('.js-btn-start').forEach(b=>b.style.display=z?.stav===STAV.PLANOVANY?'':'none');
+  document.querySelectorAll('.js-btn-end').forEach(b=>b.style.display=z?.stav===STAV.PROBIHA?'':'none');
 }
 // Obě záložky Live píšou do týchž dat, takže musí ukazovat i týž zápas —
 // jinak by se člověk po přepnutí díval jinam, než si myslí (#76).
@@ -504,7 +503,7 @@ function renderLiveSelect(){
   let vybrany=zapasy.some(z=>z.id===prev)?prev:0;
   // Auto-select: probíhající → plánovaný → první
   if(!vybrany&&zapasy.length){
-    const best=zapasy.find(z=>z.stav==='probihajici')||zapasy.find(z=>z.stav==='planovany')||zapasy[0];
+    const best=zapasy.find(z=>z.stav===STAV.PROBIHA)||zapasy.find(z=>z.stav===STAV.PLANOVANY)||zapasy[0];
     if(best)vybrany=best.id;
   }
   selecty.forEach(sel=>{sel.innerHTML=volby;sel.value=vybrany?String(vybrany):'';});
@@ -544,9 +543,9 @@ function onLiveZapasChange(zdroj){
 async function startZapas(){
   const id=state.liveZapasId;if(!id)return;
   try{
-    await apiPatch('vb_zapasy',id,{stav:'probihajici'});
-    const z=state.zapasy.find(z=>z.id===id);if(z)z.stav='probihajici';
-    zobrazStavTlacitka(z||{stav:'probihajici'});
+    await apiPatch('vb_zapasy',id,{stav:STAV.PROBIHA});
+    const z=state.zapasy.find(z=>z.id===id);if(z)z.stav=STAV.PROBIHA;
+    zobrazStavTlacitka(z||{stav:STAV.PROBIHA});
     renderZapasy();renderLiveSelect();
     toast('Zápas zahájen','success');
   }catch(e){toast('Chyba: '+e.message,'error');}
@@ -976,7 +975,7 @@ function zkontrolujKonecSetu(zapasId,set){
   if(zapasId!==state.liveZapasId||set!==state.liveSet)return;   // cizí set neřešíme
   // Dopisování statistik k odehranému zápasu není rozehraný set — nabídka by
   // tam jen otravovala.
-  if(state.zapasy.find(z=>z.id===zapasId)?.stav==='dokonceny')return;
+  if(state.zapasy.find(z=>z.id===zapasId)?.stav===STAV.DOKONCENY)return;
   const klic=`${zapasId}:${set}`;
   if(!setRozhodnuty(zapasId,set)){
     nabidnutyKonec.delete(klic);        // „zpět" vrátilo skóre pod hranici
@@ -2552,7 +2551,7 @@ function spocitejStatistiky(prepis=null){
   if(!sid)return{stav:'bez-sezony'};
   const vsechnyHraci=hraciVSezoně(sid);
   if(!vsechnyHraci.length)return{stav:'prazdna-soupiska'};
-  const vsechnyZapasy=state.zapasy.filter(z=>z.sezona_id===sid&&(z.stav==='dokonceny'||z.stav==='probihajici'));
+  const vsechnyZapasy=state.zapasy.filter(z=>z.sezona_id===sid&&(z.stav===STAV.DOKONCENY||z.stav===STAV.PROBIHA));
   if(!vsechnyZapasy.length)return{stav:'zadne-zapasy'};
 
   // Detail týmu ani profil za celou sezónu nestojí na selectech ve
@@ -2816,7 +2815,7 @@ function rozsahProfilu(celaSezona){
   }
   const sid=currentSeasonId();
   const zapasIds=state.zapasy
-    .filter(z=>z.sezona_id===sid&&(z.stav==='dokonceny'||z.stav==='probihajici'))
+    .filter(z=>z.sezona_id===sid&&(z.stav===STAV.DOKONCENY||z.stav===STAV.PROBIHA))
     .map(z=>z.id);
   // přes prepis, ne slepováním výsledku: jinak by rows zůstaly podle filtru
   // a kostky by nesouhlasily s tabulkou pod nimi
@@ -3016,7 +3015,7 @@ function detailTymu(tymId){
   if(!t)return null;
   const zapasy=state.zapasy.filter(z=>z.tym_id===tymId)
     .sort((a,b)=>(b.datum||'').localeCompare(a.datum||'')||b.id-a.id);
-  const done=zapasy.filter(z=>z.stav==='dokonceny'&&z.sety_my!=null&&z.sety_oni!=null);
+  const done=zapasy.filter(z=>z.stav===STAV.DOKONCENY&&z.sety_my!=null&&z.sety_oni!=null);
   const vyhry=done.filter(z=>z.sety_my>z.sety_oni).length;
   const prohry=done.filter(z=>z.sety_my<z.sety_oni).length;
   const setyMy=done.reduce((n,z)=>n+z.sety_my,0);
@@ -3329,7 +3328,7 @@ async function saveZapas(){
     body.soutez_id=soutezId;
     body.tym_id=tymId;
   }else{
-    body.stav='planovany';
+    body.stav=STAV.PLANOVANY;
     if(sid)body.sezona_id=sid;
     if(soutezId)body.soutez_id=soutezId;
     if(tymId)body.tym_id=tymId;
@@ -3543,7 +3542,7 @@ async function saveVysledek(){
   const id=parseInt(document.getElementById('vysledek-zapas-id').value);
   const setyMy=document.getElementById('in-sety-my').value;
   const setyOni=document.getElementById('in-sety-oni').value;
-  const body={stav:'dokonceny',sety_my:setyMy!==''?parseInt(setyMy):null,sety_oni:setyOni!==''?parseInt(setyOni):null,poznamka:document.getElementById('in-vysledek-poznamka').value||null};
+  const body={stav:STAV.DOKONCENY,sety_my:setyMy!==''?parseInt(setyMy):null,sety_oni:setyOni!==''?parseInt(setyOni):null,poznamka:document.getElementById('in-vysledek-poznamka').value||null};
   // Sety, které se v daném formátu nehrají, nemají v modalu políčko —
   // přepisovat je naslepo by z uloženého výsledku udělalo prázdno.
   for(let i=1;i<=5;i++){
