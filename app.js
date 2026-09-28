@@ -7,6 +7,10 @@ const ACTIONS=[
   {key:'utok',label:'Útok',icon:'💥',color:'#f97316'},
   {key:'blok',label:'Blok',icon:'🛡️',varianty:['plus'],color:'#7950f2'},
   {key:'chyba',label:'Chyba',icon:'❌',varianty:['minus'],color:'#ff6b6b'},
+  // Pole (dig) je vybraný balon. Zatím se vede jen počet, protože je to pokus,
+  // ne bodovaná akce — proto neutrální varianta, ta znamená „výměna
+  // pokračuje" a do skóre se nepropisuje (#84).
+  {key:'pole',label:'Pole',icon:'🖐️',varianty:['neutral'],color:'#20c997'},
 ];
 const VARIANTS=[
   {suf:'plus',sym:'+',cls:'plus'},
@@ -712,8 +716,13 @@ function bumpSouper(zapasId,pole,delta=1,opts={}){
   souperDebounce[k]=setTimeout(()=>flushSouper(k),STAT_FLUSH_MS);
   prekresliSouper();
   const poleLogu=pole==='pocet'?'souper_chyba':'souper_bod';
-  if(delta>0)zalogujUdalost(zapasId,set,null,poleLogu);
-  else odlogujUdalost(zapasId,set,null,poleLogu);
+  if(delta>0){
+    zalogujUdalost(zapasId,set,null,poleLogu);
+    rotacePoBodu(zapasId,set,opts);
+  }else{
+    rotaceZpetPredOdebranim(zapasId,set,poleLogu,null,opts);
+    odlogujUdalost(zapasId,set,null,poleLogu);
+  }
   zkontrolujKonecSetu(zapasId,set);
   if(!opts.bezUndo){
     if(delta>0){
@@ -763,10 +772,23 @@ function flushVsechnySouper(opts={}){
   return Promise.all(Object.keys(souperPending).map(k=>flushSouper(k,opts)));
 }
 
+// V hřišti se skóre nepřekresluje se seznamem, protože sedí v dlaždici. Bez
+// tohohle by číslo na tlačítku zamrzlo, dokud se nepřekreslí celé hřiště.
+function prekresliDlazdice(){
+  const zapasId=state.liveZapasId;
+  if(!zapasId||!v2Hriste)return;
+  const s=skoreSetu(zapasId,state.liveSet),u=stavUtkani(zapasId);
+  const napis=(id,txt)=>{const el=document.getElementById(id);if(el)el.textContent=txt;};
+  napis('dl-skore-nase',s.nase);
+  napis('dl-skore-jejich',s.jejich);
+  napis('dl-sety-hodnota',`${u.my}:${u.oni}`);
+}
+
 function prekresliSouper(){
   const zapasId=state.liveZapasId;
   if(!zapasId)return;
   prekresliSkore();
+  prekresliDlazdice();
   SOUPER_POLE.forEach(({pole})=>{
     const el=document.getElementById(`v2-souper-${pole}`);
     if(el)el.textContent=souhrnCelyZapas
@@ -1042,17 +1064,57 @@ function poRotaci(zona,kroku){
 
 // Vrací true, když se postavení opravdu změnilo. Zápis do DB běží na pozadí,
 // stav se mění hned — během rozehry se nedá čekat na server.
-function otocNaPodavajici(zapasId,set,hracId){
+function rotujOKroku(zapasId,set,kroku){
   const m=postaveniSetu(zapasId,set);
-  const zona=[...m.entries()].find(([,id])=>id===hracId)?.[0];
-  if(!zona)return false;                  // hráčka není na hřišti (třeba libero)
-  const kroku=(zona-1)%6;
-  if(!kroku)return false;                 // už v jedničce, není co otáčet
-  const nove=[...m.entries()].map(([z,id])=>({zapas_id:zapasId,set_cislo:set,zona:poRotaci(z,kroku),hrac_id:id}));
+  if(!m.size||!kroku)return false;
+  const nove=[...m.entries()].map(([z,id])=>
+    ({zapas_id:zapasId,set_cislo:set,zona:poRotaci(z,kroku),hrac_id:id}));
   state.postaveni=state.postaveni.filter(p=>!(p.zapas_id===zapasId&&(p.set_cislo||1)===set));
   state.postaveni.push(...nove);
   ulozPostaveni(zapasId,set);
   return true;
+}
+
+function otocNaPodavajici(zapasId,set,hracId){
+  const zona=[...postaveniSetu(zapasId,set).entries()].find(([,id])=>id===hracId)?.[0];
+  if(!zona)return false;                  // hráčka není na hřišti (třeba libero)
+  return rotujOKroku(zapasId,set,(zona-1)%6);
+}
+
+/* ─── ROTACE SAMA OD SEBE ───
+   Rotuje ten, kdo získal podání: vyhraná výměna při soupeřově podání posune
+   šestku o jednu zónu, bod při vlastním podání ne. Obojí je v logu výměn už
+   teď, takže rotace nestojí ani jeden klik navíc — jen se veze na bodu (#84).
+
+   Zapsaný servis zůstává jako oprava (v2TahlePodava „Tahle podává"): když
+   zapisovatel bod vynechá, šestka se srovná podle toho, kdo opravdu podává. */
+function ziskaliPodani(vymena){
+  if(!vymena||vymena.bod!=='my'||vymena.podaval!=='oni')return false;
+  // Eso při soupeřově podání je nesrovnalost v zápisu (podávat můžou jen jedni).
+  // Postavení srovná sám zapsaný servis, tak ať se k tomu nepřidá ještě rotace.
+  return !String(vymena.pole||'').startsWith('servis_');
+}
+
+function rotacePoBodu(zapasId,set,opts){
+  if(opts.bezUndo)return;            // lišta „zpět" vrací rotaci přes predRotaci
+  if(!ziskaliPodani(prubehSetu(zapasId,set).vymeny.at(-1)))return;
+  const pred=[...postaveniSetu(zapasId,set).entries()];
+  if(!rotujOKroku(zapasId,set,1))return;
+  const u=undoStack[undoStack.length-1];
+  if(u)u.predRotaci=pred;
+  // v seznamu se zóny nekreslí, tak není co překreslovat — a překreslení
+  // uprostřed stisku by rozbilo dlouhý stisk (#76)
+  if(v2Hriste)prekresliLive(zapasId);
+}
+
+// Ruční odečet bodu musí rotaci vrátit taky, jinak by šestka zůstala otočená
+// o jednu navíc. Čte se ještě před smazáním z logu — potom už není podle čeho.
+function rotaceZpetPredOdebranim(zapasId,set,pole,hracId,opts){
+  if(opts.bezUndo)return;
+  const v=prubehSetu(zapasId,set).vymeny.at(-1);
+  if(!ziskaliPodani(v)||v.pole!==pole||(v.hrac_id||null)!==(hracId||null))return;
+  rotujOKroku(zapasId,set,-1);
+  if(v2Hriste)prekresliLive(zapasId);
 }
 
 // Rotace padala na unikátním indexu (zápas, set, hráčka): upsert po řádcích
@@ -1094,6 +1156,60 @@ function v2OtevriZonu(zapasId,zona){
   const hracId=postaveniSetu(zapasId,set).get(zona);
   if(hracId)v2OtevriAkce(zapasId,hracId,zona);
   else v2OtevriObsazeni(zapasId,zona);
+}
+
+/* ─── DLAŽDICE U SÍTĚ ───
+   Příjem, útok a pole se dají zapsat i opačným pořadím: nejdřív akce, pak
+   kdo ji udělal. Nabídne se jen ten, koho to na place potkává — u příjmu
+   smečařky a libera, u útoku všichni kromě liber a nahrávaček, u pole
+   všichni kromě blokařek (#84).
+
+   Vede se to jako výjimky, ne jako výčet: hráčka s nevyplněnou pozicí tak
+   z nabídky nezmizí úplně. */
+const DLAZDICE_SITE=[
+  {key:'prijem',krome:['blokař','nahrávač','universál']},
+  {key:'utok',  krome:['libero','nahrávač']},
+  {key:'pole',  krome:['blokař']},
+];
+
+function dlazdiceSite(key){return DLAZDICE_SITE.find(d=>d.key===key);}
+
+function hraciProAkci(zapasId,key){
+  const d=dlazdiceSite(key);
+  const sid=currentSeasonId()||state.zapasy.find(z=>z.id===zapasId)?.sezona_id||0;
+  return serazenaSestava(zapasId,hraciVSezoně(sid))
+    .filter(h=>!d||!d.krome.includes((h.pozice||'').toLowerCase()));
+}
+
+function v2OtevriDlazdici(zapasId,key){
+  const a=ACTIONS.find(x=>x.key===key);if(!a)return;
+  const hraci=hraciProAkci(zapasId,key);
+  document.getElementById('v2-kdo-zapas').value=zapasId;
+  document.getElementById('v2-kdo-akce').value=key;
+  document.getElementById('v2-kdo-title').textContent=`${a.icon} ${a.label} — kdo?`;
+  const el=document.getElementById('v2-kdo-obsah');
+  el.innerHTML=hraci.length
+    ? hraci.map(h=>playerCard(h,{
+        atributy:`style="cursor:pointer" onclick="v2VyberProAkci(${h.id})"`,
+        ovladani:`<span style="color:${a.color};font-size:14px;font-weight:700">${a.icon}</span>`
+      })).join('')
+    : '<div class="empty" style="padding:20px"><span class="empty-icon">👥</span><div class="empty-text">Nikdo na tuhle akci</div><div>Zkontroluj pozice hráček v sestavě</div></div>';
+  openModal('modal-v2-kdo');
+}
+
+function v2VyberProAkci(hracId){
+  const zapasId=parseInt(document.getElementById('v2-kdo-zapas').value);
+  const key=document.getElementById('v2-kdo-akce').value;
+  const a=ACTIONS.find(x=>x.key===key);if(!a)return;
+  closeModal('modal-v2-kdo');
+  // Akce s jedinou variantou (pole) není co upřesňovat — zapíše se rovnou.
+  if(a.varianty&&a.varianty.length===1){
+    if(bump(hracId,zapasId,`${a.key}_${a.varianty[0]}`,1))prekresliV2Cisla();
+    return;
+  }
+  const zona=[...postaveniSetu(zapasId,state.liveSet).entries()]
+    .find(([,id])=>id===hracId)?.[0]||0;
+  v2OtevriAkce(zapasId,hracId,zona,key);
 }
 
 function v2OtevriObsazeni(zapasId,zona,nahrazuje=0){
@@ -1191,15 +1307,39 @@ function hristeHtml(zapasId){
   const mimo=`<div class="hriste-mimo">
     <div class="hriste-dlazdice dl-sety" title="Stav utkání v setech">
       <span class="hriste-cislo-zony">Sety</span>
-      <span class="dlazdice-sety">${u.my}:${u.oni}</span>
+      <span class="dlazdice-sety" id="dl-sety-hodnota">${u.my}:${u.oni}</span>
     </div>
-    <button class="hriste-dlazdice dl-skore" onclick="v2UpravSkore()"
-        title="Klepnutím upravíš skóre mimo statistiku hráček">
+    <div class="hriste-dlazdice dl-skore">
       <span class="hriste-cislo-zony">${set}. set</span>
-      <span class="dlazdice-hodnota"><span class="plus">${skore.nase}</span>:<span class="minus">${skore.jejich}</span></span>
-      <span class="dlazdice-uprava">upravit</span>
-    </button>
+      <span class="dlazdice-hodnota">
+        <button class="skore-pul plus" onclick="v2Bod('my')"
+            oncontextmenu="event.preventDefault();v2BodZpet('my');return false"
+            title="Klepnutím přidáš náš bod (chyba soupeře), pravým tlačítkem nebo dlouhým stiskem ho ubereš"
+          ><span id="dl-skore-nase">${skore.nase}</span></button
+        ><span class="skore-dvojtecka">:</span
+        ><button class="skore-pul minus" onclick="v2Bod('oni')"
+            oncontextmenu="event.preventDefault();v2BodZpet('oni');return false"
+            title="Klepnutím přidáš bod soupeře, pravým tlačítkem nebo dlouhým stiskem ho ubereš"
+          ><span id="dl-skore-jejich">${skore.jejich}</span></button>
+      </span>
+      <button class="dlazdice-uprava" onclick="v2UpravSkore()"
+        title="Ruční oprava obou stran najednou">upravit</button>
+    </div>
     ${ZONY_LIBERO.map(liberoKarta).join('')}
+  </div>`;
+
+  // Za sítí: akce, u kterých je rychlejší klepnout nejdřív co se stalo a pak
+  // kdo — během rozehry se na hráčku ukazuje prstem, ne hledá v šestce (#84).
+  const zaSiti=`<div class="hriste-akce">
+    ${DLAZDICE_SITE.map(d=>{
+      const a=ACTIONS.find(x=>x.key===d.key);
+      return `<button class="hriste-akce-dlazdice" style="border-color:${a.color}"
+          onclick="v2OtevriDlazdici(${zapasId},'${a.key}')"
+          title="${a.label} — vybereš hráčku">
+        <span class="hriste-akce-ikona">${a.icon}</span>
+        <span class="hriste-akce-nazev" style="color:${a.color}">${a.label}</span>
+      </button>`;
+    }).join('')}
   </div>`;
 
   return `<div class="hriste-wrap">
@@ -1209,6 +1349,7 @@ function hristeHtml(zapasId){
       <div class="hriste">${ZONY_ROZLOZENI.map(rada=>
         `<div class="hriste-rada">${rada.map(karta).join('')}</div>`).join('')}</div>
       <div class="hriste-sit"><span>síť</span></div>
+      ${zaSiti}
     </div>
     ${hristeInfoHtml(zapasId)}
   </div>`;
@@ -1538,6 +1679,20 @@ function v2NominujLibero(zapasId){
 
 // Skóre se jinak skládá z akcí. Když je potřeba ho srovnat mimo statistiku
 // hráček, jde to přes chybu a bod soupeře — tedy tam, kam to patří.
+/* Bod klepnutím na stav (#84). Na hřišti je skóre to, na co se člověk během
+   rozehry stejně dívá — tak ať se z něj rovnou zapisuje: naše číslo je bod
+   z chyby soupeře, jejich číslo bod soupeře. Modal s +/− zůstává pro opravy,
+   kde je potřeba vidět obě hodnoty naráz. */
+function v2Bod(kdo){
+  const zapasId=state.liveZapasId;if(!zapasId)return;
+  bumpSouper(zapasId,kdo==='my'?'pocet':'body',1);
+}
+
+function v2BodZpet(kdo){
+  const zapasId=state.liveZapasId;if(!zapasId)return;
+  bumpSouper(zapasId,kdo==='my'?'pocet':'body',-1);
+}
+
 function v2UpravSkore(){
   const zapasId=state.liveZapasId;
   const set=state.liveSet;
@@ -1665,7 +1820,9 @@ function prekresliV2Cisla(){
   }));
 }
 
-function v2OtevriAkce(zapasId,hracId,zona=0){
+// jenAkce: modal ukáže jen jednu akci — z dlaždice u sítě už je jasné, která
+// to je, a přebírat zbytek nabídky by znamenalo hledat ji znovu očima.
+function v2OtevriAkce(zapasId,hracId,zona=0,jenAkce=''){
   const h=state.hraci.find(h=>h.id===hracId);if(!h)return;
   document.getElementById('v2-akce-zapas').value=zapasId;
   document.getElementById('v2-akce-hrac').value=hracId;
@@ -1678,7 +1835,8 @@ function v2OtevriAkce(zapasId,hracId,zona=0){
   btnLib.textContent=jeLibero(zapasId,hracId)?'🎽 Zrušit libero':'🎽 Libero';
   document.getElementById('v2-akce-title').textContent=
     `${h.jmeno}${h.cislo?' · #'+h.cislo:''} — ${state.liveSet}. set`;
-  document.getElementById('v2-akce-obsah').innerHTML=ACTIONS.map(a=>{
+  document.getElementById('v2-akce-obsah').innerHTML=ACTIONS
+    .filter(a=>!jenAkce||a.key===jenAkce).map(a=>{
     const variants=a.varianty?VARIANTS.filter(v=>a.varianty.includes(v.suf)):VARIANTS;
     return `<div class="v2-akce-radek">
       <div class="v2-akce-nazev" style="color:${a.color}">${a.icon} ${a.label}</div>
@@ -1913,8 +2071,13 @@ function bump(hracId,zapasId,field,delta=1,opts={}){
   prekresliV2Cisla();
   prekresliSkore();
   zaznamenejProZpet(hracId,zapasId,field,set,nova-puvodni,opts);
-  if(delta>0)zalogujUdalost(zapasId,set,hracId,field);
-  else odlogujUdalost(zapasId,set,hracId,field);
+  if(delta>0){
+    zalogujUdalost(zapasId,set,hracId,field);
+    rotacePoBodu(zapasId,set,opts);
+  }else{
+    rotaceZpetPredOdebranim(zapasId,set,field,hracId,opts);
+    odlogujUdalost(zapasId,set,hracId,field);
+  }
   zkontrolujKonecSetu(zapasId,set);
 
   // Zapsaný servis určuje postavení. Předchozí stav si schová záznam pro
@@ -2191,6 +2354,7 @@ const STATS_SLOUPCE={
   utok_pct:{hodnota:r=>pctCislo(r.up,r.um,r.un),vychozi:'desc'},
   bp:{hodnota:r=>r.bp,vychozi:'desc'},
   cm:{hodnota:r=>r.cm,vychozi:'desc'},
+  po:{hodnota:r=>r.po,vychozi:'desc'},
   total:{hodnota:r=>r.total,vychozi:'desc'},
 };
 
@@ -2260,9 +2424,10 @@ function spocitejStatistiky(prepis=null){
     const up=sum('utok_plus'),um=sum('utok_minus'),un=sum('utok_neutral');
     const bp=sum('blok_plus');
     const cm=sum('chyba_minus');
+    const po=sum('pole_neutral');          // vybrané balony, pokus bez vlivu na skóre
     // jeden řádek na set, takže počet zápasů je počet různých zapas_id
     const zapasy=new Set(stats.map(s=>s.zapas_id)).size;
-    return {h,sp,sm,pp,pm,pn,up,um,un,bp,cm,total:sp+up+bp-sm-pm-um-cm,zapasy};
+    return {h,sp,sm,pp,pm,pn,up,um,un,bp,cm,po,total:sp+up+bp-sm-pm-um-cm,zapasy};
   }).filter(r=>r.zapasy>0);
   // Řadí se tady, ne až při vykreslení, ať CSV export stáhne tabulku v tom
   // pořadí, v jakém ji má člověk před očima.
@@ -2272,8 +2437,8 @@ function spocitejStatistiky(prepis=null){
     zapasy:acc.zapasy+r.zapasy,sp:acc.sp+r.sp,sm:acc.sm+r.sm,
     pp:acc.pp+r.pp,pm:acc.pm+r.pm,pn:acc.pn+r.pn,
     up:acc.up+r.up,um:acc.um+r.um,un:acc.un+r.un,
-    bp:acc.bp+r.bp,cm:acc.cm+r.cm,total:acc.total+r.total
-  }),{zapasy:0,sp:0,sm:0,pp:0,pm:0,pn:0,up:0,um:0,un:0,bp:0,cm:0,total:0});
+    bp:acc.bp+r.bp,cm:acc.cm+r.cm,po:acc.po+r.po,total:acc.total+r.total
+  }),{zapasy:0,sp:0,sm:0,pp:0,pm:0,pn:0,up:0,um:0,un:0,bp:0,cm:0,po:0,total:0});
 
   return {stav:'ok',sid,vsechnyHraci,zapasyPoCsoutezi,seasonSouteze,rows,tot,zapasIds,
           selTym,selSoutez,selZapas,selHrac,selSet};
@@ -2300,7 +2465,7 @@ function sZnamenkem(v){
 /* ─── EXPORT CSV ─── */
 const CSV_HLAVICKA=['Poř.','Hráčka','Číslo','Záp.','Servis Es','Servis chyby',
   'Příjem výb.','Příjem chyby','Příjem % výb.','Útok výb.','Útok chyby','Útok % výb.',
-  'Bloky','Chyby','Celkem'];
+  'Bloky','Pole','Chyby','Celkem'];
 
 function csvBunka(v){
   const t=(v===null||v===undefined)?'':String(v);
@@ -2314,11 +2479,11 @@ function statsCsv(d){
     i+1,r.h.jmeno,r.h.cislo??'',r.zapasy,r.sp,r.sm,
     r.pp,r.pm,pctCislo(r.pp,r.pm,r.pn),
     r.up,r.um,pctCislo(r.up,r.um,r.un),
-    r.bp,r.cm,r.total])));
+    r.bp,r.po,r.cm,r.total])));
   radky.push(csvRadek(['','Σ Celkem','',d.tot.zapasy,d.tot.sp,d.tot.sm,
     d.tot.pp,d.tot.pm,pctCislo(d.tot.pp,d.tot.pm,d.tot.pn),
     d.tot.up,d.tot.um,pctCislo(d.tot.up,d.tot.um,d.tot.un),
-    d.tot.bp,d.tot.cm,d.tot.total]));
+    d.tot.bp,d.tot.po,d.tot.cm,d.tot.total]));
   return radky.join('\r\n');                 // CRLF kvůli Excelu
 }
 
@@ -2426,6 +2591,7 @@ function renderStatistiky(){
         <th colspan="3">🤲 Příjem</th>
         <th colspan="3">💥 Útok</th>
         ${th('bp','🛡️ Blok','rowspan="2"')}
+        ${th('po','🖐️ Pole','rowspan="2"')}
         ${th('cm','❌ Chyba','rowspan="2"')}
         ${th('total','Celkem','rowspan="2"')}
       </tr>
@@ -2444,6 +2610,7 @@ function renderStatistiky(){
         <td style="${g}">${row.pp}</td><td style="${r}">${row.pm}</td><td style="${b}">${pct(row.pp,row.pm,row.pn)}</td>
         <td style="${g}">${row.up}</td><td style="${r}">${row.um}</td><td style="${b}">${pct(row.up,row.um,row.un)}</td>
         <td style="${g}">${row.bp}</td>
+        <td style="${b}">${row.po}</td>
         <td style="${r}">${row.cm}</td>
         <td style="${a}">${row.total}</td>
       </tr>`).join('')}
@@ -2456,6 +2623,7 @@ function renderStatistiky(){
         <td style="${g}">${tot.pp}</td><td style="${r}">${tot.pm}</td><td style="${b}">${pct(tot.pp,tot.pm,tot.pn)}</td>
         <td style="${g}">${tot.up}</td><td style="${r}">${tot.um}</td><td style="${b}">${pct(tot.up,tot.um,tot.un)}</td>
         <td style="${g}">${tot.bp}</td>
+        <td style="${b}">${tot.po}</td>
         <td style="${r}">${tot.cm}</td>
         <td style="${a}">${tot.total}</td>
       </tr>
@@ -2530,7 +2698,7 @@ function profilHracky(hracId,celaSezona=false){
       sp:v('servis_plus'),sm:v('servis_minus'),
       pp:v('prijem_plus'),pm:v('prijem_minus'),pn:v('prijem_neutral'),
       up:v('utok_plus'),um:v('utok_minus'),un:v('utok_neutral'),
-      bp:v('blok_plus'),cm:v('chyba_minus'),
+      bp:v('blok_plus'),cm:v('chyba_minus'),po:v('pole_neutral'),
       total:v('servis_plus')+v('utok_plus')+v('blok_plus')
             -v('servis_minus')-v('prijem_minus')-v('utok_minus')-v('chyba_minus')};
   });
@@ -2604,6 +2772,7 @@ function otevriProfil(hracId,celaSezona=false){
     ${kostka(sZnamenkem(uspesnost(souhrn.up,souhrn.um,souhrn.un)),'Útok úsp.')}
     ${kostka(pctCislo(souhrn.pp,souhrn.pm,souhrn.pn)??'—','Příjem % výb.')}
     ${kostka(sZnamenkem(uspesnost(souhrn.pp,souhrn.pm,souhrn.pn)),'Příjem úsp.')}
+    ${kostka(souhrn.po,'Pole','var(--accent2)')}
     ${kostka(souhrn.cm,'Chyb','var(--red)')}
   </div>`:'';
 
@@ -2626,13 +2795,14 @@ function otevriProfil(hracId,celaSezona=false){
         :'V tomhle filtru nemá hráčka žádný zápas se záznamem.'}</div>`;
 
   const tabulka=radky.length?`<div style="overflow-x:auto"><table class="profil-tabulka">
-    <thead><tr><th>Zápas</th><th>Es</th><th>Příj&nbsp;%</th><th>Útok&nbsp;%</th><th>Blok</th><th>Chyb</th><th>Celk.</th></tr></thead>
+    <thead><tr><th>Zápas</th><th>Es</th><th>Příj&nbsp;%</th><th>Útok&nbsp;%</th><th>Blok</th><th title="Vybrané balony">Pole</th><th>Chyb</th><th>Celk.</th></tr></thead>
     <tbody>${radky.map(r=>`<tr>
       <td><div class="profil-zapas-datum">${fmtDate(r.z.datum).slice(0,6)} ${vysledekZnacka(r.z)}</div><div class="profil-zapas-soupet">${esc(r.z.soupet)}</div></td>
       <td>${r.sp}</td>
       <td>${pctCislo(r.pp,r.pm,r.pn)??'—'}<div class="profil-usp">${sZnamenkem(uspesnost(r.pp,r.pm,r.pn))}</div></td>
       <td>${pctCislo(r.up,r.um,r.un)??'—'}<div class="profil-usp">${sZnamenkem(uspesnost(r.up,r.um,r.un))}</div></td>
       <td>${r.bp}</td>
+      <td>${r.po}</td>
       <td>${r.cm}</td>
       <td style="color:var(--accent);font-weight:700">${r.total}</td>
     </tr>`).join('')}</tbody></table>
@@ -2730,6 +2900,7 @@ function otevriTymDetail(tymId){
       ${kostka((pctCislo(tot.pp,tot.pm,tot.pn)??'—')+(pctCislo(tot.pp,tot.pm,tot.pn)==null?'':'%'),'Příjem % výb.')}
       ${kostka(sZnamenkem(uspesnost(tot.pp,tot.pm,tot.pn)),'Příjem úsp.')}
       ${kostka(tot.bp,'Bloky','var(--accent2)')}
+      ${kostka(tot.po,'Pole','var(--accent2)')}
       ${kostka(tot.cm,'Chyb','var(--red)')}
       ${kostka(chyby,'Chyb soupeře','var(--accent2)')}
       ${kostka(bodySoupere,'Bodů soupeře','var(--red)')}
