@@ -4077,6 +4077,86 @@ await page.evaluate(() => {
 });
 await page.waitForTimeout(200);
 
+
+// ── #84 část 20: průběh stavu podle side-outu ─────────────────────────────
+// Kde se set lámal: každá výměna je proužek se stavem po ní, sytá barva
+// znamená zisk podání, bledá bod při vlastním podání.
+await page.evaluate(() => {
+  state.liveSet = 5;
+  state.zapasy.find(z => z.id === 100).stav = 'probiha';
+  state.udalosti = state.udalosti.filter(u => !(u.zapas_id === 100 && (u.set_cislo || 1) === 5));
+  state.postaveni = state.postaveni.filter(p => !(p.zapas_id === 100 && (p.set_cislo || 1) === 5));
+  state.setInfo = state.setInfo.filter(x => !(x.zapas_id === 100 && (x.set_cislo || 1) === 5));
+  state.chybySouperu = state.chybySouperu.filter(c => c.zapas_id !== 100);
+  Object.keys(souperDirty).forEach(k => { if (k.startsWith('100_5')) delete souperDirty[k]; });
+  [10, 11, 12, 13].forEach((id, i) => state.postaveni.push(
+    { zapas_id: 100, set_cislo: 5, zona: i + 1, hrac_id: id }));
+  state.setInfo.push({ zapas_id: 100, set_cislo: 5, oddechove_casy: 0, stridani: 0,
+                       prvni_podani: 'oni' });
+  renderLive2(100);
+});
+await page.waitForTimeout(400);
+
+pass &= ok('T57a0 prázdný set žádný pruh neukazuje (#84)',
+  await page.$('.prubeh-pas') === null);
+
+// soupeř podává: náš bod (break) → náš bod z vlastního podání → jejich break
+await page.evaluate(() => bump(10, 100, 'utok_plus', 1));
+await page.waitForTimeout(500);
+await page.evaluate(() => bump(11, 100, 'utok_plus', 1));
+await page.waitForTimeout(500);
+await page.evaluate(() => bump(12, 100, 'utok_minus', 1));
+await page.waitForTimeout(600);
+
+pass &= ok('T57a průběh drží stav po každé výměně (#84)',
+  JSON.stringify(await page.evaluate(() =>
+    prubehStavu(100, 5).map(k => `${k.my}:${k.oni}`))) ===
+  JSON.stringify(['1:0', '2:0', '2:1']));
+pass &= ok('T57b zisk podání se odliší od bodu při vlastním podání (#84)',
+  JSON.stringify(await page.evaluate(() =>
+    prubehStavu(100, 5).map(k => (k.bod === 'my' ? 'M' : 'O') + (k.break ? '!' : '')))) ===
+  JSON.stringify(['M!', 'M', 'O!']));
+pass &= ok('T57c a je to vidět i v pruhu (#84)', await page.evaluate(() => {
+  const t = [...document.querySelectorAll('.prubeh-tik')];
+  return t.length === 3 && t[0].className.includes('my') && t[0].className.includes('break') &&
+         !t[1].className.includes('break') && t[2].className.includes('oni');
+}));
+pass &= ok('T57d proužek nese stav, ať jde dohledat, kde se to lámalo (#84)',
+  /2:1/.test(await page.getAttribute('.prubeh-tik:nth-child(3)', 'title')));
+pass &= ok('T57e vedle je rozpad našich bodů na side-out a vlastní podání (#84)',
+  /1 \+ 1/.test(await page.textContent('.hriste-info')));
+
+// další výměna průběh prodlouží a čísla sedí na side-out
+await page.evaluate(() => bumpSouper(100, 'pocet', 1));
+await page.waitForTimeout(600);
+pass &= ok('T57f chyba soupeře je ve stavu taky (#84)',
+  await page.evaluate(() => prubehStavu(100, 5).length) === 4 &&
+  await page.evaluate(() => prubehStavu(100, 5).at(-1).my) === 3);
+pass &= ok('T57g počet našich breaků sedí na uhrané side-outy (#84)',
+  await page.evaluate(() => prubehStavu(100, 5).filter(k => k.bod === 'my' && k.break).length) ===
+  await page.evaluate(() => sideOut(100, 5).uhrano));
+
+// bez zadaného prvního podání se break nehádá
+await page.evaluate(() => {
+  const i = state.setInfo.findIndex(x => x.zapas_id === 100 && (x.set_cislo || 1) === 5);
+  state.setInfo[i] = { ...state.setInfo[i], prvni_podani: null };
+  renderLive2(100);
+});
+await page.waitForTimeout(400);
+pass &= ok('T57h bez prvního podání se první výměna za break nevydává (#84)',
+  await page.evaluate(() => prubehStavu(100, 5)[0].break) === false &&
+  await page.evaluate(() => prubehStavu(100, 5).map(k => `${k.my}:${k.oni}`).join('|')) ===
+    '1:0|2:0|2:1|3:1');
+
+await page.evaluate(() => {
+  state.udalosti = state.udalosti.filter(u => !(u.zapas_id === 100 && (u.set_cislo || 1) === 5));
+  state.postaveni = state.postaveni.filter(p => !(p.zapas_id === 100 && (p.set_cislo || 1) === 5));
+  state.setInfo = state.setInfo.filter(x => !(x.zapas_id === 100 && (x.set_cislo || 1) === 5));
+  state.liveSet = 1;
+  renderLive2(100);
+});
+await page.waitForTimeout(200);
+
 await b.close();
 console.log(pass ? '\nVŠE PROŠLO' : '\nNĚCO SELHALO');
 process.exit(pass ? 0 : 1);

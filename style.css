@@ -382,6 +382,16 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
   align-items:center;justify-content:center}
 .hriste-sit span{font-size:10px;text-transform:uppercase;letter-spacing:2px;color:var(--muted);
   writing-mode:vertical-rl}
+/* Průběh stavu po výměnách (#84). Sytě = zisk podání, bledě = bod při
+   vlastním podání. Pás se scrolluje, aby dlouhý set nerozbil řádek. */
+.prubeh-pas{display:flex;gap:2px;align-items:flex-end;overflow-x:auto;
+  max-width:100%;padding:2px 0;flex:1 1 120px;min-width:0}
+.prubeh-tik{flex:0 0 auto;width:5px;height:14px;border-radius:2px;
+  background:rgba(81,207,102,.35)}
+.prubeh-tik.oni{background:rgba(255,107,107,.35)}
+.prubeh-tik.my.break{background:var(--green)}
+.prubeh-tik.oni.break{background:var(--red)}
+
 /* Stavy, ve kterých padly time-outy (#84). */
 .info-oddechovy-stavy{font-family:'Oswald',sans-serif;font-size:11px;color:var(--muted);
   margin-left:4px}
