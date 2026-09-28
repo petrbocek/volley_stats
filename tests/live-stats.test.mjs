@@ -40,6 +40,7 @@ const FIX = {
   vb_postaveni: [],
   vb_set_info: [],
   vb_udalosti: [],
+  vb_oddechove_casy: [],
   vb_zapas_hraci: [{ zapas_id: 100, hrac_id: 10 }, { zapas_id: 100, hrac_id: 11 },
                    { zapas_id: 100, hrac_id: 12 }, { zapas_id: 100, hrac_id: 13 },
                    { zapas_id: 200, hrac_id: 10 }],
@@ -118,6 +119,27 @@ await page.route('**/rest/v1/rpc/vb_zapis_set_info', async route => {
             FIX.vb_set_info.push(r); }
   r[p_pole] = Math.max(0, r[p_pole] + p_delta);
   return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(r) });
+});
+
+// time-outy se vedou po jednom i se stavem, ve kterém padly
+let oddechovyId = 500;
+let oddechoveRpc = [];
+await page.route('**/rest/v1/rpc/vb_zapis_oddechovy', async route => {
+  const { p_zapas, p_set, p_my, p_oni } = route.request().postDataJSON();
+  oddechoveRpc.push({ p_zapas, p_set, p_my, p_oni });
+  const r = { id: oddechovyId++, zapas_id: p_zapas, set_cislo: p_set,
+              skore_my: p_my, skore_oni: p_oni, created_at: new Date().toISOString() };
+  FIX.vb_oddechove_casy.push(r);
+  return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(r) });
+});
+
+await page.route('**/rest/v1/rpc/vb_smaz_posledni_oddechovy', async route => {
+  const { p_zapas, p_set } = route.request().postDataJSON();
+  for (let i = FIX.vb_oddechove_casy.length - 1; i >= 0; i--) {
+    const o = FIX.vb_oddechove_casy[i];
+    if (o.zapas_id === p_zapas && o.set_cislo === p_set) { FIX.vb_oddechove_casy.splice(i, 1); break; }
+  }
+  return route.fulfill({ status: 200, contentType: 'application/json', body: 'null' });
 });
 
 let chybyRpc = [];
@@ -2862,30 +2884,48 @@ pass &= ok('T44b podávající se po rotaci přepíše (#84)', await page.evalua
 }));
 
 // oddechové časy
-pass &= ok('T44c oddešáky začínají nevyčerpané (#84)', await page.evaluate(() =>
+pass &= ok('T44c time-outy začínají nevyčerpané (#84)', await page.evaluate(() =>
   document.querySelectorAll('.tecka').length === 2 &&
   document.querySelectorAll('.tecka.cerpana').length === 0));
-otherWrites = [];
-let setInfoRpc = 0;
+pass &= ok('T44c2 tlačítko se jmenuje Time-out, ne hantýrkou (#84)',
+  /Time-out/.test(await page.textContent('.info-oddechovy')) &&
+  !/Oddešák/.test(await page.textContent('.hriste-info')));
+otherWrites = []; oddechoveRpc = [];
+const stavPriTO = await page.evaluate(() => skoreSetu(100, state.liveSet));
 await page.click('.info-oddechovy');
 await page.waitForTimeout(600);
 pass &= ok('T44d klepnutí vyčerpá jeden (#84)',
-  await page.evaluate(() => setInfo(100, state.liveSet).oddechove_casy) === 1 &&
+  await page.evaluate(() => oddechovePocet(100, state.liveSet)) === 1 &&
   (await page.$$eval('.tecka.cerpana', els => els.length)) === 1);
-pass &= ok('T44e zapisuje se přírůstkem přes vlastní RPC (#84)',
-  !otherWrites.some(w => w.table === 'vb_set_info'));
+pass &= ok('T44d2 zapíše se i stav, ve kterém se bral (#84)',
+  oddechoveRpc.length === 1 && oddechoveRpc[0].p_my === stavPriTO.nase &&
+  oddechoveRpc[0].p_oni === stavPriTO.jejich &&
+  (await page.textContent('.info-oddechovy')).includes(`${stavPriTO.nase}:${stavPriTO.jejich}`));
+pass &= ok('T44e zapisuje se vlastní RPC, ne upsertem řádku (#84)',
+  !otherWrites.some(w => w.table === 'vb_set_info' || w.table === 'vb_oddechove_casy'));
 await page.click('.info-oddechovy');
 await page.waitForTimeout(600);
 pass &= ok('T44f druhý taky, a víc už se nenabízí samo (#84)',
-  await page.evaluate(() => setInfo(100, state.liveSet).oddechove_casy) === 2);
+  await page.evaluate(() => oddechovePocet(100, state.liveSet)) === 2);
 page.once('dialog', d => d.dismiss());
 await page.click('.info-oddechovy');
 await page.waitForTimeout(500);
 pass &= ok('T44g přes limit se appka zeptá a zamítnutí nic nepřidá (#84)',
-  await page.evaluate(() => setInfo(100, state.liveSet).oddechove_casy) === 2);
+  await page.evaluate(() => oddechovePocet(100, state.liveSet)) === 2);
+// pravé tlačítko vrátí poslední i se stavem
+await page.click('.info-oddechovy', { button: 'right' });
+await page.waitForTimeout(600);
+pass &= ok('T44g2 pravým tlačítkem se poslední time-out vrátí (#84)',
+  await page.evaluate(() => oddechovePocet(100, state.liveSet)) === 1);
+await page.click('.info-oddechovy');
+await page.waitForTimeout(600);
 
 // střídání se počítá samo
-const predStrid = await page.evaluate(() => setInfo(100, state.liveSet).stridani);
+// měří se proti serveru: v paměti nemusí řádek setu ještě existovat, dokud
+// se do něj nezapsalo, a nula z výchozí hodnoty by ukázala falešný přírůstek
+const setNaHristi = await page.evaluate(() => state.liveSet);
+const radekSetu = () => FIX.vb_set_info.find(x => x.zapas_id === 100 && x.set_cislo === setNaHristi);
+const predStrid = (radekSetu() || { stridani: 0 }).stridani;
 await page.click('.hriste .hriste-zona:not(.prazdna)');
 await page.waitForSelector('#modal-v2-akce:not(.hidden)');
 await page.click('#btn-v2-stridat');
@@ -2893,9 +2933,12 @@ await page.waitForSelector('#modal-v2-zona:not(.hidden)');
 await page.click('#v2-zona-obsah .player-card');
 await page.waitForTimeout(800);
 pass &= ok('T44h střídání se přičte samo, neklika se zvlášť (#84)',
+  radekSetu().stridani === predStrid + 1 &&
   await page.evaluate(() => setInfo(100, state.liveSet).stridani) === predStrid + 1);
-pass &= ok('T44i a je vidět kolik z kolika (#84)',
-  /\d+\/6/.test(await page.textContent('.hriste-info')));
+pass &= ok('T44i a je vidět kolik z kolika (#84)', await page.evaluate(() =>
+  new RegExp('\\d+/' + STRIDANI_NA_SET).test(document.querySelector('.hriste-info').textContent)));
+pass &= ok('T44i2 střídání se hraje na osm, ne na šest (#84)',
+  await page.evaluate(() => STRIDANI_NA_SET) === 8);
 
 // pouhé obsazení prázdné zóny střídání není
 pass &= ok('T44j0 je koho postavit, jinak by se měřilo prázdno (#84)',
@@ -3883,6 +3926,80 @@ pass &= ok('T54k označení ze třetího setu nemluví do druhého (#84)',
 await page.evaluate(() => {
   state.postaveni = state.postaveni.filter(p => !(p.zapas_id === 100 && (p.set_cislo || 1) === 3));
   state.setInfo = state.setInfo.filter(x => !(x.zapas_id === 100 && (x.set_cislo || 1) === 3));
+  state.liveSet = 1;
+  renderLive2(100);
+});
+await page.waitForTimeout(200);
+
+
+// ── #84 část 18: time-out nesmí shodit nastavení setu ─────────────────────
+// Z turnaje: „když si vezmu time, musím opětovně definovat kdo podával."
+// RPC vracela jen svoje dvě počítadla a appka si tou odpovědí přepsala celý
+// řádek setu, takže z něj zmizelo první podání i nahrávačka.
+await page.evaluate(() => {
+  state.liveSet = 4;
+  state.zapasy.find(z => z.id === 100).stav = 'probiha';
+  state.oddechove = state.oddechove.filter(o => o.zapas_id !== 100);
+  state.setInfo = state.setInfo.filter(x => !(x.zapas_id === 100 && (x.set_cislo || 1) === 4));
+  state.postaveni = state.postaveni.filter(p => !(p.zapas_id === 100 && (p.set_cislo || 1) === 4));
+  [10, 11, 12, 13].forEach((id, i) => state.postaveni.push(
+    { zapas_id: 100, set_cislo: 4, zona: i + 1, hrac_id: id }));
+  state.setInfo.push({ zapas_id: 100, set_cislo: 4, oddechove_casy: 0, stridani: 0,
+                       prvni_podani: 'oni', nahravacka_hrac_id: 11 });
+  renderLive2(100);
+});
+FIX.vb_oddechove_casy.length = 0;
+await page.waitForTimeout(400);
+
+pass &= ok('T55a0 set má zadané první podání i nahrávačku (#84)',
+  await page.evaluate(() => setInfo(100, 4).prvni_podani) === 'oni' &&
+  await page.evaluate(() => nahravackaSetu(100, 4)) === 11);
+
+await page.click('.info-oddechovy');
+await page.waitForTimeout(700);
+pass &= ok('T55a po time-outu zůstává zadané první podání (#84)',
+  await page.evaluate(() => setInfo(100, 4).prvni_podani) === 'oni' &&
+  !/Podání na začátku/.test(await page.textContent('.hriste-info')));
+pass &= ok('T55b a nahrávačka taky, posty se nerozpadnou (#84)',
+  await page.evaluate(() => nahravackaSetu(100, 4)) === 11 &&
+  await page.evaluate(() => postHracky(100, 4, 11)) === 'nahrávač');
+
+// totéž při střídání, jde stejnou cestou
+await page.evaluate(() => bumpSetInfo(100, 'stridani', 1));
+await page.waitForTimeout(700);
+pass &= ok('T55c stejně tak po střídání (#84)',
+  await page.evaluate(() => setInfo(100, 4).prvni_podani) === 'oni' &&
+  await page.evaluate(() => nahravackaSetu(100, 4)) === 11);
+
+// stav se drží u každého time-outu zvlášť
+await page.evaluate(() => { bumpSouper(100, 'pocet', 7); bumpSouper(100, 'body', 5); });
+await page.waitForTimeout(700);
+await page.click('.info-oddechovy');
+await page.waitForTimeout(700);
+pass &= ok('T55d druhý time-out si nese svůj stav, ne ten první (#84)',
+  JSON.stringify(await page.evaluate(() =>
+    oddechoveSetu(100, 4).map(o => `${o.skore_my}:${o.skore_oni}`))) ===
+  JSON.stringify(['0:0', '7:5']));
+pass &= ok('T55e oba stavy jsou vidět u tlačítka (#84)',
+  /0:0/.test(await page.textContent('.info-oddechovy')) &&
+  /7:5/.test(await page.textContent('.info-oddechovy')));
+
+// starší zápas bez řádků má pořád jen počítadlo
+await page.evaluate(() => {
+  state.oddechove = state.oddechove.filter(o => o.zapas_id !== 100);
+  const i = state.setInfo.findIndex(x => x.zapas_id === 100 && (x.set_cislo || 1) === 4);
+  state.setInfo[i] = { ...state.setInfo[i], oddechove_casy: 2 };
+  renderLive2(100);
+});
+await page.waitForTimeout(400);
+pass &= ok('T55f starý zápis bez stavů se o time-outy nepřipraví (#84)',
+  await page.evaluate(() => oddechovePocet(100, 4)) === 2 &&
+  (await page.$$eval('.tecka.cerpana', els => els.length)) === 2);
+
+await page.evaluate(() => {
+  state.oddechove = state.oddechove.filter(o => o.zapas_id !== 100);
+  state.setInfo = state.setInfo.filter(x => !(x.zapas_id === 100 && (x.set_cislo || 1) === 4));
+  state.postaveni = state.postaveni.filter(p => !(p.zapas_id === 100 && (p.set_cislo || 1) === 4));
   state.liveSet = 1;
   renderLive2(100);
 });

@@ -18,7 +18,7 @@ const VARIANTS=[
   {suf:'minus',sym:'−',cls:'minus'},
 ];
 
-const state={sezony:[],activeSeason:null,hraci:[],hraciSezony:[],zapasy:[],statistiky:[],tymy:[],hraciTymy:[],souteze:[],zapasHraci:[],chybySouperu:[],postaveni:[],setInfo:[],udalosti:[],liveZapasId:null,liveSet:1};
+const state={sezony:[],activeSeason:null,hraci:[],hraciSezony:[],zapasy:[],statistiky:[],tymy:[],hraciTymy:[],souteze:[],zapasHraci:[],chybySouperu:[],postaveni:[],setInfo:[],udalosti:[],oddechove:[],liveZapasId:null,liveSet:1};
 
 // Rozepsaný set si pamatujeme podle zápasu: po reloadu uprostřed třetího setu
 // by skok zpátky na první znamenal zapisovat do špatného setu.
@@ -207,7 +207,7 @@ async function apiPatch(table,id,body){
 
 async function init(){
   try{
-    const [sez,hr,hs,zap,stat,tym,ht,sout,zh,chyby,post,setinfo,udal]=await Promise.all([
+    const [sez,hr,hs,zap,stat,tym,ht,sout,zh,chyby,post,setinfo,udal,odd]=await Promise.all([
       // Řazení musí být jednoznačné, jinak může stránkování řádky přeskočit
       // nebo zopakovat — proto všude rozhodující sloupec navíc.
       apiAll('vb_sezony?order=id.desc'),
@@ -223,6 +223,7 @@ async function init(){
       apiAll('vb_postaveni?order=zapas_id.asc,set_cislo.asc,zona.asc'),
       apiAll('vb_set_info?order=zapas_id.asc,set_cislo.asc'),
       apiAll('vb_udalosti?order=id.asc'),
+      apiAll('vb_oddechove_casy?order=id.asc'),
     ]);
     state.sezony=sez||[];
     state.hraci=hr||[];
@@ -237,6 +238,7 @@ async function init(){
     state.postaveni=post||[];
     state.setInfo=setinfo||[];
     state.udalosti=udal||[];
+    state.oddechove=odd||[];
     state.activeSeason=(sez||[]).find(s=>s.aktivni)||null;
     renderSeasonSelect();
     renderAll();
@@ -1461,7 +1463,7 @@ function tymSouhrnHtml(zapasId){
    a historie střídání se nikde nedrží. Zapisují se přírůstkově jako všechno
    ostatní (#84). */
 const ODDECHOVE_NA_SET=2;
-const STRIDANI_NA_SET=6;
+const STRIDANI_NA_SET=8;          // nové pravidlo, dřív šest
 
 function setInfo(zapasId,set){
   return state.setInfo.find(x=>x.zapas_id===zapasId&&(x.set_cislo||1)===set)
@@ -1480,26 +1482,82 @@ async function bumpSetInfo(zapasId,pole,delta){
   try{
     const r=await apiRpc('vb_zapis_set_info',{p_zapas:zapasId,p_set:set,p_pole:pole,p_delta:delta});
     if(r&&typeof r==='object'){
+      // Sloučit, ne přepsat: starší verze RPC vracela jen svoje dvě počítadla,
+      // takže se tím zahazovalo první podání i nahrávačka a appka se na ně
+      // po time-outu ptala znovu (#84).
       const j=state.setInfo.findIndex(x=>x.zapas_id===zapasId&&(x.set_cislo||1)===set);
-      if(j>=0)state.setInfo[j]=r;
+      if(j>=0)state.setInfo[j]={...state.setInfo[j],...r};
       prekresliLive(zapasId);
     }
   }catch(e){toast('Chyba: '+e.message,'error');}
   return true;
 }
 
-function v2Oddechovy(){
-  const zapasId=state.liveZapasId;if(!zapasId)return;
-  const zbyva=ODDECHOVE_NA_SET-setInfo(zapasId,state.liveSet).oddechove_casy;
-  if(zbyva<=0){
-    if(!confirm('Oddechové časy jsou vyčerpané. Přidat další?'))return;
-  }
-  bumpSetInfo(zapasId,'oddechove_casy',1);
+/* ─── TIME-OUTY ───
+   Vedou se po jednom i se stavem, ve kterém padly — počet z nich plyne, takže
+   nevzniká druhá pravda vedle počítadla. Samotný počet říká jen „dva jsou
+   pryč"; zajímavé je, jestli se bralo za 8:12 nebo za 22:24 (#84).
+
+   Starší zápasy mají jen počítadlo ve vb_set_info, bez stavu. Když k setu
+   žádný řádek není, počet se vezme odtamtud, ať se o ně nepřijde. */
+function oddechoveSetu(zapasId,set){
+  return state.oddechove
+    .filter(o=>o.zapas_id===zapasId&&(o.set_cislo||1)===set)
+    .sort((a,b)=>a.id-b.id);
 }
 
-function v2OddechovyZpet(){
+function oddechovePocet(zapasId,set){
+  const radky=oddechoveSetu(zapasId,set);
+  return radky.length||setInfo(zapasId,set).oddechove_casy||0;
+}
+
+async function v2Oddechovy(){
   const zapasId=state.liveZapasId;if(!zapasId)return;
-  bumpSetInfo(zapasId,'oddechove_casy',-1);
+  if(!isLoggedIn()){toast('Na zapisování se přihlas (🔒 nahoře)','error');return;}
+  const set=state.liveSet;
+  if(oddechovePocet(zapasId,set)>=ODDECHOVE_NA_SET){
+    if(!confirm('Time-outy jsou vyčerpané. Přidat další?'))return;
+  }
+  const s=skoreSetu(zapasId,set);
+  // do stavu hned, ať se dlaždice nečeká na server; id doplní odpověď
+  const docasny={id:Number.MAX_SAFE_INTEGER,zapas_id:zapasId,set_cislo:set,
+                 skore_my:s.nase,skore_oni:s.jejich};
+  state.oddechove.push(docasny);
+  prekresliLive(zapasId);
+  try{
+    const r=await apiRpc('vb_zapis_oddechovy',
+      {p_zapas:zapasId,p_set:set,p_my:s.nase,p_oni:s.jejich});
+    const i=state.oddechove.indexOf(docasny);
+    if(i>=0){if(r&&r.id)state.oddechove[i]=r;else state.oddechove.splice(i,1);}
+    prekresliLive(zapasId);
+  }catch(e){
+    const i=state.oddechove.indexOf(docasny);
+    if(i>=0)state.oddechove.splice(i,1);
+    prekresliLive(zapasId);
+    toast('Time-out se neuložil: '+e.message,'error');
+  }
+}
+
+async function v2OddechovyZpet(){
+  const zapasId=state.liveZapasId;if(!zapasId)return;
+  if(!isLoggedIn()){toast('Na změny se přihlas (🔒 nahoře)','error');return;}
+  const set=state.liveSet;
+  const radky=oddechoveSetu(zapasId,set);
+  // Zápasy bez řádků mají jen staré počítadlo — tam se ubírá po staru.
+  if(!radky.length){
+    if(setInfo(zapasId,set).oddechove_casy>0)bumpSetInfo(zapasId,'oddechove_casy',-1);
+    return;
+  }
+  const posledni=radky[radky.length-1];
+  state.oddechove=state.oddechove.filter(o=>o!==posledni);
+  prekresliLive(zapasId);
+  try{
+    await apiRpc('vb_smaz_posledni_oddechovy',{p_zapas:zapasId,p_set:set});
+  }catch(e){
+    state.oddechove.push(posledni);
+    prekresliLive(zapasId);
+    toast('Chyba: '+e.message,'error');
+  }
 }
 
 /* ─── LOG VÝMĚN ───
@@ -1703,8 +1761,15 @@ function hristeInfoHtml(zapasId){
   const p=podavajici(zapasId,set);
   const b=bodyPoHrackach(zapasId,set);
   const info=setInfo(zapasId,set);
-  const teckyOddechove=Array.from({length:Math.max(ODDECHOVE_NA_SET,info.oddechove_casy)},(_,i)=>
-    `<span class="tecka${i<info.oddechove_casy?' cerpana':''}"></span>`).join('');
+  const vzate=oddechoveSetu(zapasId,set);
+  const oddechovych=oddechovePocet(zapasId,set);
+  const teckyOddechove=Array.from({length:Math.max(ODDECHOVE_NA_SET,oddechovych)},(_,i)=>
+    `<span class="tecka${i<oddechovych?' cerpana':''}"></span>`).join('');
+  // Stavy, ve kterých se time-outy braly. U starších zápasů se nevedly, tak
+  // se ukáže jen počet teček.
+  const stavyOddechovych=vzate.length
+    ?`<span class="info-oddechovy-stavy" title="Stav při time-outu">${
+        vzate.map(o=>`${o.skore_my}:${o.skore_oni}`).join(' · ')}</span>`:'';
 
   return `<div class="hriste-info">
     <div class="hriste-info-radek">
@@ -1715,9 +1780,10 @@ function hristeInfoHtml(zapasId){
     <div class="hriste-info-radek">
       <button class="info-oddechovy" onclick="v2Oddechovy()"
           oncontextmenu="event.preventDefault();v2OddechovyZpet();return false"
-          title="Klepnutím vyčerpáš oddechový čas, pravým tlačítkem nebo dlouhým stiskem vrátíš">
-        <span class="hriste-info-nazev">Oddešák</span>
+          title="Klepnutím vezmeš time-out (zapíše se i stav), pravým tlačítkem nebo dlouhým stiskem ho vrátíš">
+        <span class="hriste-info-nazev">Time-out</span>
         <span class="tecky">${teckyOddechove}</span>
+        ${stavyOddechovych}
       </button>
       <span class="hriste-info-nazev">Střídání</span>
       <span class="info-hodnota${info.stridani>STRIDANI_NA_SET?' prekroceno':''}">${info.stridani}/${STRIDANI_NA_SET}</span>
