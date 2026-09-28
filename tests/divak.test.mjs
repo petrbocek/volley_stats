@@ -96,11 +96,11 @@ await page.route('**/rest/v1/**', async route => {
   return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(data) });
 });
 
-// ── zápas z adresy ────────────────────────────────────────────────────────
-await page.goto(`${ADRESA}/divak.html?zapas=7`);
+// ── rozehraný zápas ───────────────────────────────────────────────────────
+await page.goto(`${ADRESA}/divak.html`);
 await page.waitForSelector('.divak-skore-cisla');
 
-pass &= ok('D1 stránka ukáže zápas z adresy', await (async () => {
+pass &= ok('D1 stránka sama najde rozehraný zápas', await (async () => {
   const t = await page.textContent('.divak-hlavicka');
   return /VK Ostrava/.test(t) && /Probíhá/.test(t);
 })());
@@ -181,28 +181,31 @@ pass &= ok('D20 výpadek spojení se přizná', await (async () => {
 })());
 vypadek = false;
 
-// ── bez parametru: rozehraný zápas ────────────────────────────────────────
-dotazy = [];
-await page.goto(`${ADRESA}/divak.html`);
-await page.waitForSelector('.divak-skore-cisla');
-pass &= ok('D21 bez parametru najde rozehraný zápas',
-  /VK Ostrava/.test(await page.textContent('.divak-hlavicka')));
-
+// ── jen rozehraný zápas, nic jiného ───────────────────────────────────────
+// Po ukončení zápasu se stránka nemá čím chlubit — ať to řekne, místo aby
+// ukazovala starý výsledek jako živý.
 FIX.vb_zapasy[0].stav = 'dokonceny';
-await page.goto(`${ADRESA}/divak.html`);
-await page.waitForSelector('.divak-hlavicka');
-pass &= ok('D22 když nic neběží, ukáže poslední odehraný',
-  /VK Ostrava/.test(await page.textContent('.divak-hlavicka')) &&
-  /Dokončeno/.test(await page.textContent('.divak-hlavicka')));
-FIX.vb_zapasy[0].stav = 'probiha';
-
-// ── zápas bez zápisu nesmí vypadat rozbitě ────────────────────────────────
-await page.goto(`${ADRESA}/divak.html?zapas=8`);
-await page.waitForSelector('.divak-hlavicka');
-pass &= ok('D23 zápas bez dat řekne, že se nic nezapsalo, a nespadne', await (async () => {
+await page.waitForFunction(() => !!document.querySelector('.divak-nehraje'),
+  null, { timeout: 15000 }).catch(() => {});
+pass &= ok('D21 po ukončení zápasu stránka řekne, že se nehraje', await (async () => {
   const t = await page.textContent('#divak');
-  return /Starý zápas/.test(t) && /nezapsala/.test(t) && /žádná výměna/.test(t);
+  return /Teď se nehraje/.test(t) && !/VK Ostrava/.test(t);
 })());
+pass &= ok('D22 dohraný zápas se nevydává za živý',
+  await page.$('.divak-skore-cisla') === null);
+
+// další zápas dne se chytne sám, bez sahání na adresu
+FIX.vb_zapasy[1].stav = 'probiha';
+await page.waitForFunction(() => /Starý zápas/.test(document.body.textContent),
+  null, { timeout: 15000 }).catch(() => {});
+pass &= ok('D23 další rozehraný zápas se chytne sám',
+  /Starý zápas/.test(await page.textContent('.divak-hlavicka')));
+pass &= ok('D24 zápas bez zápisu nevypadá rozbitě', await (async () => {
+  const t = await page.textContent('#divak');
+  return /nezapsala/.test(t) && /žádná výměna/.test(t);
+})());
+FIX.vb_zapasy[0].stav = 'probiha';
+FIX.vb_zapasy[1].stav = 'dokonceny';
 
 await b.close();
 console.log(pass ? '\nVŠE PROŠLO' : '\nNĚCO SELHALO');

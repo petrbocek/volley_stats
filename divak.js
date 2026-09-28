@@ -10,7 +10,7 @@
    Čte se rolí anon, které RLS pouští jen to, co je veřejné už dnes. */
 
 const OBNOVA_ZIVE_MS=5000;        // rozehraný zápas
-const OBNOVA_KLID_MS=30000;       // dohraný nebo plánovaný
+const OBNOVA_KLID_MS=30000;       // nikdo zrovna nehraje
 const VYMEN_V_SEZNAMU=12;         // co se vejde na telefon bez scrollování
 
 const d={zapas:null,hraci:[],sestava:[],statistiky:[],chyby:[],postaveni:[],
@@ -28,24 +28,19 @@ async function ziskej(dotaz){
   return r.json();
 }
 
-// Který zápas ukázat: z adresy, jinak ten rozehraný, jinak poslední odehraný.
-// Turnajový den může mít rozehraných víc — bere se nejnovější (#102).
+// Ukazuje se jedině rozehraný zápas — adresa je jedna pro celou halu a nikdo
+// nemá co vybírat (#102). Turnajový den může mít rozehraných víc, bere se
+// nejnovější; ptáme se na to při každé obnově, takže se stránka po ukončení
+// zápasu sama přepne na další.
 async function vyberZapas(){
-  const zId=parseInt(new URLSearchParams(location.search).get('zapas'));
-  if(zId){
-    const z=await ziskej(`vb_zapasy?id=eq.${zId}`);
-    return z[0]||null;
-  }
   const probiha=await ziskej('vb_zapasy?stav=eq.probiha&order=datum.desc,id.desc&limit=1');
-  if(probiha[0])return probiha[0];
-  const posledni=await ziskej('vb_zapasy?order=datum.desc,id.desc&limit=1');
-  return posledni[0]||null;
+  return probiha[0]||null;
 }
 
 async function nacti(){
   try{
-    const zapas=d.zapas?(await ziskej(`vb_zapasy?id=eq.${d.zapas.id}`))[0]:await vyberZapas();
-    if(!zapas){d.zapas=null;d.chyba=null;vykresli();return;}
+    const zapas=await vyberZapas();
+    if(!zapas){d.zapas=null;d.chyba=null;d.nacteno=new Date();vykresli();return;}
     d.zapas=zapas;
     const id=zapas.id;
     const [sestava,statistiky,chyby,postaveni,setInfo,udalosti,oddechove]=await Promise.all([
@@ -241,8 +236,14 @@ function patickaHtml(){
 function vykresli(){
   const el=document.getElementById('divak');
   if(!d.zapas){
-    el.innerHTML=`<div class="divak-prazdno">${d.chyba
-      ?'Data se nepodařilo načíst.':'Žádný zápas k zobrazení.'}</div>`;
+    el.innerHTML=`<div class="divak-nehraje">
+      <div class="divak-nehraje-ikona">🏐</div>
+      <div class="divak-nehraje-text">${d.chyba
+        ?'Data se nepodařilo načíst.':'Teď se nehraje.'}</div>
+      <div class="divak-nehraje-popis">${d.chyba
+        ?'Zkusím to znovu za chvíli.':'Až zápas začne, objeví se tu sám.'}</div>
+    </div>`+patickaHtml();
+    document.title='Volejbal — živě';
     return;
   }
   el.innerHTML=hlavickaHtml()+skoreHtml()+
@@ -253,7 +254,7 @@ function vykresli(){
 
 function naplanuj(){
   clearTimeout(obnovaTimer);
-  const jak=d.zapas&&d.zapas.stav==='probiha'?OBNOVA_ZIVE_MS:OBNOVA_KLID_MS;
+  const jak=d.zapas?OBNOVA_ZIVE_MS:OBNOVA_KLID_MS;   // co je na obrazovce, to se hraje
   obnovaTimer=setTimeout(tik,jak);
 }
 
