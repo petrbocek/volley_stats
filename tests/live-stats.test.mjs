@@ -2675,9 +2675,10 @@ pass &= ok('T42h nominace ze slotu se uloží do sestavy (#84)',
 pass &= ok('T42i a nezapsala se přitom do vb_postaveni (#84)',
   !otherWrites.some(w => w.table === 'vb_postaveni'));
 
-// dlaždice se skóre upravuje skóre mimo statistiku hráček
+// „upravit" na dlaždici se skóre otevře ruční opravu mimo statistiku hráček
+// (samotná čísla zapisují bod, viz T51)
 const predUpravou = await page.evaluate(() => skoreSetu(100, state.liveSet));
-await page.click('.hriste-dlazdice.dl-skore');
+await page.click('.hriste-dlazdice.dl-skore .dlazdice-uprava');
 await page.waitForSelector('#modal-v2-skore:not(.hidden)');
 pass &= ok('T42j dlaždice skóre otevře úpravu s pojmenovanými akcemi (#84)',
   await page.evaluate(() => {
@@ -3421,6 +3422,113 @@ await page.evaluate(() => {
   [1, 2, 3, 4, 5].forEach(i => { delete z[`set${i}_my`]; delete z[`set${i}_oni`]; });
   state.liveSet = 1;
 });
+
+
+// ── #84 část 14: bod klepnutím na stav ────────────────────────────────────
+// Chyba i bod soupeře se zapisují přímo ze skóre: naše číslo = náš bod
+// z chyby soupeře, jejich číslo = bod soupeře.
+await page.click('.nav-tab:nth-child(6)');
+await page.waitForSelector('#live2-wrap');
+await page.evaluate(() => { if (!v2Hriste) v2PrepniHriste(); });
+await page.waitForSelector('.hriste-info');
+// čistá soupeřova strana i na straně serveru — odpověď z flushe jinak vrátí
+// hodnoty z dřívějších testů a měřilo by se něco jiného
+FIX.vb_chyby_souperu = FIX.vb_chyby_souperu.filter(c => c.zapas_id !== 100);
+await page.evaluate(() => {
+  state.liveSet = 3;
+  // rozehraný zápas: „Výsledek" ho v předchozím bloku uložil jako dokončený
+  state.zapasy.find(z => z.id === 100).stav = 'probiha';
+  state.chybySouperu = state.chybySouperu.filter(c => c.zapas_id !== 100);
+  Object.keys(souperDirty).forEach(k => { if (k.startsWith('100_')) delete souperDirty[k]; });
+  state.udalosti = state.udalosti.filter(u => !(u.zapas_id === 100 && (u.set_cislo || 1) === 3));
+  renderLive2(100);
+});
+await page.waitForTimeout(400);
+
+const dlazdiceSkore = () => page.evaluate(() => [
+  document.getElementById('dl-skore-nase').textContent,
+  document.getElementById('dl-skore-jejich').textContent].join(':'));
+const pred51 = await page.evaluate(() => skoreSetu(100, 3));
+pass &= ok('T51a0 stav je na dlaždici vidět jako dvě čísla (#84)',
+  await dlazdiceSkore() === `${pred51.nase}:${pred51.jejich}`);
+
+chybyRpc = [];
+await page.click('.dl-skore .skore-pul.plus');
+await page.waitForTimeout(600);
+pass &= ok('T51a klepnutí na naše číslo přidá bod z chyby soupeře (#84)',
+  await page.evaluate(p => skoreSetu(100, 3).nase === p.nase + 1 &&
+    skoreSetu(100, 3).jejich === p.jejich, pred51) &&
+  chybyRpc.length === 1 && chybyRpc[0].p_pole === 'pocet' &&
+  chybyRpc[0].p_delta === 1 && chybyRpc[0].p_set === 3);
+pass &= ok('T51b a číslo na dlaždici se hned srovná (#84)',
+  await dlazdiceSkore() === `${pred51.nase + 1}:${pred51.jejich}`);
+
+chybyRpc = [];
+await page.click('.dl-skore .skore-pul.minus');
+await page.waitForTimeout(600);
+pass &= ok('T51c klepnutí na jejich číslo zapíše bod soupeře (#84)',
+  await page.evaluate(p => skoreSetu(100, 3).jejich === p.jejich + 1, pred51) &&
+  chybyRpc.length === 1 && chybyRpc[0].p_pole === 'body' && chybyRpc[0].p_delta === 1 &&
+  await dlazdiceSkore() === `${pred51.nase + 1}:${pred51.jejich + 1}`);
+
+pass &= ok('T51d obě klepnutí jsou výměna v logu, počítá se z nich side-out (#84)',
+  await page.evaluate(() => {
+    const p = prubehSetu(100, 3).vymeny.slice(-2);
+    return p.length === 2 && p[0].bod === 'my' && p[1].bod === 'oni';
+  }));
+
+// pravé tlačítko (na mobilu dlouhý stisk) bod ubere
+chybyRpc = [];
+await page.click('.dl-skore .skore-pul.minus', { button: 'right' });
+await page.waitForTimeout(600);
+pass &= ok('T51e pravým tlačítkem se bod zase ubere (#84)',
+  await page.evaluate(p => skoreSetu(100, 3).jejich === p.jejich, pred51) &&
+  chybyRpc.some(r => r.p_pole === 'body' && r.p_delta === -1) &&
+  await dlazdiceSkore() === `${pred51.nase + 1}:${pred51.jejich}`);
+
+pass &= ok('T51f překlep jde vzít i lištou zpět (#84)', await (async () => {
+  const popis = await page.textContent('#btn-undo-v2');
+  await page.click('#btn-undo-v2');
+  await page.waitForTimeout(600);
+  return /Chyba soupeře/.test(popis) &&
+    await page.evaluate(p => skoreSetu(100, 3).nase === p.nase, pred51);
+})());
+
+pass &= ok('T51g „upravit" pořád otevře ruční opravu obou stran (#84)', await (async () => {
+  await page.click('.dl-skore .dlazdice-uprava');
+  await page.waitForTimeout(400);
+  const vidno = await page.isVisible('#modal-v2-skore');
+  await page.click('#modal-v2-skore .modal-footer .btn-secondary');
+  await page.waitForTimeout(300);
+  return vidno;
+})());
+
+// 25. bod naklepaný ze stavu set taky ukončí
+await page.evaluate(() => {
+  const s = skoreSetu(100, 3);
+  bumpSouper(100, 'pocet', 24 - s.nase);
+  bumpSouper(100, 'body', 20 - s.jejich);
+});
+await page.waitForTimeout(700);
+let dialog51 = null;
+// klepnutí, ne evaluate: dialog vyskočí uprostřed akce, tak si text jen
+// přečteme a zavření necháme být, když ho Playwright stihl zavřít sám
+const chytDialog = d => { dialog51 = dialog51 || d.message(); d.dismiss().catch(() => {}); };
+page.on('dialog', chytDialog);
+await page.click('.dl-skore .skore-pul.plus');
+await page.waitForTimeout(700);
+page.off('dialog', chytDialog);
+pass &= ok('T51h i bod ze stavu ukončí set (#84)',
+  !!dialog51 && /3\. set končí 25:20/.test(dialog51) &&
+  await dlazdiceSkore() === '25:20');
+
+await page.evaluate(() => {
+  state.chybySouperu = state.chybySouperu.filter(c => c.zapas_id !== 100);
+  Object.keys(souperDirty).forEach(k => { if (k.startsWith('100_3')) delete souperDirty[k]; });
+  state.liveSet = 1;
+  renderLive2(100);
+});
+await page.waitForTimeout(200);
 
 await b.close();
 console.log(pass ? '\nVŠE PROŠLO' : '\nNĚCO SELHALO');

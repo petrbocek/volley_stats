@@ -763,10 +763,23 @@ function flushVsechnySouper(opts={}){
   return Promise.all(Object.keys(souperPending).map(k=>flushSouper(k,opts)));
 }
 
+// V hřišti se skóre nepřekresluje se seznamem, protože sedí v dlaždici. Bez
+// tohohle by číslo na tlačítku zamrzlo, dokud se nepřekreslí celé hřiště.
+function prekresliDlazdice(){
+  const zapasId=state.liveZapasId;
+  if(!zapasId||!v2Hriste)return;
+  const s=skoreSetu(zapasId,state.liveSet),u=stavUtkani(zapasId);
+  const napis=(id,txt)=>{const el=document.getElementById(id);if(el)el.textContent=txt;};
+  napis('dl-skore-nase',s.nase);
+  napis('dl-skore-jejich',s.jejich);
+  napis('dl-sety-hodnota',`${u.my}:${u.oni}`);
+}
+
 function prekresliSouper(){
   const zapasId=state.liveZapasId;
   if(!zapasId)return;
   prekresliSkore();
+  prekresliDlazdice();
   SOUPER_POLE.forEach(({pole})=>{
     const el=document.getElementById(`v2-souper-${pole}`);
     if(el)el.textContent=souhrnCelyZapas
@@ -1191,14 +1204,24 @@ function hristeHtml(zapasId){
   const mimo=`<div class="hriste-mimo">
     <div class="hriste-dlazdice dl-sety" title="Stav utkání v setech">
       <span class="hriste-cislo-zony">Sety</span>
-      <span class="dlazdice-sety">${u.my}:${u.oni}</span>
+      <span class="dlazdice-sety" id="dl-sety-hodnota">${u.my}:${u.oni}</span>
     </div>
-    <button class="hriste-dlazdice dl-skore" onclick="v2UpravSkore()"
-        title="Klepnutím upravíš skóre mimo statistiku hráček">
+    <div class="hriste-dlazdice dl-skore">
       <span class="hriste-cislo-zony">${set}. set</span>
-      <span class="dlazdice-hodnota"><span class="plus">${skore.nase}</span>:<span class="minus">${skore.jejich}</span></span>
-      <span class="dlazdice-uprava">upravit</span>
-    </button>
+      <span class="dlazdice-hodnota">
+        <button class="skore-pul plus" onclick="v2Bod('my')"
+            oncontextmenu="event.preventDefault();v2BodZpet('my');return false"
+            title="Klepnutím přidáš náš bod (chyba soupeře), pravým tlačítkem nebo dlouhým stiskem ho ubereš"
+          ><span id="dl-skore-nase">${skore.nase}</span></button
+        ><span class="skore-dvojtecka">:</span
+        ><button class="skore-pul minus" onclick="v2Bod('oni')"
+            oncontextmenu="event.preventDefault();v2BodZpet('oni');return false"
+            title="Klepnutím přidáš bod soupeře, pravým tlačítkem nebo dlouhým stiskem ho ubereš"
+          ><span id="dl-skore-jejich">${skore.jejich}</span></button>
+      </span>
+      <button class="dlazdice-uprava" onclick="v2UpravSkore()"
+        title="Ruční oprava obou stran najednou">upravit</button>
+    </div>
     ${ZONY_LIBERO.map(liberoKarta).join('')}
   </div>`;
 
@@ -1538,6 +1561,20 @@ function v2NominujLibero(zapasId){
 
 // Skóre se jinak skládá z akcí. Když je potřeba ho srovnat mimo statistiku
 // hráček, jde to přes chybu a bod soupeře — tedy tam, kam to patří.
+/* Bod klepnutím na stav (#84). Na hřišti je skóre to, na co se člověk během
+   rozehry stejně dívá — tak ať se z něj rovnou zapisuje: naše číslo je bod
+   z chyby soupeře, jejich číslo bod soupeře. Modal s +/− zůstává pro opravy,
+   kde je potřeba vidět obě hodnoty naráz. */
+function v2Bod(kdo){
+  const zapasId=state.liveZapasId;if(!zapasId)return;
+  bumpSouper(zapasId,kdo==='my'?'pocet':'body',1);
+}
+
+function v2BodZpet(kdo){
+  const zapasId=state.liveZapasId;if(!zapasId)return;
+  bumpSouper(zapasId,kdo==='my'?'pocet':'body',-1);
+}
+
 function v2UpravSkore(){
   const zapasId=state.liveZapasId;
   const set=state.liveSet;

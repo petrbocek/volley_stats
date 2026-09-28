@@ -436,11 +436,22 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 button.hriste-dlazdice{cursor:pointer}
 button.hriste-dlazdice:active{background:var(--surface)}
 button.hriste-dlazdice:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.dlazdice-hodnota{font-family:'Oswald',sans-serif;font-size:22px;font-weight:700;line-height:1}
+.dlazdice-hodnota{display:flex;align-items:center;justify-content:center;
+  font-family:'Oswald',sans-serif;font-size:22px;font-weight:700;line-height:1}
+/* Obě čísla ve stavu jsou tlačítka — naše přičte bod z chyby soupeře, jejich
+   bod soupeře. Vypadat mají pořád jako číslo, ne jako tlačítko (#84). */
+.skore-pul{font-family:inherit;font-size:inherit;font-weight:inherit;line-height:1;
+  background:none;border:none;border-radius:8px;cursor:pointer;padding:4px 8px;
+  min-width:40px;min-height:40px;color:inherit}
+.skore-pul:active{background:var(--surface)}
+.skore-pul:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.skore-dvojtecka{color:var(--muted)}
 .hriste-dlazdice.dl-sety .dlazdice-hodnota{color:var(--accent2)}
 .hriste-dlazdice.dl-skore .dlazdice-hodnota .plus{color:var(--green)}
 .hriste-dlazdice.dl-skore .dlazdice-hodnota .minus{color:var(--red)}
-.dlazdice-uprava{font-size:9px;color:var(--accent);text-transform:uppercase;letter-spacing:.5px}
+.dlazdice-uprava{font-family:inherit;font-size:9px;color:var(--accent);background:none;
+  border:none;cursor:pointer;text-transform:uppercase;letter-spacing:.5px;padding:2px 6px}
+.dlazdice-uprava:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 /* Libero je mimo hřiště, tak nese modrou proti oranžové šestce (#84). */
 .hriste-zona.libero{border-style:solid;border-color:var(--accent2);background:rgba(77,171,247,.12)}
 .hriste-zona.libero.prazdna{border-style:dashed;border-color:rgba(77,171,247,.45);
