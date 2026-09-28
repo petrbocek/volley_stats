@@ -1762,12 +1762,21 @@ function prubehHtml(zapasId,set){
    ze sytých zelených naopak povedený příjem (#84). */
 function prubehStavu(zapasId,set){
   let my=0,oni=0;
-  return prubehSetu(zapasId,set).vymeny.map(v=>{
+  return prubehSetu(zapasId,set).vymeny.map((v,i)=>{
     if(v.bod==='my')my++;else oni++;
     // break = bod získaný při podání toho druhého; bez známého prvního podání
     // se to nepozná, tak se nic nehádá
-    return {bod:v.bod,my,oni,break:!!v.podaval&&v.podaval!==v.bod};
+    return {poradi:i+1,bod:v.bod,my,oni,break:!!v.podaval&&v.podaval!==v.bod,
+            podaval:v.podaval||null,pole:v.pole,hrac_id:v.hrac_id||null};
   });
+}
+
+// Čím výměna skončila: akce a kdo ji udělal, nebo že to byla soupeřova strana.
+function popisVymeny(krok){
+  const sp=SOUPER_POLE.find(x=>(x.pole==='pocet'?'souper_chyba':'souper_bod')===krok.pole);
+  if(sp)return {kdo:'Soupeř',akce:sp.label};
+  const h=state.hraci.find(x=>x.id===krok.hrac_id);
+  return {kdo:h?h.jmeno+(h.cislo?` #${h.cislo}`:''):'—',akce:popisAkce(krok.pole)};
 }
 
 function prubehStavuHtml(zapasId,set){
@@ -1777,11 +1786,51 @@ function prubehStavuHtml(zapasId,set){
   const naseZPodani=kroky.filter(k=>k.bod==='my'&&!k.break).length;
   return `<div class="hriste-info-radek">
     <span class="hriste-info-nazev" title="Sytě = zisk podání, bledě = bod při vlastním podání">Průběh</span>
-    <span class="prubeh-pas">${kroky.map(k=>
+    <button class="prubeh-pas" onclick="v2OtevriPrubeh(${zapasId})"
+        title="Klepnutím rozbalíš celý průběh po výměnách">${kroky.map(k=>
       `<span class="prubeh-tik ${k.bod}${k.break?' break':''}"
-        title="${k.my}:${k.oni} — ${k.bod==='my'?'náš bod':'bod soupeře'}${k.break?' (zisk podání)':''}"></span>`).join('')}</span>
+        title="${k.my}:${k.oni} — ${k.bod==='my'?'náš bod':'bod soupeře'}${k.break?' (zisk podání)':''}"></span>`).join('')}</button>
     <span class="info-proc" title="Naše body: ze side-outu a při vlastním podání">${naseBreaky} + ${naseZPodani}</span>
   </div>`;
+}
+
+/* Celý průběh pod sebou: co výměna, to řádek se stavem, akcí a hráčkou.
+   Pás nad hřištěm ukazuje tvar setu, tohle je k dohledání konkrétní pasáže —
+   „těch pět bodů v řadě, co to bylo?" (#84). */
+function v2OtevriPrubeh(zapasId){
+  const set=state.liveSet;
+  const kroky=prubehStavu(zapasId,set);
+  const s=skoreSetu(zapasId,set);
+  document.getElementById('v2-prubeh-title').textContent=
+    `${set}. set — průběh ${s.nase}:${s.jejich}`;
+  // Skóre stojí na počítadlech, průběh na logu výměn. Když se rozejdou,
+  // je to poznat hned tady — jinak by seznam tiše končil na jiném čísle,
+  // než co je v dlaždici.
+  const posledni=kroky.length?{my:kroky.at(-1).my,jejich:kroky.at(-1).oni}:null;
+  const nesedi=posledni&&(posledni.my!==s.nase||posledni.jejich!==s.jejich);
+  const el=document.getElementById('v2-prubeh-obsah');
+  if(!kroky.length){
+    el.innerHTML='<div class="empty" style="padding:20px"><span class="empty-icon">📋</span><div class="empty-text">V tomhle setu zatím není žádná výměna</div></div>';
+  }else{
+    // nejnovější nahoře: během zápasu se kouká na to, co se právě stalo
+    el.innerHTML=`<div class="prubeh-seznam">${[...kroky].reverse().map(k=>{
+      const p=popisVymeny(k);
+      return `<div class="prubeh-radek ${k.bod}">
+        <span class="prubeh-poradi">${k.poradi}.</span>
+        <span class="prubeh-skore"><b class="${k.bod==='my'?'plus':'minus'}">${k.my}</b>:<b class="${k.bod==='my'?'minus':'plus'}">${k.oni}</b></span>
+        <span class="prubeh-akce">${esc(p.akce)}</span>
+        <span class="prubeh-kdo">${esc(p.kdo)}</span>
+        ${k.break?'<span class="prubeh-break" title="Zisk podání">⇄</span>'
+                 :'<span class="prubeh-break prazdny"></span>'}
+      </div>`;
+    }).join('')}</div>
+    ${nesedi?`<div class="skore-nesedi" title="Skóre se skládá z počítadel, průběh z logu výměn">
+      ⚠ Z akcí vychází ${s.nase}:${s.jejich}, z výměn ${posledni.my}:${posledni.jejich} —
+      v logu část bodů chybí (zápis z druhého zařízení, výpadek sítě).
+    </div>`:''}
+    <div class="profil-legenda">⇄ = zisk podání (break). Pořadí je od poslední výměny.</div>`;
+  }
+  openModal('modal-v2-prubeh');
 }
 
 function hristeInfoHtml(zapasId){
