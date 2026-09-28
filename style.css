@@ -648,3 +648,9 @@ button.hriste-dlazdice:focus-visible{outline:2px solid var(--accent);outline-off
   .divak-skore-cisla{font-size:64px}
   .divak-soupet{font-size:22px}
 }
+
+/* Když se nehraje: stránka to řekne, místo aby ukazovala prázdno (#102). */
+.divak-nehraje{padding:48px 16px;text-align:center}
+.divak-nehraje-ikona{font-size:40px;line-height:1.4}
+.divak-nehraje-text{font-size:18px;font-weight:700;margin-top:8px}
+.divak-nehraje-popis{font-size:13px;color:var(--muted);margin-top:4px}
