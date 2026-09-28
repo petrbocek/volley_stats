@@ -382,6 +382,10 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
   align-items:center;justify-content:center}
 .hriste-sit span{font-size:10px;text-transform:uppercase;letter-spacing:2px;color:var(--muted);
   writing-mode:vertical-rl}
+/* Stavy, ve kterých padly time-outy (#84). */
+.info-oddechovy-stavy{font-family:'Oswald',sans-serif;font-size:11px;color:var(--muted);
+  margin-left:4px}
+
 /* Post odvozený z místa v šestce, ne z profilu hráčky (#84). */
 .hriste-post{display:inline-block;margin-left:2px;padding:0 4px;border-radius:4px;
   background:var(--surface);color:var(--accent2);font-weight:700}
