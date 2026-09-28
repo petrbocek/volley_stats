@@ -850,6 +850,29 @@ function v2PrepniLibero(){
   prepniLibero(zapasId,hracId);
 }
 
+function v2PrepniNahravacku(){
+  const zapasId=parseInt(document.getElementById('v2-akce-zapas').value);
+  const hracId=parseInt(document.getElementById('v2-akce-hrac').value);
+  closeModal('modal-v2-akce');
+  oznacNahravacku(zapasId,state.liveSet,hracId);
+}
+
+// Označení platí pro set: mezi sety se sestava mění. Opakované klepnutí
+// označení zruší, ať se dá překliknutí spravit stejnou cestou.
+async function oznacNahravacku(zapasId,set,hracId){
+  if(!isLoggedIn()){toast('Na změny se přihlas (🔒 nahoře)','error');return;}
+  const info=setInfo(zapasId,set);
+  const nova=info.nahravacka_hrac_id===hracId?null:hracId;
+  const i=state.setInfo.findIndex(x=>x.zapas_id===zapasId&&(x.set_cislo||1)===set);
+  const novy={...info,nahravacka_hrac_id:nova};
+  if(i>=0)state.setInfo[i]=novy;else state.setInfo.push(novy);
+  prekresliLive(zapasId);
+  try{
+    await apiUpsert('vb_set_info',
+      {zapas_id:zapasId,set_cislo:set,nahravacka_hrac_id:nova},'zapas_id,set_cislo');
+  }catch(e){toast('Chyba: '+e.message,'error');}
+}
+
 // Kdo je v sestavě, ale zrovna nestojí na hřišti. Libera se do zón nedávají,
 // takže na lavičce nefigurují.
 function lavicka(zapasId,set){
@@ -1158,14 +1181,45 @@ function v2OtevriZonu(zapasId,zona){
   else v2OtevriObsazeni(zapasId,zona);
 }
 
+/* ─── POSTY ZE ŠESTKY ───
+   Post se nedá brát z nastavení hráčky: jedna holka hraje podle potřeby
+   smečařku i univerzálku. Postavení je ale dané — po zónách jde proti směru
+   hodin N-S-B-U-S-B — takže stačí označit nahrávačku a zbytek postů z toho
+   plyne sám, a veze se to s rotací, aniž by se do toho muselo sahat (#84).
+
+   Zóny jdou proti směru hodin 1→2→3→4→5→6, tedy stejně jako pořadí podání. */
+const POSTY_ZON=['nahrávač','smečař','blokař','universál','smečař','blokař'];
+const POST_ZKRATKA={'nahrávač':'N','smečař':'S','blokař':'B','universál':'U','libero':'L'};
+
+function nahravackaSetu(zapasId,set){
+  return setInfo(zapasId,set).nahravacka_hrac_id||null;
+}
+
+// Post podle zóny vůči nahrávačce. Bez označené nahrávačky se nehádá.
+function postVZone(zapasId,set,zona){
+  const nid=nahravackaSetu(zapasId,set);
+  if(!nid||zona<1||zona>6)return null;
+  const m=postaveniSetu(zapasId,set);
+  const zonaN=[...m.entries()].find(([,id])=>id===nid)?.[0];
+  if(!zonaN)return null;                    // nahrávačka zrovna není na hřišti
+  return POSTY_ZON[(zona-zonaN+6)%6];
+}
+
+function postHracky(zapasId,set,hracId){
+  if(jeLibero(zapasId,hracId))return 'libero';
+  const zona=[...postaveniSetu(zapasId,set).entries()].find(([,id])=>id===hracId)?.[0];
+  return zona?postVZone(zapasId,set,zona):null;
+}
+
 /* ─── DLAŽDICE U SÍTĚ ───
    Příjem, útok a pole se dají zapsat i opačným pořadím: nejdřív akce, pak
    kdo ji udělal. Nabídne se jen ten, koho to na place potkává — u příjmu
    smečařky a libera, u útoku všichni kromě liber a nahrávaček, u pole
    všichni kromě blokařek (#84).
 
-   Vede se to jako výjimky, ne jako výčet: hráčka s nevyplněnou pozicí tak
-   z nabídky nezmizí úplně. */
+   Vede se to jako výjimky, ne jako výčet: dokud není označená nahrávačka,
+   posty se neznají a nabídne se celá šestka i s libery — schovat půlku
+   sestavy kvůli tomu, že něco chybí, by bylo horší než nabídnout všechny. */
 const DLAZDICE_SITE=[
   {key:'prijem',krome:['blokař','nahrávač','universál']},
   {key:'utok',  krome:['libero','nahrávač']},
@@ -1174,26 +1228,50 @@ const DLAZDICE_SITE=[
 
 function dlazdiceSite(key){return DLAZDICE_SITE.find(d=>d.key===key);}
 
+// Na place může zahrát jen šestka na hřišti a nominovaná libera — lavička
+// se do nabídky nemíchá, na balon nedosáhne.
+function hraciNaPlace(zapasId,set){
+  const m=postaveniSetu(zapasId,set);
+  const ids=[...m.values()];
+  const sid=currentSeasonId()||state.zapasy.find(z=>z.id===zapasId)?.sezona_id||0;
+  const vsichni=serazenaSestava(zapasId,hraciVSezoně(sid));
+  return vsichni.filter(h=>ids.includes(h.id)||jeLibero(zapasId,h.id));
+}
+
 function hraciProAkci(zapasId,key){
   const d=dlazdiceSite(key);
-  const sid=currentSeasonId()||state.zapasy.find(z=>z.id===zapasId)?.sezona_id||0;
-  return serazenaSestava(zapasId,hraciVSezoně(sid))
-    .filter(h=>!d||!d.krome.includes((h.pozice||'').toLowerCase()));
+  const set=state.liveSet;
+  const naPlace=hraciNaPlace(zapasId,set);
+  if(!nahravackaSetu(zapasId,set))return naPlace;      // posty se zatím neznají
+  return naPlace.filter(h=>{
+    const post=postHracky(zapasId,set,h.id);
+    return !post||!d||!d.krome.includes(post);
+  });
 }
 
 function v2OtevriDlazdici(zapasId,key){
   const a=ACTIONS.find(x=>x.key===key);if(!a)return;
+  const set=state.liveSet;
   const hraci=hraciProAkci(zapasId,key);
   document.getElementById('v2-kdo-zapas').value=zapasId;
   document.getElementById('v2-kdo-akce').value=key;
   document.getElementById('v2-kdo-title').textContent=`${a.icon} ${a.label} — kdo?`;
+  // Bez nahrávačky se posty neznají, tak ať je jasné, proč je v nabídce celá
+  // šestka a čím to spravit.
+  const napoveda=nahravackaSetu(zapasId,set)?''
+    :`<div class="v2-kdo-napoveda">Posty se odvozují od nahrávačky — označ ji
+       v panelu hráčky (🏐 Nahrávačka) a nabídka se zúží.</div>`;
   const el=document.getElementById('v2-kdo-obsah');
-  el.innerHTML=hraci.length
-    ? hraci.map(h=>playerCard(h,{
-        atributy:`style="cursor:pointer" onclick="v2VyberProAkci(${h.id})"`,
-        ovladani:`<span style="color:${a.color};font-size:14px;font-weight:700">${a.icon}</span>`
-      })).join('')
-    : '<div class="empty" style="padding:20px"><span class="empty-icon">👥</span><div class="empty-text">Nikdo na tuhle akci</div><div>Zkontroluj pozice hráček v sestavě</div></div>';
+  el.innerHTML=napoveda+(hraci.length
+    ? hraci.map(h=>{
+        const post=postHracky(zapasId,set,h.id);
+        return playerCard(h,{
+          atributy:`style="cursor:pointer" onclick="v2VyberProAkci(${h.id})"`,
+          ovladani:`<span style="color:${a.color};font-size:14px;font-weight:700">${
+            post?POST_ZKRATKA[post]||'':a.icon}</span>`
+        });
+      }).join('')
+    : '<div class="empty" style="padding:20px"><span class="empty-icon">👥</span><div class="empty-text">Nikdo na tuhle akci</div><div>Postav šestku na hřiště a označ nahrávačku</div></div>');
   openModal('modal-v2-kdo');
 }
 
@@ -1275,8 +1353,11 @@ function hristeHtml(zapasId){
     if(!h)return `<button class="hriste-zona prazdna${zona===1?' podava':''}" onclick="v2OtevriZonu(${zapasId},${zona})"
       title="Obsadit zónu ${zona}"><span class="hriste-cislo-zony">${zona}${zona===1?' • podání':''}</span>
       <span class="hriste-prazdno">+</span></button>`;
+    // Post se nebere z profilu hráčky, ale z místa v šestce vůči nahrávačce.
+    const post=postVZone(zapasId,set,zona);
     return `<button class="hriste-zona${zona===1?' podava':''}" onclick="v2OtevriZonu(${zapasId},${zona})">
-      <span class="hriste-cislo-zony">${zona}${zona===1?' • podání':''}</span>
+      <span class="hriste-cislo-zony">${zona}${zona===1?' • podání':''}${
+        post?` <span class="hriste-post" title="${post}">${POST_ZKRATKA[post]}</span>`:''}</span>
       <span class="hriste-jmeno">${esc(h.jmeno)}</span>
       <span class="hriste-dres">${h.cislo?'#'+h.cislo:''}</span>
       ${cisla(h)}
@@ -1833,6 +1914,12 @@ function v2OtevriAkce(zapasId,hracId,zona=0,jenAkce=''){
   document.getElementById('btn-v2-podava').style.display=zona&&zona!==1?'':'none';
   const btnLib=document.getElementById('btn-v2-libero');
   btnLib.textContent=jeLibero(zapasId,hracId)?'🎽 Zrušit libero':'🎽 Libero';
+  const btnNah=document.getElementById('btn-v2-nahravacka');
+  // Nahrávačku má smysl označit jen u hráčky na hřišti — od její zóny se
+  // posty odvozují.
+  btnNah.style.display=zona?'':'none';
+  btnNah.textContent=nahravackaSetu(zapasId,state.liveSet)===hracId
+    ?'🏐 Není nahrávačka':'🏐 Nahrávačka';
   document.getElementById('v2-akce-title').textContent=
     `${h.jmeno}${h.cislo?' · #'+h.cislo:''} — ${state.liveSet}. set`;
   document.getElementById('v2-akce-obsah').innerHTML=ACTIONS
