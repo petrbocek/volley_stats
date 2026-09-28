@@ -533,25 +533,32 @@ pass &= ok('T14c název souboru nese sezónu a datum (#34)',
   /^statistiky_.*_\d{4}-\d{2}-\d{2}\.csv$/.test(soubor.suggestedFilename()));
 
 const csv = parseCsv(syrove.replace(/^﻿/, ''));
-pass &= ok('T14d hlavička sedí a má 15 sloupců (#34)',
-  csv[0].length === 15 && csv[0][0] === 'Poř.' && csv[0][1] === 'Hráčka' && csv[0][4] === 'Servis Es');
+// počet sloupců se bere z hlavičky appky, ať přidaná akce znamená zápis
+// navíc, ne přepisování čísel v testu
+const sloupcuCsv = await page.evaluate(() => CSV_HLAVICKA.length);
+const posledni = sloupcuCsv - 1;
+pass &= ok('T14d hlavička sedí a má všechny sloupce (#34)',
+  sloupcuCsv >= 15 && csv[0].length === sloupcuCsv &&
+  csv[0][0] === 'Poř.' && csv[0][1] === 'Hráčka' && csv[0][4] === 'Servis Es' &&
+  csv[0][posledni] === 'Celkem');
 
 const csvDelta = csv.find(r => r[1] === JMENO_SE_STREDNIKEM);
 pass &= ok('T14e jméno se středníkem a uvozovkami zůstane jedna buňka (#34)',
-  !!csvDelta && csvDelta.length === 15);
+  !!csvDelta && csvDelta.length === sloupcuCsv);
 
 const tab = await page.$$eval('.stats-table tbody tr', trs =>
   trs.map(tr => [...tr.children].map(td => td.textContent.trim())));
 const tabDelta = tab.find(r => r[1].includes('Delta'));
 pass &= ok('T14f čísla v CSV sedí na tabulku (#34)',
-  csvDelta[4] === tabDelta[3] && csvDelta[9] === tabDelta[8] && csvDelta[14] === tabDelta[13]);
+  csvDelta[4] === tabDelta[3] && csvDelta[9] === tabDelta[8] &&
+  csvDelta[posledni] === tabDelta[tabDelta.length - 1]);
 pass &= ok('T14g procenta jsou číslo bez %, ať se v Excelu počítá (#34)',
   csvDelta[11] === '60' && tabDelta[10] === '60%');
 
 const csvSoucet = csv[csv.length - 1];
 const tabSoucet = await page.$$eval('.stats-table tfoot td', tds => tds.map(td => td.textContent.trim()));
 pass &= ok('T14h poslední řádek je součet a sedí na patičku tabulky (#34)',
-  csvSoucet[1] === 'Σ Celkem' && csvSoucet[14] === tabSoucet[tabSoucet.length - 1]);
+  csvSoucet[1] === 'Σ Celkem' && csvSoucet[posledni] === tabSoucet[tabSoucet.length - 1]);
 
 // ── #32: statistiky po setech ──────────────────────────────────────────────
 await page.selectOption('#season-select', '1');
@@ -1440,7 +1447,12 @@ const dlazdice = await page.evaluate(() => {
   return { pocet: document.querySelectorAll('#modal-v2-akce .v2-dlazdice').length,
            sirka: Math.round(d.width), vyska: Math.round(d.height) };
 });
-pass &= ok('T32e dlaždice pokrývají všechny akce mřížky (#76)', dlazdice.pocet === 11);
+// počet se odvozuje z ACTIONS, ať nová akce znamená jen zápis navíc, ne
+// přepisování čísla v testu
+const variantCelkem = await page.evaluate(() =>
+  ACTIONS.reduce((n, a) => n + (a.varianty ? a.varianty.length : VARIANTS.length), 0));
+pass &= ok('T32e dlaždice pokrývají všechny akce mřížky (#76)',
+  variantCelkem >= 11 && dlazdice.pocet === variantCelkem);
 pass &= ok('T32f dlaždice je násobně větší cíl než buňka v mřížce (#76)',
   dlazdice.sirka >= 44 && dlazdice.vyska >= 44);
 // na nízké obrazovce se panel musí dát doscrollovat, ne uříznout
@@ -1507,12 +1519,14 @@ pass &= ok('T32n přepnutí setu ve V2 přepne i starou mřížku (#76)',
 await page.click('#live2-wrap .set-prepinac button:nth-of-type(1)');
 await page.waitForTimeout(300);
 pass &= ok('T32o V2 ukazuje týmový souhrn (#76)',
-  (await page.$$eval('#live2-wrap .v2-chip', els => els.length)) === 5);
+  (await page.$$eval('#live2-wrap .v2-chip', els => els.length)) ===
+  await page.evaluate(() => ACTIONS.length));
 // tři holá čísla vedle sebe neřeknou, které je které — barva to sama neunese
 pass &= ok('T32o2 každé číslo v souhrnu si nese svůj symbol, ne jen barvu (#76)',
   await page.evaluate(() => {
     const cisla = [...document.querySelectorAll('#live2-wrap .v2-chip-num')];
-    return cisla.length === 11 && cisla.every(el => {
+    const celkem = ACTIONS.reduce((n, a) => n + (a.varianty ? a.varianty.length : VARIANTS.length), 0);
+    return cisla.length === celkem && cisla.every(el => {
       const sym = el.querySelector('.v2-chip-sym');
       return sym && ['+', '/', '−'].includes(sym.textContent.trim());
     });
@@ -3644,6 +3658,112 @@ await page.evaluate(() => {
   state.liveSet = 1;
   renderLive2(100);
 });
+await page.waitForTimeout(200);
+
+
+// ── #84 část 16: dlaždice za sítí a nová akce Pole ────────────────────────
+// Zápis opačným pořadím: nejdřív akce, pak kdo ji udělal. Nabídne se jen ten,
+// koho to na place potkává.
+await page.click('.nav-tab:nth-child(6)');
+await page.waitForSelector('#live2-wrap');
+await page.evaluate(() => { if (!v2Hriste) v2PrepniHriste(); });
+await page.waitForSelector('.hriste-info');
+await page.evaluate(() => {
+  state.liveSet = 2;
+  state.zapasy.find(z => z.id === 100).stav = 'probiha';
+  // jedna od každé pozice, ať jde filtr změřit
+  const pozice = { 10: 'smečař', 11: 'blokař', 12: 'libero', 13: 'nahrávač', 14: 'universál' };
+  Object.entries(pozice).forEach(([id, p]) => {
+    const h = state.hraci.find(x => x.id === +id);
+    if (h) h.pozice = p;
+  });
+  renderLive2(100);
+});
+await page.waitForTimeout(400);
+
+const vNabidce = () => page.$$eval('#v2-kdo-obsah .player-name', els => els.map(e => e.textContent.trim()));
+const jmenoHracky = id => page.evaluate(i => state.hraci.find(h => h.id === i).jmeno, id);
+const [sm, bl, lib, nah, uni] = await Promise.all([10, 11, 12, 13, 14].map(jmenoHracky));
+
+pass &= ok('T53a za sítí jsou tři dlaždice: příjem, útok, pole (#84)',
+  JSON.stringify(await page.$$eval('.hriste-akce .hriste-akce-nazev',
+    els => els.map(e => e.textContent.trim()))) ===
+  JSON.stringify(['Příjem', 'Útok', 'Pole']));
+pass &= ok('T53b dlaždice stojí za sítí, ne v hřišti (#84)', await page.evaluate(() => {
+  const akce = document.querySelector('.hriste-akce').getBoundingClientRect();
+  const sit = document.querySelector('.hriste-sit').getBoundingClientRect();
+  return akce.left >= sit.right - 1;
+}));
+
+await page.click('.hriste-akce .hriste-akce-dlazdice:nth-of-type(1)');
+await page.waitForSelector('#modal-v2-kdo:not(.hidden)');
+const proPrijem = await vNabidce();
+pass &= ok('T53c na příjem se nabídnou jen smečařky a libera (#84)',
+  proPrijem.includes(sm) && proPrijem.includes(lib) &&
+  !proPrijem.includes(bl) && !proPrijem.includes(nah) && !proPrijem.includes(uni));
+await page.click('#modal-v2-kdo .modal-footer .btn-secondary');
+await page.waitForTimeout(300);
+
+await page.click('.hriste-akce .hriste-akce-dlazdice:nth-of-type(2)');
+await page.waitForSelector('#modal-v2-kdo:not(.hidden)');
+const proUtok = await vNabidce();
+pass &= ok('T53d na útok všichni kromě liber a nahrávaček (#84)',
+  proUtok.includes(sm) && proUtok.includes(bl) && proUtok.includes(uni) &&
+  !proUtok.includes(lib) && !proUtok.includes(nah));
+
+// vybraná hráčka → panel jen s tou akcí, ne celá nabídka
+await page.click('#v2-kdo-obsah .player-card');
+await page.waitForSelector('#modal-v2-akce:not(.hidden)');
+pass &= ok('T53e po výběru hráčky se ukáže jen ta akce, ne celý panel (#84)',
+  await page.$$eval('#modal-v2-akce .v2-akce-radek', els => els.length) === 1 &&
+  /Útok/.test(await page.textContent('#modal-v2-akce .v2-akce-nazev')));
+const predUtokem53 = await page.evaluate(() => getStatVal(100, 10, 'utok_plus', 2));
+await page.click('#modal-v2-akce .v2-dlazdice.plus');
+await page.waitForTimeout(600);
+pass &= ok('T53f zápis z dlaždice jde do statistiky té hráčky (#84)',
+  await page.evaluate(() => getStatVal(100, 10, 'utok_plus', 2)) === predUtokem53 + 1);
+
+// pole: jen počet, zapíše se rovnou a skóre nechá být
+await page.click('.hriste-akce .hriste-akce-dlazdice:nth-of-type(3)');
+await page.waitForSelector('#modal-v2-kdo:not(.hidden)');
+const proPole = await vNabidce();
+pass &= ok('T53g na pole všichni kromě blokařek (#84)',
+  proPole.includes(sm) && proPole.includes(lib) && proPole.includes(nah) &&
+  proPole.includes(uni) && !proPole.includes(bl));
+
+const predPolem = await page.evaluate(() => ({
+  pole: getStatVal(100, 10, 'pole_neutral', 2), skore: skoreSetu(100, 2),
+  vymen: prubehSetu(100, 2).vymeny.length }));
+rpcCalls = [];
+await page.click('#v2-kdo-obsah .player-card');
+await page.waitForTimeout(700);
+pass &= ok('T53h pole se zapíše rovnou, bez ptaní na variantu (#84)',
+  await page.isVisible('#modal-v2-akce') === false &&
+  await page.evaluate(() => getStatVal(100, 10, 'pole_neutral', 2)) === predPolem.pole + 1);
+pass &= ok('T53i posílá se jako každá jiná akce, přes RPC s přírůstkem (#84)',
+  rpcCalls.some(z => z.some(x => x.pole === 'pole_neutral' && x.delta === 1 && x.set_cislo === 2)));
+pass &= ok('T53j pole je pokus, skóre ani výměnu nezmění (#84)',
+  JSON.stringify(await page.evaluate(() => skoreSetu(100, 2))) === JSON.stringify(predPolem.skore) &&
+  await page.evaluate(() => prubehSetu(100, 2).vymeny.length) === predPolem.vymen);
+pass &= ok('T53k a nepočítá se ani mezi výborné, ani mezi chyby (#84)',
+  await page.evaluate(() => !V2_VYBORNE.includes('pole_neutral') &&
+    !V2_CHYBY.includes('pole_neutral') &&
+    !SKORE_NASE.includes('pole_neutral') && !SKORE_JEJICH.includes('pole_neutral')));
+
+// zpět ho vezme jako každou jinou akci
+await page.click('#btn-undo-v2');
+await page.waitForTimeout(600);
+pass &= ok('T53l zpět vezme pole taky (#84)',
+  await page.evaluate(() => getStatVal(100, 10, 'pole_neutral', 2)) === predPolem.pole);
+
+// a je vidět ve statistikách
+await page.click('.nav-tab:nth-child(7)');
+await page.waitForTimeout(500);
+pass &= ok('T53m ve statistikách má Pole svůj sloupec (#84)',
+  /Pole/.test(await page.textContent('.stats-table thead')));
+await page.click('.nav-tab:nth-child(6)');
+await page.waitForTimeout(300);
+await page.evaluate(() => { state.liveSet = 1; renderLive2(100); });
 await page.waitForTimeout(200);
 
 await b.close();
