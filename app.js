@@ -712,8 +712,13 @@ function bumpSouper(zapasId,pole,delta=1,opts={}){
   souperDebounce[k]=setTimeout(()=>flushSouper(k),STAT_FLUSH_MS);
   prekresliSouper();
   const poleLogu=pole==='pocet'?'souper_chyba':'souper_bod';
-  if(delta>0)zalogujUdalost(zapasId,set,null,poleLogu);
-  else odlogujUdalost(zapasId,set,null,poleLogu);
+  if(delta>0){
+    zalogujUdalost(zapasId,set,null,poleLogu);
+    rotacePoBodu(zapasId,set,opts);
+  }else{
+    rotaceZpetPredOdebranim(zapasId,set,poleLogu,null,opts);
+    odlogujUdalost(zapasId,set,null,poleLogu);
+  }
   zkontrolujKonecSetu(zapasId,set);
   if(!opts.bezUndo){
     if(delta>0){
@@ -1055,17 +1060,57 @@ function poRotaci(zona,kroku){
 
 // Vrací true, když se postavení opravdu změnilo. Zápis do DB běží na pozadí,
 // stav se mění hned — během rozehry se nedá čekat na server.
-function otocNaPodavajici(zapasId,set,hracId){
+function rotujOKroku(zapasId,set,kroku){
   const m=postaveniSetu(zapasId,set);
-  const zona=[...m.entries()].find(([,id])=>id===hracId)?.[0];
-  if(!zona)return false;                  // hráčka není na hřišti (třeba libero)
-  const kroku=(zona-1)%6;
-  if(!kroku)return false;                 // už v jedničce, není co otáčet
-  const nove=[...m.entries()].map(([z,id])=>({zapas_id:zapasId,set_cislo:set,zona:poRotaci(z,kroku),hrac_id:id}));
+  if(!m.size||!kroku)return false;
+  const nove=[...m.entries()].map(([z,id])=>
+    ({zapas_id:zapasId,set_cislo:set,zona:poRotaci(z,kroku),hrac_id:id}));
   state.postaveni=state.postaveni.filter(p=>!(p.zapas_id===zapasId&&(p.set_cislo||1)===set));
   state.postaveni.push(...nove);
   ulozPostaveni(zapasId,set);
   return true;
+}
+
+function otocNaPodavajici(zapasId,set,hracId){
+  const zona=[...postaveniSetu(zapasId,set).entries()].find(([,id])=>id===hracId)?.[0];
+  if(!zona)return false;                  // hráčka není na hřišti (třeba libero)
+  return rotujOKroku(zapasId,set,(zona-1)%6);
+}
+
+/* ─── ROTACE SAMA OD SEBE ───
+   Rotuje ten, kdo získal podání: vyhraná výměna při soupeřově podání posune
+   šestku o jednu zónu, bod při vlastním podání ne. Obojí je v logu výměn už
+   teď, takže rotace nestojí ani jeden klik navíc — jen se veze na bodu (#84).
+
+   Zapsaný servis zůstává jako oprava (v2TahlePodava „Tahle podává"): když
+   zapisovatel bod vynechá, šestka se srovná podle toho, kdo opravdu podává. */
+function ziskaliPodani(vymena){
+  if(!vymena||vymena.bod!=='my'||vymena.podaval!=='oni')return false;
+  // Eso při soupeřově podání je nesrovnalost v zápisu (podávat můžou jen jedni).
+  // Postavení srovná sám zapsaný servis, tak ať se k tomu nepřidá ještě rotace.
+  return !String(vymena.pole||'').startsWith('servis_');
+}
+
+function rotacePoBodu(zapasId,set,opts){
+  if(opts.bezUndo)return;            // lišta „zpět" vrací rotaci přes predRotaci
+  if(!ziskaliPodani(prubehSetu(zapasId,set).vymeny.at(-1)))return;
+  const pred=[...postaveniSetu(zapasId,set).entries()];
+  if(!rotujOKroku(zapasId,set,1))return;
+  const u=undoStack[undoStack.length-1];
+  if(u)u.predRotaci=pred;
+  // v seznamu se zóny nekreslí, tak není co překreslovat — a překreslení
+  // uprostřed stisku by rozbilo dlouhý stisk (#76)
+  if(v2Hriste)prekresliLive(zapasId);
+}
+
+// Ruční odečet bodu musí rotaci vrátit taky, jinak by šestka zůstala otočená
+// o jednu navíc. Čte se ještě před smazáním z logu — potom už není podle čeho.
+function rotaceZpetPredOdebranim(zapasId,set,pole,hracId,opts){
+  if(opts.bezUndo)return;
+  const v=prubehSetu(zapasId,set).vymeny.at(-1);
+  if(!ziskaliPodani(v)||v.pole!==pole||(v.hrac_id||null)!==(hracId||null))return;
+  rotujOKroku(zapasId,set,-1);
+  if(v2Hriste)prekresliLive(zapasId);
 }
 
 // Rotace padala na unikátním indexu (zápas, set, hráčka): upsert po řádcích
@@ -1950,8 +1995,13 @@ function bump(hracId,zapasId,field,delta=1,opts={}){
   prekresliV2Cisla();
   prekresliSkore();
   zaznamenejProZpet(hracId,zapasId,field,set,nova-puvodni,opts);
-  if(delta>0)zalogujUdalost(zapasId,set,hracId,field);
-  else odlogujUdalost(zapasId,set,hracId,field);
+  if(delta>0){
+    zalogujUdalost(zapasId,set,hracId,field);
+    rotacePoBodu(zapasId,set,opts);
+  }else{
+    rotaceZpetPredOdebranim(zapasId,set,field,hracId,opts);
+    odlogujUdalost(zapasId,set,hracId,field);
+  }
   zkontrolujKonecSetu(zapasId,set);
 
   // Zapsaný servis určuje postavení. Předchozí stav si schová záznam pro

@@ -3530,6 +3530,122 @@ await page.evaluate(() => {
 });
 await page.waitForTimeout(200);
 
+
+// ── #84 část 15: rotace sama od sebe ──────────────────────────────────────
+// Rotuje ten, kdo získal podání: vyhraná výměna při soupeřově podání posune
+// šestku o jednu zónu, bod při vlastním podání ne.
+await page.click('.nav-tab:nth-child(6)');
+await page.waitForSelector('#live2-wrap');
+await page.evaluate(() => { if (!v2Hriste) v2PrepniHriste(); });
+await page.waitForSelector('.hriste-info');
+
+const sestavaZon = () => page.evaluate(() =>
+  Object.fromEntries([...postaveniSetu(100, 5).entries()].map(([z, id]) => [z, id])));
+const pripravSet5 = podani => page.evaluate(p => {
+  state.liveSet = 5;
+  state.zapasy.find(z => z.id === 100).stav = 'probiha';
+  state.udalosti = state.udalosti.filter(u => !(u.zapas_id === 100 && (u.set_cislo || 1) === 5));
+  state.postaveni = state.postaveni.filter(x => !(x.zapas_id === 100 && (x.set_cislo || 1) === 5));
+  state.setInfo = state.setInfo.filter(x => !(x.zapas_id === 100 && (x.set_cislo || 1) === 5));
+  state.chybySouperu = state.chybySouperu.filter(c => c.zapas_id !== 100);
+  Object.keys(souperDirty).forEach(k => { if (k.startsWith('100_5')) delete souperDirty[k]; });
+  [10, 11, 12, 13, 14].forEach((id, i) => state.postaveni.push(
+    { zapas_id: 100, set_cislo: 5, zona: i + 1, hrac_id: id }));
+  if (p) state.setInfo.push({ zapas_id: 100, set_cislo: 5, prvni_podani: p,
+                              oddechove_casy: 0, stridani: 0 });
+  renderLive2(100);
+}, podani);
+
+await pripravSet5('oni');
+await page.waitForTimeout(400);
+const pred52 = await sestavaZon();
+pass &= ok('T52a0 šestka stojí a podává soupeř, jinak by se měřilo prázdno (#84)',
+  Object.keys(pred52).length === 5 &&
+  await page.evaluate(() => setInfo(100, 5).prvni_podani) === 'oni');
+
+postaveniRpc = [];
+await page.evaluate(() => bump(10, 100, 'utok_plus', 1));
+await page.waitForTimeout(700);
+pass &= ok('T52a vyhraná výměna při soupeřově podání otočí šestku o jednu (#84)',
+  await page.evaluate(p => {
+    const m = postaveniSetu(100, 5);
+    // 2→1, 3→2, …: hráčka ze zóny z stojí po rotaci v poRotaci(z,1)
+    return Object.entries(p).every(([z, id]) => m.get(poRotaci(+z, 1)) === id);
+  }, pred52));
+pass &= ok('T52b rotace se uloží jednou RPC, ne po řádcích (#84)',
+  postaveniRpc.length === 1 && !otherWrites.some(w => w.table === 'vb_postaveni'));
+pass &= ok('T52c podává ta, co přišla do jedničky (#84)', await page.evaluate(p => {
+  const podava = podavajici(100, 5).ted;
+  return !!podava && podava.id === p[2];         // dvojka jde po rotaci do jedničky
+}, pred52));
+
+// bod při vlastním podání nerotuje
+const poPrvni = await sestavaZon();
+await page.evaluate(() => bump(11, 100, 'utok_plus', 1));
+await page.waitForTimeout(700);
+pass &= ok('T52d bod při vlastním podání šestkou nehýbe (#84)',
+  JSON.stringify(await sestavaZon()) === JSON.stringify(poPrvni));
+
+// bod soupeře taky ne — rotují oni, ne my
+await page.evaluate(() => bump(12, 100, 'utok_minus', 1));
+await page.waitForTimeout(700);
+pass &= ok('T52e bod soupeře naší šestkou nehýbe (#84)',
+  JSON.stringify(await sestavaZon()) === JSON.stringify(poPrvni));
+
+// a další side-out zase otočí
+await page.evaluate(() => bump(13, 100, 'utok_plus', 1));
+await page.waitForTimeout(700);
+pass &= ok('T52f další zisk podání otočí znovu (#84)',
+  await page.evaluate(p => {
+    const m = postaveniSetu(100, 5);
+    return Object.entries(p).every(([z, id]) => m.get(poRotaci(+z, 1)) === id);
+  }, poPrvni));
+
+// lišta zpět vrátí bod i rotaci
+await page.click('#btn-undo-v2');
+await page.waitForTimeout(700);
+pass &= ok('T52g zpět vrátí bod i rotaci (#84)',
+  JSON.stringify(await sestavaZon()) === JSON.stringify(poPrvni));
+
+// ruční odečet taky
+await page.evaluate(() => bump(10, 100, 'utok_plus', 1));
+await page.waitForTimeout(700);
+const poSideOutu = await sestavaZon();
+await page.evaluate(() => bump(10, 100, 'utok_plus', -1));
+await page.waitForTimeout(700);
+pass &= ok('T52h ruční odečet bodu rotaci vrátí (#84)',
+  JSON.stringify(await sestavaZon()) === JSON.stringify(poPrvni) &&
+  JSON.stringify(poSideOutu) !== JSON.stringify(poPrvni));
+
+// bod naklepaný ze stavu rotuje stejně
+await pripravSet5('oni');
+await page.waitForTimeout(400);
+const predKlikem = await sestavaZon();
+await page.click('.dl-skore .skore-pul.plus');
+await page.waitForTimeout(700);
+pass &= ok('T52i bod ze stavu (chyba soupeře) rotuje taky (#84)',
+  await page.evaluate(p => {
+    const m = postaveniSetu(100, 5);
+    return Object.entries(p).every(([z, id]) => m.get(poRotaci(+z, 1)) === id);
+  }, predKlikem));
+
+// bez známého prvního podání se nehádá
+await pripravSet5(null);
+await page.waitForTimeout(400);
+const bezPodani = await sestavaZon();
+await page.evaluate(() => bump(10, 100, 'utok_plus', 1));
+await page.waitForTimeout(700);
+pass &= ok('T52j bez zadaného prvního podání se nerotuje (#84)',
+  JSON.stringify(await sestavaZon()) === JSON.stringify(bezPodani));
+
+await page.evaluate(() => {
+  state.udalosti = state.udalosti.filter(u => !(u.zapas_id === 100 && (u.set_cislo || 1) === 5));
+  state.postaveni = state.postaveni.filter(x => !(x.zapas_id === 100 && (x.set_cislo || 1) === 5));
+  state.liveSet = 1;
+  renderLive2(100);
+});
+await page.waitForTimeout(200);
+
 await b.close();
 console.log(pass ? '\nVŠE PROŠLO' : '\nNĚCO SELHALO');
 process.exit(pass ? 0 : 1);
