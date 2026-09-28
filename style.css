@@ -385,12 +385,29 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 /* Průběh stavu po výměnách (#84). Sytě = zisk podání, bledě = bod při
    vlastním podání. Pás se scrolluje, aby dlouhý set nerozbil řádek. */
 .prubeh-pas{display:flex;gap:2px;align-items:flex-end;overflow-x:auto;
-  max-width:100%;padding:2px 0;flex:1 1 120px;min-width:0}
+  max-width:100%;padding:2px 0;flex:1 1 120px;min-width:0;
+  background:none;border:none;cursor:pointer}
+.prubeh-pas:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .prubeh-tik{flex:0 0 auto;width:5px;height:14px;border-radius:2px;
   background:rgba(81,207,102,.35)}
 .prubeh-tik.oni{background:rgba(255,107,107,.35)}
 .prubeh-tik.my.break{background:var(--green)}
 .prubeh-tik.oni.break{background:var(--red)}
+
+/* Průběh setu pod sebou: co výměna, to řádek (#84). */
+.prubeh-seznam{max-height:60vh;overflow-y:auto;border:1px solid var(--border);border-radius:10px}
+.prubeh-radek{display:flex;align-items:center;gap:10px;padding:7px 10px;
+  border-bottom:1px solid var(--border);border-left:3px solid var(--green)}
+.prubeh-radek.oni{border-left-color:var(--red)}
+.prubeh-radek:last-child{border-bottom:none}
+.prubeh-poradi{font-size:11px;color:var(--muted);min-width:26px;text-align:right}
+.prubeh-skore{font-family:'Oswald',sans-serif;font-size:15px;font-weight:700;min-width:54px}
+.prubeh-skore .plus{color:var(--green)}
+.prubeh-skore .minus{color:var(--red)}
+.prubeh-akce{font-size:13px;min-width:92px}
+.prubeh-kdo{font-size:13px;color:var(--muted);flex:1;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.prubeh-break{color:var(--accent);font-size:13px;width:14px;text-align:center}
 
 /* Stavy, ve kterých padly time-outy (#84). */
 .info-oddechovy-stavy{font-family:'Oswald',sans-serif;font-size:11px;color:var(--muted);

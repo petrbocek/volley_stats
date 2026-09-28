@@ -1364,7 +1364,11 @@ pass &= ok('T31b po zápisu lišta pojmenuje hráčku i akci (#76)',
 
 // jedno klepnutí, žádné držení
 await page.click('#btn-undo');
-await page.waitForTimeout(250);
+// pevné čekání sem nestačí: odečet i překreslení lišty běží přes debounce,
+// takže se na hodnotu počká, jinak test občas střílí do rozdělané práce
+await page.waitForFunction(
+  ([sel, cil]) => document.querySelector(sel)?.textContent.trim() === String(cil),
+  ['#cnt-11-servis_plus', predZapisem], { timeout: 5000 }).catch(() => {});
 pass &= ok('T31c klepnutí na lištu vezme zápis zpět (#76)',
   await cnt('#cnt-11-servis_plus') === predZapisem);
 pass &= ok('T31d po vyčerpání je lišta zase prázdná (#76)', await undoVypnuto());
@@ -4150,6 +4154,94 @@ pass &= ok('T57h bez prvního podání se první výměna za break nevydává (#
 
 await page.evaluate(() => {
   state.udalosti = state.udalosti.filter(u => !(u.zapas_id === 100 && (u.set_cislo || 1) === 5));
+  state.postaveni = state.postaveni.filter(p => !(p.zapas_id === 100 && (p.set_cislo || 1) === 5));
+  state.setInfo = state.setInfo.filter(x => !(x.zapas_id === 100 && (x.set_cislo || 1) === 5));
+  state.liveSet = 1;
+  renderLive2(100);
+});
+await page.waitForTimeout(200);
+
+
+// ── #84 část 21: průběh rozbalený po výměnách ─────────────────────────────
+// Pás ukazuje tvar setu, tohle je k dohledání konkrétní pasáže: co výměna,
+// to řádek se stavem, akcí a hráčkou (nebo soupeřem).
+await page.evaluate(() => {
+  state.liveSet = 5;
+  state.zapasy.find(z => z.id === 100).stav = 'probiha';
+  state.udalosti = state.udalosti.filter(u => !(u.zapas_id === 100 && (u.set_cislo || 1) === 5));
+  state.postaveni = state.postaveni.filter(p => !(p.zapas_id === 100 && (p.set_cislo || 1) === 5));
+  state.setInfo = state.setInfo.filter(x => !(x.zapas_id === 100 && (x.set_cislo || 1) === 5));
+  state.chybySouperu = state.chybySouperu.filter(c => c.zapas_id !== 100);
+  Object.keys(souperDirty).forEach(k => { if (k.startsWith('100_5')) delete souperDirty[k]; });
+  [10, 11, 12, 13].forEach((id, i) => state.postaveni.push(
+    { zapas_id: 100, set_cislo: 5, zona: i + 1, hrac_id: id }));
+  state.setInfo.push({ zapas_id: 100, set_cislo: 5, oddechove_casy: 0, stridani: 0,
+                       prvni_podani: 'oni' });
+  renderLive2(100);
+});
+await page.waitForTimeout(400);
+
+await page.evaluate(() => bump(10, 100, 'utok_plus', 1));     // náš break
+await page.waitForTimeout(500);
+await page.evaluate(() => bump(11, 100, 'servis_plus', 1));   // eso z vlastního podání
+await page.waitForTimeout(500);
+await page.evaluate(() => bumpSouper(100, 'body', 1));        // bod soupeře
+await page.waitForTimeout(600);
+
+const jmeno10 = await page.evaluate(() => state.hraci.find(h => h.id === 10).jmeno);
+await page.click('.prubeh-pas');
+await page.waitForSelector('#modal-v2-prubeh:not(.hidden)');
+
+pass &= ok('T58a klepnutí na pruh otevře celý průběh (#84)',
+  await page.$$eval('#v2-prubeh-obsah .prubeh-radek', els => els.length) === 3 &&
+  /5\. set/.test(await page.textContent('#v2-prubeh-title')));
+pass &= ok('T58b nejnovější výměna je nahoře (#84)',
+  /2:1/.test(await page.textContent('#v2-prubeh-obsah .prubeh-radek:first-child .prubeh-skore')));
+pass &= ok('T58c u výměny je akce i hráčka, co ji ukončila (#84)', await (async () => {
+  const posledni = await page.textContent('#v2-prubeh-obsah .prubeh-radek:last-child');
+  return /Útok/.test(posledni) && posledni.includes(jmeno10) && /1:0/.test(posledni);
+})());
+pass &= ok('T58d bod soupeře je popsaný jako soupeřův (#84)', await (async () => {
+  const prvni = await page.textContent('#v2-prubeh-obsah .prubeh-radek:first-child');
+  return /Bod soupeře/.test(prvni) && /Soupeř/.test(prvni);
+})());
+pass &= ok('T58e zisk podání je v řádku označený (#84)', await page.evaluate(() => {
+  const radky = [...document.querySelectorAll('#v2-prubeh-obsah .prubeh-radek')];
+  // nejnovější nahoře: [bod soupeře (break), eso z podání, náš break]
+  const znacka = r => !!r.querySelector('.prubeh-break:not(.prazdny)');
+  return znacka(radky[0]) && !znacka(radky[1]) && znacka(radky[2]);
+}));
+pass &= ok('T58f strana výměny je vidět barvou řádku (#84)', await page.evaluate(() => {
+  const radky = [...document.querySelectorAll('#v2-prubeh-obsah .prubeh-radek')];
+  return radky[0].classList.contains('oni') && radky[2].classList.contains('my');
+}));
+pass &= ok('T58f2 rozchod logu a počítadel se ohlásí, ne zamlčí (#84)',
+  await page.evaluate(() => {
+    const k = prubehStavu(100, 5).at(-1), s = skoreSetu(100, 5);
+    const hlasi = !!document.querySelector('#v2-prubeh-obsah .skore-nesedi');
+    return (k.my !== s.nase || k.oni !== s.jejich) === hlasi;
+  }));
+await page.click('#modal-v2-prubeh .modal-footer .btn-secondary');
+await page.waitForTimeout(300);
+
+// prázdný set nemá co rozbalovat — pás tam vůbec není
+await page.evaluate(() => {
+  state.udalosti = state.udalosti.filter(u => !(u.zapas_id === 100 && (u.set_cislo || 1) === 5));
+  state.chybySouperu = state.chybySouperu.filter(c => c.zapas_id !== 100);
+  Object.keys(souperDirty).forEach(k => { if (k.startsWith('100_5')) delete souperDirty[k]; });
+  [10, 11].forEach(id => {
+    const k = statKey(100, id, 5);
+    if (dirtyStats[k]) Object.keys(dirtyStats[k]).forEach(f => {
+      if (typeof dirtyStats[k][f] === 'number' && f !== 'set_cislo') dirtyStats[k][f] = 0;
+    });
+  });
+  renderLive2(100);
+});
+await page.waitForTimeout(400);
+pass &= ok('T58g prázdný set pás ani nenabídne (#84)',
+  await page.$('.prubeh-pas') === null);
+
+await page.evaluate(() => {
   state.postaveni = state.postaveni.filter(p => !(p.zapas_id === 100 && (p.set_cislo || 1) === 5));
   state.setInfo = state.setInfo.filter(x => !(x.zapas_id === 100 && (x.set_cislo || 1) === 5));
   state.liveSet = 1;
