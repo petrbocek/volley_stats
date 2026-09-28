@@ -382,6 +382,12 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
   align-items:center;justify-content:center}
 .hriste-sit span{font-size:10px;text-transform:uppercase;letter-spacing:2px;color:var(--muted);
   writing-mode:vertical-rl}
+/* Post odvozený z místa v šestce, ne z profilu hráčky (#84). */
+.hriste-post{display:inline-block;margin-left:2px;padding:0 4px;border-radius:4px;
+  background:var(--surface);color:var(--accent2);font-weight:700}
+.v2-kdo-napoveda{grid-column:1/-1;font-size:12px;line-height:1.5;color:var(--muted);
+  padding:8px 10px;border:1px dashed var(--border);border-radius:8px;margin-bottom:8px}
+
 /* Dlaždice za sítí: akce napřed, hráčka až potom (#84). */
 .hriste-akce{flex:0 0 22%;min-width:76px;display:flex;flex-direction:column;gap:6px}
 .hriste-akce-dlazdice{flex:1;min-height:56px;display:flex;flex-direction:column;

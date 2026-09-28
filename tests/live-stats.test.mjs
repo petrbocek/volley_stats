@@ -3668,22 +3668,35 @@ await page.click('.nav-tab:nth-child(6)');
 await page.waitForSelector('#live2-wrap');
 await page.evaluate(() => { if (!v2Hriste) v2PrepniHriste(); });
 await page.waitForSelector('.hriste-info');
+// Posty se neberou z profilu hráčky, ale z místa v šestce vůči nahrávačce:
+// po zónách jde proti směru hodin N-S-B-U-S-B. Profilové pozice schválně
+// nastavuju naschvál (blokař všude), ať je vidět, že do toho nemluví.
 await page.evaluate(() => {
   state.liveSet = 2;
   state.zapasy.find(z => z.id === 100).stav = 'probiha';
-  // jedna od každé pozice, ať jde filtr změřit
-  const pozice = { 10: 'smečař', 11: 'blokař', 12: 'libero', 13: 'nahrávač', 14: 'universál' };
-  Object.entries(pozice).forEach(([id, p]) => {
-    const h = state.hraci.find(x => x.id === +id);
-    if (h) h.pozice = p;
-  });
+  state.hraci.forEach(h => { if ([10, 11, 12, 13, 14].includes(h.id)) h.pozice = 'blokař'; });
+  state.postaveni = state.postaveni.filter(p => !(p.zapas_id === 100 && (p.set_cislo || 1) === 2));
+  state.setInfo = state.setInfo.filter(x => !(x.zapas_id === 100 && (x.set_cislo || 1) === 2));
+  state.zapasHraci.filter(zh => zh.zapas_id === 100).forEach(zh => { zh.libero = false; });
+  // 10 do jedničky jako nahrávačka → 11 S, 12 B, 13 U; 14 je libero mimo hřiště
+  [10, 11, 12, 13].forEach((id, i) => state.postaveni.push(
+    { zapas_id: 100, set_cislo: 2, zona: i + 1, hrac_id: id }));
+  const lib = state.zapasHraci.find(zh => zh.zapas_id === 100 && zh.hrac_id === 14);
+  if (lib) lib.libero = true;
+  state.setInfo.push({ zapas_id: 100, set_cislo: 2, oddechove_casy: 0, stridani: 0,
+                       nahravacka_hrac_id: 10 });
   renderLive2(100);
 });
 await page.waitForTimeout(400);
 
 const vNabidce = () => page.$$eval('#v2-kdo-obsah .player-name', els => els.map(e => e.textContent.trim()));
 const jmenoHracky = id => page.evaluate(i => state.hraci.find(h => h.id === i).jmeno, id);
-const [sm, bl, lib, nah, uni] = await Promise.all([10, 11, 12, 13, 14].map(jmenoHracky));
+const [nah, sm, bl, uni, lib] = await Promise.all([10, 11, 12, 13, 14].map(jmenoHracky));
+
+pass &= ok('T53a0 posty plynou ze zón, ne z profilu hráčky (#84)',
+  JSON.stringify(await page.evaluate(() =>
+    [10, 11, 12, 13, 14].map(id => postHracky(100, 2, id)))) ===
+  JSON.stringify(['nahrávač', 'smečař', 'blokař', 'universál', 'libero']));
 
 pass &= ok('T53a za sítí jsou tři dlaždice: příjem, útok, pole (#84)',
   JSON.stringify(await page.$$eval('.hriste-akce .hriste-akce-nazev',
@@ -3712,16 +3725,16 @@ pass &= ok('T53d na útok všichni kromě liber a nahrávaček (#84)',
   !proUtok.includes(lib) && !proUtok.includes(nah));
 
 // vybraná hráčka → panel jen s tou akcí, ne celá nabídka
-await page.click('#v2-kdo-obsah .player-card');
+await page.click(`#v2-kdo-obsah .player-card:has-text("${sm}")`);
 await page.waitForSelector('#modal-v2-akce:not(.hidden)');
 pass &= ok('T53e po výběru hráčky se ukáže jen ta akce, ne celý panel (#84)',
   await page.$$eval('#modal-v2-akce .v2-akce-radek', els => els.length) === 1 &&
   /Útok/.test(await page.textContent('#modal-v2-akce .v2-akce-nazev')));
-const predUtokem53 = await page.evaluate(() => getStatVal(100, 10, 'utok_plus', 2));
+const predUtokem53 = await page.evaluate(() => getStatVal(100, 11, 'utok_plus', 2));
 await page.click('#modal-v2-akce .v2-dlazdice.plus');
 await page.waitForTimeout(600);
 pass &= ok('T53f zápis z dlaždice jde do statistiky té hráčky (#84)',
-  await page.evaluate(() => getStatVal(100, 10, 'utok_plus', 2)) === predUtokem53 + 1);
+  await page.evaluate(() => getStatVal(100, 11, 'utok_plus', 2)) === predUtokem53 + 1);
 
 // pole: jen počet, zapíše se rovnou a skóre nechá být
 await page.click('.hriste-akce .hriste-akce-dlazdice:nth-of-type(3)');
@@ -3735,7 +3748,7 @@ const predPolem = await page.evaluate(() => ({
   pole: getStatVal(100, 10, 'pole_neutral', 2), skore: skoreSetu(100, 2),
   vymen: prubehSetu(100, 2).vymeny.length }));
 rpcCalls = [];
-await page.click('#v2-kdo-obsah .player-card');
+await page.click(`#v2-kdo-obsah .player-card:has-text("${nah}")`);
 await page.waitForTimeout(700);
 pass &= ok('T53h pole se zapíše rovnou, bez ptaní na variantu (#84)',
   await page.isVisible('#modal-v2-akce') === false &&
@@ -3764,6 +3777,115 @@ pass &= ok('T53m ve statistikách má Pole svůj sloupec (#84)',
 await page.click('.nav-tab:nth-child(6)');
 await page.waitForTimeout(300);
 await page.evaluate(() => { state.liveSet = 1; renderLive2(100); });
+await page.waitForTimeout(200);
+
+
+// ── #84 část 17: posty ze šestky, ne z profilu hráčky ─────────────────────
+// Hráčka hraje podle potřeby víc postů. Postavení je ale dané: po zónách jde
+// proti směru hodin N-S-B-U-S-B, takže stačí označit nahrávačku.
+await page.evaluate(() => {
+  state.liveSet = 3;
+  state.postaveni = state.postaveni.filter(p => !(p.zapas_id === 100 && (p.set_cislo || 1) === 3));
+  state.setInfo = state.setInfo.filter(x => !(x.zapas_id === 100 && (x.set_cislo || 1) === 3));
+  state.zapasHraci.filter(zh => zh.zapas_id === 100).forEach(zh => { zh.libero = false; });
+  [10, 11, 12, 13, 14].forEach((id, i) => state.postaveni.push(
+    { zapas_id: 100, set_cislo: 3, zona: i + 1, hrac_id: id }));
+  renderLive2(100);
+});
+await page.waitForTimeout(400);
+
+pass &= ok('T54a bez označené nahrávačky se posty nehádají (#84)',
+  await page.evaluate(() => [1, 2, 3, 4, 5, 6].every(z => postVZone(100, 3, z) === null)));
+await page.click('.hriste-akce .hriste-akce-dlazdice:nth-of-type(1)');
+await page.waitForSelector('#modal-v2-kdo:not(.hidden)');
+pass &= ok('T54b a nabídne se celá šestka i s vysvětlením proč (#84)',
+  await page.$$eval('#v2-kdo-obsah .player-card', els => els.length) === 5 &&
+  /Posty se odvozují od nahrávačky/.test(await page.textContent('#v2-kdo-obsah')));
+await page.click('#modal-v2-kdo .modal-footer .btn-secondary');
+await page.waitForTimeout(300);
+
+// označení jde z panelu hráčky
+otherWrites = [];
+await page.evaluate(() => v2OtevriAkce(100, 12, 3));
+await page.waitForSelector('#modal-v2-akce:not(.hidden)');
+pass &= ok('T54c panel hráčky na hřišti nabízí označit nahrávačku (#84)',
+  await page.isVisible('#btn-v2-nahravacka'));
+await page.click('#btn-v2-nahravacka');
+await page.waitForTimeout(600);
+pass &= ok('T54d označení se uloží k setu, ne k hráčce (#84)',
+  await page.evaluate(() => setInfo(100, 3).nahravacka_hrac_id) === 12 &&
+  otherWrites.some(w => w.table === 'vb_set_info' && w.body &&
+    w.body.set_cislo === 3 && w.body.nahravacka_hrac_id === 12) &&
+  !otherWrites.some(w => w.table === 'vb_hraci'));
+
+// N-S-B-U-S-B od zóny nahrávačky proti směru hodin (12 stojí ve trojce)
+pass &= ok('T54e posty jdou od nahrávačky N-S-B-U-S-B (#84)',
+  JSON.stringify(await page.evaluate(() =>
+    [3, 4, 5, 6, 1, 2].map(z => postVZone(100, 3, z)))) ===
+  JSON.stringify(['nahrávač', 'smečař', 'blokař', 'universál', 'smečař', 'blokař']));
+pass &= ok('T54f na kartě zóny je post vidět zkratkou (#84)', await page.evaluate(() => {
+  const zony = [...document.querySelectorAll('.hriste .hriste-zona')];
+  const trojka = zony.find(z => /^3/.test(z.querySelector('.hriste-cislo-zony').textContent.trim()));
+  return !!trojka && trojka.querySelector('.hriste-post')?.textContent.trim() === 'N';
+}));
+
+// rotace posty veze s sebou: hráčka si post drží, zóna se mění
+const postyPredRotaci = await page.evaluate(() =>
+  [10, 11, 12, 13, 14].map(id => postHracky(100, 3, id)));
+await page.evaluate(() => rotujOKroku(100, 3, 1));
+await page.evaluate(() => renderLive2(100));
+await page.waitForTimeout(400);
+pass &= ok('T54g po rotaci si každá drží svůj post (#84)',
+  JSON.stringify(await page.evaluate(() =>
+    [10, 11, 12, 13, 14].map(id => postHracky(100, 3, id)))) ===
+  JSON.stringify(postyPredRotaci));
+
+// filtr u dlaždic jede podle odvozených postů, ne podle profilu
+await page.evaluate(() => {
+  state.hraci.forEach(h => { if ([10, 11, 12, 13, 14].includes(h.id)) h.pozice = 'nahrávač'; });
+  renderLive2(100);
+});
+await page.waitForTimeout(300);
+await page.click('.hriste-akce .hriste-akce-dlazdice:nth-of-type(2)');
+await page.waitForSelector('#modal-v2-kdo:not(.hidden)');
+pass &= ok('T54h profilová pozice do nabídky nemluví (#84)', await (async () => {
+  const jmena = await page.$$eval('#v2-kdo-obsah .player-name', els => els.map(e => e.textContent.trim()));
+  const nahravacka = await page.evaluate(() =>
+    state.hraci.find(h => h.id === setInfo(100, 3).nahravacka_hrac_id).jmeno);
+  // všichni mají v profilu „nahrávač", a přesto je v nabídce útoku většina
+  return jmena.length === 4 && !jmena.includes(nahravacka);
+})());
+await page.click('#modal-v2-kdo .modal-footer .btn-secondary');
+await page.waitForTimeout(300);
+
+// druhé klepnutí označení zruší
+await page.evaluate(() => v2OtevriAkce(100, setInfo(100, 3).nahravacka_hrac_id,
+  [...postaveniSetu(100, 3).entries()].find(([, id]) => id === setInfo(100, 3).nahravacka_hrac_id)[0]));
+await page.waitForSelector('#modal-v2-akce:not(.hidden)');
+pass &= ok('T54i u označené hráčky tlačítko nabízí zrušení (#84)',
+  /Není nahrávačka/.test(await page.textContent('#btn-v2-nahravacka')));
+await page.click('#btn-v2-nahravacka');
+await page.waitForTimeout(600);
+pass &= ok('T54j a zrušit to jde stejnou cestou (#84)',
+  await page.evaluate(() => setInfo(100, 3).nahravacka_hrac_id) === null &&
+  await page.evaluate(() => postHracky(100, 3, 10)) === null);
+
+// mezi sety se sestava mění, takže označení patří setu
+await page.evaluate(() => {
+  state.setInfo = state.setInfo.filter(x => !(x.zapas_id === 100 && (x.set_cislo || 1) === 3));
+  state.setInfo.push({ zapas_id: 100, set_cislo: 3, oddechove_casy: 0, stridani: 0,
+                       nahravacka_hrac_id: 10 });
+});
+pass &= ok('T54k označení ze třetího setu nemluví do druhého (#84)',
+  await page.evaluate(() => nahravackaSetu(100, 3)) === 10 &&
+  await page.evaluate(() => nahravackaSetu(100, 4)) === null);
+
+await page.evaluate(() => {
+  state.postaveni = state.postaveni.filter(p => !(p.zapas_id === 100 && (p.set_cislo || 1) === 3));
+  state.setInfo = state.setInfo.filter(x => !(x.zapas_id === 100 && (x.set_cislo || 1) === 3));
+  state.liveSet = 1;
+  renderLive2(100);
+});
 await page.waitForTimeout(200);
 
 await b.close();
