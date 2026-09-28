@@ -4005,6 +4005,78 @@ await page.evaluate(() => {
 });
 await page.waitForTimeout(200);
 
+
+// ── #84 část 19: neutrální akce rotaci nespouští ──────────────────────────
+// Ze zápasu: „pozitivní příjem spouští rotaci." Příjem výměnu neuzavírá,
+// takže v logu žádnou nepřidá — kontrola pak sahala po výměně PŘEDCHOZÍ
+// a při každém dalším příjmu se rotovalo znovu.
+await page.evaluate(() => {
+  state.liveSet = 5;
+  state.zapasy.find(z => z.id === 100).stav = 'probiha';
+  state.udalosti = state.udalosti.filter(u => !(u.zapas_id === 100 && (u.set_cislo || 1) === 5));
+  state.postaveni = state.postaveni.filter(p => !(p.zapas_id === 100 && (p.set_cislo || 1) === 5));
+  state.setInfo = state.setInfo.filter(x => !(x.zapas_id === 100 && (x.set_cislo || 1) === 5));
+  state.chybySouperu = state.chybySouperu.filter(c => c.zapas_id !== 100);
+  Object.keys(souperDirty).forEach(k => { if (k.startsWith('100_5')) delete souperDirty[k]; });
+  [10, 11, 12, 13, 14].forEach((id, i) => state.postaveni.push(
+    { zapas_id: 100, set_cislo: 5, zona: i + 1, hrac_id: id }));
+  state.setInfo.push({ zapas_id: 100, set_cislo: 5, oddechove_casy: 0, stridani: 0,
+                       prvni_podani: 'oni' });
+  renderLive2(100);
+});
+await page.waitForTimeout(400);
+
+const sestava56 = () => page.evaluate(() =>
+  Object.fromEntries([...postaveniSetu(100, 5).entries()]));
+
+// side-out: podával soupeř, my bod → rotace patří
+await page.evaluate(() => bump(10, 100, 'utok_plus', 1));
+await page.waitForTimeout(700);
+const poSideOutu56 = await sestava56();
+
+// a teď kvalitní příjem — s tím se hýbat nesmí
+await page.evaluate(() => bump(11, 100, 'prijem_plus', 1));
+await page.waitForTimeout(700);
+pass &= ok('T56a kvalitní příjem šestkou nehýbe (#84)',
+  JSON.stringify(await sestava56()) === JSON.stringify(poSideOutu56));
+
+// ani opakovaně
+await page.evaluate(() => { bump(12, 100, 'prijem_plus', 1); bump(13, 100, 'prijem_neutral', 1); });
+await page.waitForTimeout(800);
+pass &= ok('T56b ani po několika za sebou (#84)',
+  JSON.stringify(await sestava56()) === JSON.stringify(poSideOutu56));
+
+pass &= ok('T56c a do výměn se nezapočítaly (#84)',
+  await page.evaluate(() => prubehSetu(100, 5).vymeny.length) === 1);
+
+// útok zakončený bodem při soupeřově podání rotovat musí dál
+await page.evaluate(() => bumpSouper(100, 'body', 1));      // ztratíme podání
+await page.waitForTimeout(700);
+const predDalsim = await sestava56();
+await page.evaluate(() => bump(11, 100, 'utok_plus', 1));   // znovu side-out
+await page.waitForTimeout(700);
+pass &= ok('T56d zisk podání pořád rotuje (#84)',
+  await page.evaluate(p => {
+    const m = postaveniSetu(100, 5);
+    return Object.entries(p).every(([z, id]) => m.get(poRotaci(+z, 1)) === id);
+  }, predDalsim));
+
+// neutrální akce nesmí rotaci ani vracet
+const predUbranim = await sestava56();
+await page.evaluate(() => bump(11, 100, 'prijem_plus', -1));
+await page.waitForTimeout(700);
+pass &= ok('T56e ubrání neutrální akce rotaci nevrací (#84)',
+  JSON.stringify(await sestava56()) === JSON.stringify(predUbranim));
+
+await page.evaluate(() => {
+  state.udalosti = state.udalosti.filter(u => !(u.zapas_id === 100 && (u.set_cislo || 1) === 5));
+  state.postaveni = state.postaveni.filter(p => !(p.zapas_id === 100 && (p.set_cislo || 1) === 5));
+  state.setInfo = state.setInfo.filter(x => !(x.zapas_id === 100 && (x.set_cislo || 1) === 5));
+  state.liveSet = 1;
+  renderLive2(100);
+});
+await page.waitForTimeout(200);
+
 await b.close();
 console.log(pass ? '\nVŠE PROŠLO' : '\nNĚCO SELHALO');
 process.exit(pass ? 0 : 1);

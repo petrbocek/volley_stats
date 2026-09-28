@@ -720,7 +720,7 @@ function bumpSouper(zapasId,pole,delta=1,opts={}){
   const poleLogu=pole==='pocet'?'souper_chyba':'souper_bod';
   if(delta>0){
     zalogujUdalost(zapasId,set,null,poleLogu);
-    rotacePoBodu(zapasId,set,opts);
+    rotacePoBodu(zapasId,set,poleLogu,null,opts);
   }else{
     rotaceZpetPredOdebranim(zapasId,set,poleLogu,null,opts);
     odlogujUdalost(zapasId,set,null,poleLogu);
@@ -1120,9 +1120,14 @@ function ziskaliPodani(vymena){
   return !String(vymena.pole||'').startsWith('servis_');
 }
 
-function rotacePoBodu(zapasId,set,opts){
+function rotacePoBodu(zapasId,set,pole,hracId,opts){
   if(opts.bezUndo)return;            // lišta „zpět" vrací rotaci přes predRotaci
-  if(!ziskaliPodani(prubehSetu(zapasId,set).vymeny.at(-1)))return;
+  // Neutrální akce (třeba kvalitní příjem) výměnu neuzavírá, takže v logu
+  // žádnou nepřidá. Bez téhle pojistky by se sáhlo po výměně PŘEDCHOZÍ a při
+  // každém dalším příjmu by se rotovalo znovu — nahlášeno ze zápasu.
+  if(!komuBod(pole))return;
+  const v=prubehSetu(zapasId,set).vymeny.at(-1);
+  if(!ziskaliPodani(v)||v.pole!==pole||(v.hrac_id||null)!==(hracId||null))return;
   const pred=[...postaveniSetu(zapasId,set).entries()];
   if(!rotujOKroku(zapasId,set,1))return;
   const u=undoStack[undoStack.length-1];
@@ -1136,6 +1141,7 @@ function rotacePoBodu(zapasId,set,opts){
 // o jednu navíc. Čte se ještě před smazáním z logu — potom už není podle čeho.
 function rotaceZpetPredOdebranim(zapasId,set,pole,hracId,opts){
   if(opts.bezUndo)return;
+  if(!komuBod(pole))return;          // neutrální akce žádnou výměnu nezavřela
   const v=prubehSetu(zapasId,set).vymeny.at(-1);
   if(!ziskaliPodani(v)||v.pole!==pole||(v.hrac_id||null)!==(hracId||null))return;
   rotujOKroku(zapasId,set,-1);
@@ -2226,7 +2232,7 @@ function bump(hracId,zapasId,field,delta=1,opts={}){
   zaznamenejProZpet(hracId,zapasId,field,set,nova-puvodni,opts);
   if(delta>0){
     zalogujUdalost(zapasId,set,hracId,field);
-    rotacePoBodu(zapasId,set,opts);
+    rotacePoBodu(zapasId,set,field,hracId,opts);
   }else{
     rotaceZpetPredOdebranim(zapasId,set,field,hracId,opts);
     odlogujUdalost(zapasId,set,hracId,field);
