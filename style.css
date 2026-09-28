@@ -598,3 +598,53 @@ button.hriste-dlazdice:focus-visible{outline:2px solid var(--accent);outline-off
 /* Formát zápasu u přepínače setů — jen když se nehraje na tři vítězné. */
 .set-format{font-size:10px;color:var(--accent);border:1px solid var(--accent);
   border-radius:6px;padding:1px 4px;margin-left:4px;letter-spacing:.5px}
+
+/* ─── DIVÁCKÁ STRÁNKA (#102) ───
+   Telefon na výšku: stav velký nahoře, hřiště menší, průběh pod tím.
+   Třídy hřiště a průběhu jsou společné s appkou, tady jen bez ovládání. */
+.divak-body{padding-bottom:24px}
+.divak-lista{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:10px 16px;background:var(--surface);border-bottom:1px solid var(--border)}
+.divak-znacka{font-family:'Oswald',sans-serif;font-size:16px;font-weight:700;
+  color:var(--accent);letter-spacing:.5px}
+.divak-rezim{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.divak-obal{max-width:720px;margin:0 auto;padding:12px 16px;display:flex;
+  flex-direction:column;gap:12px}
+.divak-hlavicka{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.divak-soupet{font-size:18px;font-weight:700;line-height:1.3}
+.divak-detail{font-size:12px;color:var(--muted);line-height:1.5}
+.divak-sety{text-align:right;flex-shrink:0}
+.divak-sety-popis{display:block;font-size:10px;color:var(--muted);
+  text-transform:uppercase;letter-spacing:.5px}
+.divak-sety-cislo{font-family:'Oswald',sans-serif;font-size:26px;font-weight:700;
+  color:var(--accent2)}
+.divak-skore{text-align:center;padding:12px;border:1px solid var(--border);
+  border-radius:12px;background:var(--surface2)}
+.divak-skore-popis{font-size:11px;color:var(--muted);text-transform:uppercase;
+  letter-spacing:.5px}
+.divak-skore-cisla{font-family:'Oswald',sans-serif;font-size:52px;font-weight:700;
+  line-height:1.1}
+.divak-skore-cisla .plus{color:var(--green)}
+.divak-skore-cisla .minus{color:var(--red)}
+.divak-dvojtecka{color:var(--muted);margin:0 6px}
+.divak-skore .skore-sety{justify-content:center;margin-top:4px}
+.divak-blok{padding:10px;border:1px solid var(--border);border-radius:12px;
+  background:var(--surface);display:flex;flex-direction:column;gap:10px}
+.divak-plocha{display:flex;gap:6px;align-items:stretch;max-height:420px}
+.divak-plocha .hriste-zona{cursor:default}
+.divak-libera{flex:0 0 26%;display:flex;flex-direction:column;gap:6px;min-width:0}
+.divak-radek{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.divak-nazev{font-size:10px;text-transform:uppercase;letter-spacing:.5px;
+  color:var(--muted);font-weight:700}
+.divak-hodnota{font-size:14px;font-weight:700}
+.divak-dres{color:var(--muted);font-size:12px}
+.divak-pristi{font-size:12px;color:var(--muted)}
+.divak-proc{font-family:'Oswald',sans-serif;font-size:13px;color:var(--accent2)}
+.divak-prazdno{padding:16px;text-align:center;color:var(--muted);font-size:13px}
+.divak-vic{font-size:11px;color:var(--muted);text-align:center}
+.divak-paticka{font-size:11px;color:var(--muted);text-align:center}
+.divak-paticka.chyba{color:var(--yellow)}
+@media(min-width:700px){
+  .divak-skore-cisla{font-size:64px}
+  .divak-soupet{font-size:22px}
+}

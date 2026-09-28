@@ -10,14 +10,21 @@ nasazení přes [Vercel](https://vercel.com).
 ## Struktura
 
 ```
-index.html              struktura stránky a modaly
-app.js                  veškerá logika (bez závislostí)
+index.html              zapisovatelská appka — struktura stránky a modaly
+app.js                  logika zápisu (bez závislostí)
+divak.html / divak.js   divácká stránka, jen pro čtení
+sdilene.js              pravidla a klíče společné oběma stránkám
 style.css               styly
 supabase/migrations/    schéma databáze — jediný zdroj pravdy
 supabase/README.md      práce s databází, zabezpečení, zapisovatelé
 tests/                  testy v prohlížeči
 gh_issues.py            pomůcka na zakládání issues z ISSUES.md
 ```
+
+`sdilene.js` drží to, co si obě stránky nesmí počítat každá po svém: co je
+bod, jak jdou posty po zónách, jak se z logu skládají výměny. Kdyby si to
+divácká stránka spočítala vlastní cestou, jednou se rozejdou a nepozná se,
+která má pravdu.
 
 Aplikace záměrně nemá žádné knihovny ani build krok: `index.html` se dá otevřít
 rovnou a `app.js` je jeden soubor, ve kterém se dá hledat. Přihlášení proti
@@ -30,7 +37,7 @@ python3 -m http.server 8000
 ```
 
 a otevřít <http://localhost:8000>. Aplikace se připojí k produkční databázi —
-klíče jsou v `app.js:1-2`. Pro vlastní instanci viz `supabase/README.md`.
+klíče jsou v `sdilene.js:1-2`. Pro vlastní instanci viz `supabase/README.md`.
 
 ## Zabezpečení
 
@@ -82,6 +89,23 @@ Hráčku jde smazat jen dokud nemá zaznamenané akce — cizí klíč ve
 Jakmile něco odehraje, nabízí se místo toho **archivace**: zmizí ze soupisky,
 sestav i správy týmů, ale statistiky zůstanou a v Archivu jde kdykoli obnovit.
 
+## Divácká stránka
+
+`divak.html` ukazuje **stav, postavení a průběh akcí** lidem v hale. Jen
+koukání: žádné přihlášení, žádné zapisování, umí jedinou HTTP metodu (GET).
+
+- `divak.html?zapas=<id>` — konkrétní zápas
+- `divak.html` bez parametru — rozehraný zápas, a když žádný neběží, poslední
+  odehraný
+
+Data se dotahují po 5 s, když zápas běží, jinak po 30 s; schovaná záložka
+nestahuje nic. Tahá se jen jeden zápas, ne celá databáze jako v appce. Když
+spojení vázne, stránka to napíše — zamrzlé číslo bez varování je horší než
+přiznaná pauza.
+
+Rozdílu mezi počítadly a logem výměn si divák nemusí všímat: **stav se bere
+z počítadel** (zdroj pravdy), průběh z logu jako doplněk.
+
 ## Testy
 
 Testy jedou v Chromiu přes Playwright a Supabase mají odchycené, takže
@@ -90,13 +114,15 @@ Testy jedou v Chromiu přes Playwright a Supabase mají odchycené, takže
 ```sh
 npm i playwright            # jednorázově
 python3 -m http.server 8099 &
-node tests/live-stats.test.mjs
+node tests/live-stats.test.mjs   # zapisovatelská appka
+node tests/divak.test.mjs        # divácká stránka
 ```
 
 Volitelně `APP_URL` (jiná adresa) a `CHROMIUM_PATH` (jiné Chromium).
 
-V CI testy neběží; Vercel dělá jen nasazení, takže je před změnou v `app.js`
-potřeba pustit je ručně.
+V CI testy neběží; Vercel dělá jen nasazení, takže je před změnou v `app.js`,
+`divak.js` nebo `sdilene.js` potřeba pustit je ručně. Změna v `sdilene.js` se
+dotýká obou stránek, tam je nutné pustit oba soubory.
 
 ## Nasazení
 

@@ -1,22 +1,5 @@
-const SB_URL='https://cqcjdslqygayijxfhzof.supabase.co';
-const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNxY2pkc2xxeWdheWlqeGZoem9mIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgyNDYxMTcsImV4cCI6MjA5MzgyMjExN30.8RxdnXDybGehH9pMKxNkJuXw5f_vIGjfSRE_-tJciK0';
-
-const ACTIONS=[
-  {key:'servis',label:'Servis',icon:'🎯',color:'#4dabf7'},
-  {key:'prijem',label:'Příjem',icon:'🤲',color:'#51cf66'},
-  {key:'utok',label:'Útok',icon:'💥',color:'#f97316'},
-  {key:'blok',label:'Blok',icon:'🛡️',varianty:['plus'],color:'#7950f2'},
-  {key:'chyba',label:'Chyba',icon:'❌',varianty:['minus'],color:'#ff6b6b'},
-  // Pole (dig) je vybraný balon. Zatím se vede jen počet, protože je to pokus,
-  // ne bodovaná akce — proto neutrální varianta, ta znamená „výměna
-  // pokračuje" a do skóre se nepropisuje (#84).
-  {key:'pole',label:'Pole',icon:'🖐️',varianty:['neutral'],color:'#20c997'},
-];
-const VARIANTS=[
-  {suf:'plus',sym:'+',cls:'plus'},
-  {suf:'neutral',sym:'/',cls:'neutral'},
-  {suf:'minus',sym:'−',cls:'minus'},
-];
+/* Pravidla (co je bod, posty po zónách, výměny z logu) žijí v sdilene.js —
+   čte je i divácká stránka a smí existovat jen jednou (#102). */
 
 const state={sezony:[],activeSeason:null,hraci:[],hraciSezony:[],zapasy:[],statistiky:[],tymy:[],hraciTymy:[],souteze:[],zapasHraci:[],chybySouperu:[],postaveni:[],setInfo:[],udalosti:[],oddechove:[],liveZapasId:null,liveSet:1};
 
@@ -41,8 +24,6 @@ const dirtyStats={};
 // Posílají se změny (±1), ne absolutní hodnoty: při dvou zapisovatelích
 // u jednoho zápasu by upsert celého řádku přebil kliky toho druhého (#27).
 const pendingDeltas={};          // `${zapasId}_${hracId}_${set}` -> { pole: delta }
-const SETU=5;                    // strop: víc setů se neodehraje ani na tři vítězné
-
 /* ─── FORMÁT ZÁPASU ───
    Turnaj se hraje na dva vítězné sety, liga na tři. Z toho plyne, kdy zápas
    končí a který set je zkrácený tiebreak — dřív to bylo natvrdo na tři, takže
@@ -805,7 +786,6 @@ function prekresliSouper(){
    střídá mimo rotaci (#84). */
 // Síť vpravo: standardní schéma otočené o 90°. Pravý sloupec je u sítě
 // (4-3-2 shora dolů), levý zadní řada (5-6-1), takže zóna 1 je vlevo dole.
-const ZONY_ROZLOZENI=[[5,4],[6,3],[1,2]];
 let v2Hriste=false;                       // přepínač seznam ⇄ hřiště
 
 function postaveniSetu(zapasId,set){
@@ -923,9 +903,6 @@ async function prevezmiPostaveni(zapasId,set){
    Skóre se neukládá, skládá se z akcí. Platí dohoda z #84: podání, smeč a blok
    jsou bodované, každé minus je ztracený bod, plus a neutral u příjmu je
    kvalita. Chyby a body soupeře doplňují to, co se na naší straně nezapíše. */
-const SKORE_NASE=['servis_plus','utok_plus','blok_plus'];
-const SKORE_JEJICH=['servis_minus','prijem_minus','utok_minus','chyba_minus'];
-
 function skoreSetu(zapasId,set){
   const sid=currentSeasonId()||state.zapasy.find(z=>z.id===zapasId)?.sezona_id||0;
   const hraci=hraciVSezoně(sid);
@@ -1083,10 +1060,6 @@ function prekresliSkore(){
    podával" ji plně určuje (#84).
 
    Hráčky se posouvají 2→1→6→5→4→3→2, tedy o zónu zpět, a z jedničky na šestku. */
-function poRotaci(zona,kroku){
-  return ((zona-1-kroku)%6+6)%6+1;
-}
-
 // Vrací true, když se postavení opravdu změnilo. Zápis do DB běží na pozadí,
 // stav se mění hned — během rozehry se nedá čekat na server.
 function rotujOKroku(zapasId,set,kroku){
@@ -1196,9 +1169,6 @@ function v2OtevriZonu(zapasId,zona){
    plyne sám, a veze se to s rotací, aniž by se do toho muselo sahat (#84).
 
    Zóny jdou proti směru hodin 1→2→3→4→5→6, tedy stejně jako pořadí podání. */
-const POSTY_ZON=['nahrávač','smečař','blokař','universál','smečař','blokař'];
-const POST_ZKRATKA={'nahrávač':'N','smečař':'S','blokař':'B','universál':'U','libero':'L'};
-
 function nahravackaSetu(zapasId,set){
   return setInfo(zapasId,set).nahravacka_hrac_id||null;
 }
@@ -1210,7 +1180,7 @@ function postVZone(zapasId,set,zona){
   const m=postaveniSetu(zapasId,set);
   const zonaN=[...m.entries()].find(([,id])=>id===nid)?.[0];
   if(!zonaN)return null;                    // nahrávačka zrovna není na hřišti
-  return POSTY_ZON[(zona-zonaN+6)%6];
+  return postZony(zona,zonaN);
 }
 
 function postHracky(zapasId,set,hracId){
@@ -1341,7 +1311,6 @@ let stridaniZony=0;
 
 // Zóny 7 a 8 jsou sloty pro libera mimo hřiště. Nejsou v databázi — plynou
 // z nominace v sestavě, takže neexistují dvě pravdy o tom, kdo je libero.
-const ZONY_LIBERO=[7,8];
 
 function hristeHtml(zapasId){
   const set=state.liveSet;
@@ -1468,8 +1437,6 @@ function tymSouhrnHtml(zapasId){
    Oddechové časy a střídání se odvodit nedají: oddešák není akce hráčky
    a historie střídání se nikde nedrží. Zapisují se přírůstkově jako všechno
    ostatní (#84). */
-const ODDECHOVE_NA_SET=2;
-const STRIDANI_NA_SET=8;          // nové pravidlo, dřív šest
 
 function setInfo(zapasId,set){
   return state.setInfo.find(x=>x.zapas_id===zapasId&&(x.set_cislo||1)===set)
@@ -1572,17 +1539,6 @@ async function v2OddechovyZpet(){
    dál stojí na počítadlech, log pohání jen nové metriky (#84).
 
    Nestojí to ani jeden klik navíc — loguje se to, co se stejně kliká. */
-const POLE_BOD_MY=['servis_plus','utok_plus','blok_plus'];
-const POLE_BOD_ONI=['servis_minus','prijem_minus','utok_minus','chyba_minus'];
-
-function komuBod(pole){
-  if(pole==='souper_chyba')return 'my';
-  if(pole==='souper_bod')return 'oni';
-  if(POLE_BOD_MY.includes(pole))return 'my';
-  if(POLE_BOD_ONI.includes(pole))return 'oni';
-  return null;                       // neutral: výměna pokračuje
-}
-
 async function zalogujUdalost(zapasId,set,hracId,pole){
   // neutrální akce do logu patří taky: bez nich by „série" počítala výměny,
   // které nikdo nevyhrál, jako by se nestaly
@@ -1621,35 +1577,17 @@ async function odlogujUdalost(zapasId,set,hracId,pole){
    Podání přechází, když bod získá ten, kdo nepodával. Z toho a z prvního
    podání plyne u každé výměny, kdo podával — a tedy co byl side-out. */
 function prubehSetu(zapasId,set){
-  const info=setInfo(zapasId,set);
   const udalosti=state.udalosti
     .filter(u=>u.zapas_id===zapasId&&(u.set_cislo||1)===set)
     .sort((a,b)=>a.id-b.id);
-  const prvni=info.prvni_podani||null;
-  let podava=prvni;
-  let serie={kdo:null,delka:0},nejdelsi={my:0,oni:0};
-  const vymeny=[];
-  udalosti.forEach(u=>{
-    const bod=komuBod(u.pole);
-    if(!bod)return;                        // výměna pokračovala
-    vymeny.push({podaval:podava,bod,zona1:u.zona1_hrac_id||null,pole:u.pole,hrac_id:u.hrac_id});
-    if(serie.kdo===bod)serie.delka++;else serie={kdo:bod,delka:1};
-    if(serie.delka>nejdelsi[bod])nejdelsi[bod]=serie.delka;
-    if(podava&&bod!==podava)podava=bod;    // ztráta podání
-    else if(!podava)podava=bod;            // bez prvního podání se aspoň chytneme
-  });
-  return {vymeny,serie,nejdelsi,podavaTed:podava,znamePrvni:!!prvni};
+  return vymenyZLogu(udalosti,setInfo(zapasId,set).prvni_podani||null);
 }
 
 // Jak často uhrajeme výměnu, když podává soupeř. Podle prohlížených appek
 // je to hlavní živá metrika; dobrá hodnota startuje kolem 60 %.
 function sideOut(zapasId,set){
   const {vymeny,znamePrvni}=prubehSetu(zapasId,set);
-  if(!znamePrvni)return null;
-  const prijem=vymeny.filter(v=>v.podaval==='oni');
-  if(!prijem.length)return {pct:null,uhrano:0,celkem:0};
-  const uhrano=prijem.filter(v=>v.bod==='my').length;
-  return {pct:Math.round(uhrano/prijem.length*100),uhrano,celkem:prijem.length};
+  return sideOutZVymen(vymeny,znamePrvni);
 }
 
 // Rozpad podle rotací. Rotace se pozná podle podávající, ne podle pořadového
@@ -1761,14 +1699,7 @@ function prubehHtml(zapasId,set){
    podání. Ze sloupce bledých červených je vidět série na soupeřově podání,
    ze sytých zelených naopak povedený příjem (#84). */
 function prubehStavu(zapasId,set){
-  let my=0,oni=0;
-  return prubehSetu(zapasId,set).vymeny.map((v,i)=>{
-    if(v.bod==='my')my++;else oni++;
-    // break = bod získaný při podání toho druhého; bez známého prvního podání
-    // se to nepozná, tak se nic nehádá
-    return {poradi:i+1,bod:v.bod,my,oni,break:!!v.podaval&&v.podaval!==v.bod,
-            podaval:v.podaval||null,pole:v.pole,hrac_id:v.hrac_id||null};
-  });
+  return prubehZVymen(prubehSetu(zapasId,set).vymeny);
 }
 
 // Čím výměna skončila: akce a kdo ji udělal, nebo že to byla soupeřova strana.
@@ -2355,13 +2286,6 @@ function zaznamenejProZpet(hracId,zapasId,field,set,delta,opts){
     }
   }
   prekresliUndo();
-}
-
-function popisAkce(field){
-  const [klic,suf]=field.split('_');
-  const a=ACTIONS.find(x=>x.key===klic);
-  const v=VARIANTS.find(x=>x.suf===suf);
-  return `${a?a.label:klic} ${v?v.sym:suf}`;
 }
 
 function undoPopisek(){
