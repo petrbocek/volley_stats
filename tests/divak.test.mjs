@@ -11,12 +11,18 @@ const ADRESA = process.env.ADRESA || 'http://localhost:8099';
 let pass = true;
 const ok = (n, c) => (console.log(`${c ? '  OK  ' : ' FAIL '} ${n}`), !!c);
 
+// Stavy zápasu se berou z sdilene.js, ne z hlavy: fixture s vymyšlenou
+// hodnotou („probiha" místo „probihajici") nechala projít stránku, která
+// v provozu neukázala nic (#102).
+const STAV = new Function(await (await fetch(`${ADRESA}/sdilene.js`)).text() +
+  '; return STAV;')();
+
 // ── data ──────────────────────────────────────────────────────────────────
 const FIX = {
   vb_zapasy: [
-    { id: 7, datum: '2026-10-04', cas: '10:00:00', soupet: 'VK Ostrava', stav: 'probiha',
+    { id: 7, datum: '2026-10-04', cas: '10:00:00', soupet: 'VK Ostrava', stav: STAV.PROBIHA,
       vitezne_sety: 3, sezona_id: 1, set1_my: null, set1_oni: null },
-    { id: 8, datum: '2026-09-20', cas: null, soupet: 'Starý zápas', stav: 'dokonceny',
+    { id: 8, datum: '2026-09-20', cas: null, soupet: 'Starý zápas', stav: STAV.DOKONCENY,
       vitezne_sety: 3, sezona_id: 1 },
   ],
   vb_hraci: [
@@ -152,6 +158,10 @@ pass &= ok('D15 tahá jen tenhle zápas, ne celou databázi',
   dotazy.every(q => q.tabulka === 'vb_zapasy' || q.tabulka === 'vb_hraci' ||
     /zapas_id=eq\.7/.test(q.query)) &&
   !dotazy.some(q => ['vb_sezony', 'vb_tymy', 'vb_souteze', 'vb_hraci_tymy'].includes(q.tabulka)));
+pass &= ok('D15b ptá se na stav, který appka opravdu zapisuje',
+  STAV.PROBIHA === 'probihajici' &&
+  dotazy.some(q => q.tabulka === 'vb_zapasy' &&
+    q.query.includes(`stav=eq.${STAV.PROBIHA}`)));
 pass &= ok('D16 nesahá na tabulky, které nejsou veřejné',
   !dotazy.some(q => ['vb_zapisovatele', 'vb_zaloha_smazane'].includes(q.tabulka)));
 pass &= ok('D17 nikde není tlačítko, co by zapisovalo', await page.evaluate(() =>
@@ -184,7 +194,7 @@ vypadek = false;
 // ── jen rozehraný zápas, nic jiného ───────────────────────────────────────
 // Po ukončení zápasu se stránka nemá čím chlubit — ať to řekne, místo aby
 // ukazovala starý výsledek jako živý.
-FIX.vb_zapasy[0].stav = 'dokonceny';
+FIX.vb_zapasy[0].stav = STAV.DOKONCENY;
 await page.waitForFunction(() => !!document.querySelector('.divak-nehraje'),
   null, { timeout: 15000 }).catch(() => {});
 pass &= ok('D21 po ukončení zápasu stránka řekne, že se nehraje', await (async () => {
@@ -195,7 +205,7 @@ pass &= ok('D22 dohraný zápas se nevydává za živý',
   await page.$('.divak-skore-cisla') === null);
 
 // další zápas dne se chytne sám, bez sahání na adresu
-FIX.vb_zapasy[1].stav = 'probiha';
+FIX.vb_zapasy[1].stav = STAV.PROBIHA;
 await page.waitForFunction(() => /Starý zápas/.test(document.body.textContent),
   null, { timeout: 15000 }).catch(() => {});
 pass &= ok('D23 další rozehraný zápas se chytne sám',
@@ -204,8 +214,8 @@ pass &= ok('D24 zápas bez zápisu nevypadá rozbitě', await (async () => {
   const t = await page.textContent('#divak');
   return /nezapsala/.test(t) && /žádná výměna/.test(t);
 })());
-FIX.vb_zapasy[0].stav = 'probiha';
-FIX.vb_zapasy[1].stav = 'dokonceny';
+FIX.vb_zapasy[0].stav = STAV.PROBIHA;
+FIX.vb_zapasy[1].stav = STAV.DOKONCENY;
 
 await b.close();
 console.log(pass ? '\nVŠE PROŠLO' : '\nNĚCO SELHALO');

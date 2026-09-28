@@ -33,7 +33,7 @@ async function ziskej(dotaz){
 // nejnovější; ptáme se na to při každé obnově, takže se stránka po ukončení
 // zápasu sama přepne na další.
 async function vyberZapas(){
-  const probiha=await ziskej('vb_zapasy?stav=eq.probiha&order=datum.desc,id.desc&limit=1');
+  const probiha=await ziskej(`vb_zapasy?stav=eq.${STAV.PROBIHA}&order=datum.desc,id.desc&limit=1`);
   return probiha[0]||null;
 }
 
@@ -133,7 +133,7 @@ function jmenoSCislem(h){return h?esc(h.jmeno)+(h.cislo?` <span class="divak-dre
 function hlavickaHtml(){
   const z=d.zapas;
   const u=stavUtkani();
-  const stav={probiha:'Probíhá',dokonceny:'Dokončeno',planovany:'Plánovaný'}[z.stav]||z.stav;
+  const stav=stavLabel(z.stav);
   const datum=z.datum?z.datum.split('-').reverse().join('. '):'';
   return `<div class="divak-hlavicka">
     <div class="divak-zapas">
