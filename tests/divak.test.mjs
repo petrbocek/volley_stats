@@ -67,7 +67,11 @@ const FIX = {
     { id: 13, zapas_id: 7, set_cislo: 2, hrac_id: null, pole: 'souper_chyba', zona1_hrac_id: 1 },
     { id: 14, zapas_id: 7, set_cislo: 2, hrac_id: 1, pole: 'pole_neutral', zona1_hrac_id: 1 },
   ],
-  vb_oddechove_casy: [{ id: 1, zapas_id: 7, set_cislo: 2, skore_my: 1, skore_oni: 1 }],
+  vb_oddechove_casy: [{ id: 1, zapas_id: 7, set_cislo: 2, skore_my: 2, skore_oni: 0 }],
+  // Epsilon (5) šla z place, Nehrající (9) na něj — 9 schválně není v sestavě,
+  // ať je vidět, že se jméno dotáhne i tak
+  vb_stridani: [{ id: 1, zapas_id: 7, set_cislo: 2, skore_my: 2, skore_oni: 1,
+                  hrac_ven: 5, hrac_dovnitr: 9 }],
 };
 
 let dotazy = [];
@@ -140,9 +144,11 @@ pass &= ok('D8 je vidět, kdo podává a kdo je na řadě', await (async () => {
 pass &= ok('D9 průběh má proužek za každou bodovou výměnu',
   await page.$$eval('.prubeh-tik', els => els.length) === 4);
 pass &= ok('D10 neutrální akce se do výměn nepočítá (pole)',
-  await page.$$eval('.prubeh-radek', els => els.length) === 4);
+  await page.$$eval('.prubeh-radek:not(.prerus)', els => els.length) === 4);
 pass &= ok('D11 v rozpisu je stav, akce i hráčka', await (async () => {
-  const radky = await page.$$eval('.prubeh-radek', els => els.map(e => e.textContent.replace(/\s+/g, ' ').trim()));
+  // jen výměny: přerušení (time-out, střídání) mají vlastní řádky mezi nimi
+  const radky = await page.$$eval('.prubeh-radek:not(.prerus)',
+    els => els.map(e => e.textContent.replace(/\s+/g, ' ').trim()));
   // nejnovější nahoře: 3:1 chyba soupeře, 2:1 bod soupeře, 2:0 eso Alfy
   return /3:1/.test(radky[0]) && /Chyba soupeře/.test(radky[0]) && /Soupeř/.test(radky[0]) &&
          /Servis/.test(radky[2]) && /Alfa/.test(radky[2]);
@@ -153,6 +159,32 @@ pass &= ok('D13 side-out se počítá z prvního podání',
   /Side-out 100%/.test(await page.textContent('#divak-prubeh')));
 
 // ── čte se jen, nikdy nepíše ──────────────────────────────────────────────
+// ── time-out a střídání v logu ────────────────────────────────────────────
+pass &= ok('D13a time-out je v průběhu vidět i se stavem', await (async () => {
+  const t = await page.textContent('#divak-prubeh');
+  const radek = await page.$$eval('.prubeh-radek.prerus', els =>
+    els.map(e => e.textContent.replace(/\s+/g, ' ').trim()));
+  return /Time-out/.test(t) && radek.some(r => /Time-out/.test(r) && /2:0/.test(r));
+})());
+pass &= ok('D13b střídání ukáže, kdo za koho', await (async () => {
+  const radek = await page.$$eval('.prubeh-radek.prerus', els =>
+    els.map(e => e.textContent.replace(/\s+/g, ' ').trim()));
+  return radek.some(r => /Střídání/.test(r) && /Nehrající/.test(r) && /za/.test(r) &&
+                         /Epsilon/.test(r) && /2:1/.test(r));
+})());
+pass &= ok('D13c přerušení sedí mezi výměny podle stavu', await page.evaluate(() => {
+  // pořadí odshora: 3:1, střídání 2:1, 2:1, time-out 2:0, 2:0, 1:0
+  const radky = [...document.querySelectorAll('.prubeh-radek')]
+    .map(e => ({ prerus: e.classList.contains('prerus'),
+                 skore: e.querySelector('.prubeh-skore').textContent.replace(/\s/g, '') }));
+  const i = radky.findIndex(r => r.prerus && r.skore === '2:1');
+  const j = radky.findIndex(r => r.prerus && r.skore === '2:0');
+  return i > 0 && radky[i - 1].skore === '3:1' && radky[i + 1].skore === '2:1' &&
+         j > i && radky[j - 1].skore === '2:1' && radky[j + 1].skore === '2:0';
+}));
+pass &= ok('D13d přerušení se nepočítají mezi výměny',
+  await page.$$eval('.prubeh-tik', els => els.length) === 4);
+
 pass &= ok('D14 stránka nikam nezapisuje', zapisy.length === 0);
 pass &= ok('D15 tahá jen tenhle zápas, ne celou databázi',
   dotazy.every(q => q.tabulka === 'vb_zapasy' || q.tabulka === 'vb_hraci' ||

@@ -14,7 +14,7 @@ const OBNOVA_KLID_MS=30000;       // nikdo zrovna nehraje
 const VYMEN_V_SEZNAMU=12;         // co se vejde na telefon bez scrollování
 
 const d={zapas:null,hraci:[],sestava:[],statistiky:[],chyby:[],postaveni:[],
-         setInfo:[],udalosti:[],oddechove:[],set:1,nacteno:null,chyba:null};
+         setInfo:[],udalosti:[],oddechove:[],stridani:[],set:1,nacteno:null,chyba:null};
 let obnovaTimer=null;
 
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>
@@ -43,7 +43,7 @@ async function nacti(){
     if(!zapas){d.zapas=null;d.chyba=null;d.nacteno=new Date();vykresli();return;}
     d.zapas=zapas;
     const id=zapas.id;
-    const [sestava,statistiky,chyby,postaveni,setInfo,udalosti,oddechove]=await Promise.all([
+    const [sestava,statistiky,chyby,postaveni,setInfo,udalosti,oddechove,stridani]=await Promise.all([
       ziskej(`vb_zapas_hraci?zapas_id=eq.${id}`),
       ziskej(`vb_statistiky?zapas_id=eq.${id}`),
       ziskej(`vb_chyby_souperu?zapas_id=eq.${id}`),
@@ -51,11 +51,13 @@ async function nacti(){
       ziskej(`vb_set_info?zapas_id=eq.${id}`),
       ziskej(`vb_udalosti?zapas_id=eq.${id}&order=id.asc`),
       ziskej(`vb_oddechove_casy?zapas_id=eq.${id}&order=id.asc`),
+      ziskej(`vb_stridani?zapas_id=eq.${id}&order=id.asc`),
     ]);
     d.sestava=sestava;d.statistiky=statistiky;d.chyby=chyby;d.postaveni=postaveni;
-    d.setInfo=setInfo;d.udalosti=udalosti;d.oddechove=oddechove;
+    d.setInfo=setInfo;d.udalosti=udalosti;d.oddechove=oddechove;d.stridani=stridani;
     // hráčky dotahuju až podle sestavy, ne celou kartotéku
-    const ids=[...new Set(sestava.map(s=>s.hrac_id))];
+    const ids=[...new Set([...sestava.map(s=>s.hrac_id),
+      ...stridani.flatMap(x=>[x.hrac_ven,x.hrac_dovnitr])].filter(Boolean))];
     d.hraci=ids.length?await ziskej(`vb_hraci?id=in.(${ids.join(',')})`):[];
     d.set=rozehranySet();
     d.nacteno=new Date();
@@ -75,6 +77,8 @@ function setMaData(set){
            Object.keys(s).some(k=>k.includes('_')&&s[k]>0))||
          d.chyby.some(c=>(c.set_cislo||1)===set&&((c.pocet||0)+(c.body||0))>0)||
          d.udalosti.some(u=>(u.set_cislo||1)===set)||
+         d.oddechove.some(o=>(o.set_cislo||1)===set)||
+         d.stridani.some(x=>(x.set_cislo||1)===set)||
          d.postaveni.some(p=>(p.set_cislo||1)===set);
 }
 
@@ -199,12 +203,64 @@ function podaniHtml(){
   </div>`;
 }
 
+/* Time-outy a střídání nemají v logu výměn pořadí — vedou se zvlášť se
+   stavem, ve kterém padly. Do průběhu se proto vkládají podle skóre: za
+   výměnu, která na ten stav dovedla. Přesnější pořadí by znamenalo ukládat
+   i pozici ve výměnách; stav stačí a divák se podle něj zorientuje (#102). */
+function prerusenaSetu(set){
+  const prerusy=[];
+  d.oddechove.filter(o=>(o.set_cislo||1)===set).forEach(o=>prerusy.push(
+    {typ:'timeout',my:o.skore_my,oni:o.skore_oni,id:o.id}));
+  d.stridani.filter(x=>(x.set_cislo||1)===set).forEach(x=>prerusy.push(
+    {typ:'stridani',my:x.skore_my,oni:x.skore_oni,id:x.id,
+     ven:hracka(x.hrac_ven),dovnitr:hracka(x.hrac_dovnitr)}));
+  return prerusy;
+}
+
+// Výměny a přerušení do jednoho seznamu, seřazené podle stavu.
+function prubehSPrerusenimi(set){
+  const kroky=prubehZVymen(vymenySetu(set).vymeny).map(k=>({...k,typ:'vymena'}));
+  const radky=[];
+  prerusenaSetu(set).forEach(p=>{
+    // index poslední výměny, po které stav sedí; před první výměnou → na začátek
+    let kam=-1;
+    kroky.forEach((k,i)=>{if(k.my<=p.my&&k.oni<=p.oni)kam=i;});
+    radky.push({...p,po:kam});
+  });
+  const vysledek=[];
+  kroky.forEach((k,i)=>{
+    vysledek.push(k);
+    radky.filter(r=>r.po===i).forEach(r=>vysledek.push(r));
+  });
+  radky.filter(r=>r.po===-1).forEach(r=>vysledek.unshift(r));
+  return vysledek;
+}
+
+function radekPrerusení(p){
+  if(p.typ==='timeout')return `<div class="prubeh-radek prerus">
+    <span class="prubeh-poradi">⏸</span>
+    <span class="prubeh-skore">${p.my}:${p.oni}</span>
+    <span class="prubeh-akce">Time-out</span>
+    <span class="prubeh-kdo"></span>
+    <span class="prubeh-break prazdny"></span>
+  </div>`;
+  const jmeno=h=>h?esc(h.jmeno)+(h.cislo?` #${h.cislo}`:''):'—';
+  return `<div class="prubeh-radek prerus">
+    <span class="prubeh-poradi">⇅</span>
+    <span class="prubeh-skore">${p.my}:${p.oni}</span>
+    <span class="prubeh-akce">Střídání</span>
+    <span class="prubeh-kdo">${jmeno(p.dovnitr)} za ${jmeno(p.ven)}</span>
+    <span class="prubeh-break prazdny"></span>
+  </div>`;
+}
+
 function prubehHtml(){
   const {vymeny,znamePrvni}=vymenySetu(d.set);
   const kroky=prubehZVymen(vymeny);
-  if(!kroky.length)return '<div class="divak-prazdno">V tomhle setu zatím není zapsaná žádná výměna.</div>';
+  const vse=prubehSPrerusenimi(d.set);
+  if(!vse.length)return '<div class="divak-prazdno">V tomhle setu zatím není zapsaná žádná výměna.</div>';
   const so=sideOutZVymen(vymeny,znamePrvni);
-  const posledni=[...kroky].reverse().slice(0,VYMEN_V_SEZNAMU);
+  const posledni=[...vse].reverse().slice(0,VYMEN_V_SEZNAMU);
   return `<div class="divak-radek">
       <span class="divak-nazev" title="Sytě = zisk podání">Průběh</span>
       <span class="prubeh-pas">${kroky.map(k=>
@@ -213,6 +269,7 @@ function prubehHtml(){
       ${so&&so.pct!=null?`<span class="divak-proc">Side-out ${so.pct}%</span>`:''}
     </div>
     <div class="prubeh-seznam">${posledni.map(k=>{
+      if(k.typ!=='vymena')return radekPrerusení(k);
       const h=hracka(k.hrac_id);
       const souper=k.pole==='souper_chyba'?'Chyba soupeře':k.pole==='souper_bod'?'Bod soupeře':null;
       return `<div class="prubeh-radek ${k.bod}">
@@ -223,7 +280,7 @@ function prubehHtml(){
         ${k.break?'<span class="prubeh-break" title="Zisk podání">⇄</span>':'<span class="prubeh-break prazdny"></span>'}
       </div>`;
     }).join('')}</div>
-    ${kroky.length>VYMEN_V_SEZNAMU?`<div class="divak-vic">Zobrazeno posledních ${VYMEN_V_SEZNAMU} z ${kroky.length} výměn.</div>`:''}`;
+    ${vse.length>VYMEN_V_SEZNAMU?`<div class="divak-vic">Zobrazeno posledních ${VYMEN_V_SEZNAMU} z ${vse.length} záznamů.</div>`:''}`;
 }
 
 function patickaHtml(){

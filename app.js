@@ -1,7 +1,7 @@
 /* Pravidla (co je bod, posty po zónách, výměny z logu) žijí v sdilene.js —
    čte je i divácká stránka a smí existovat jen jednou (#102). */
 
-const state={sezony:[],activeSeason:null,hraci:[],hraciSezony:[],zapasy:[],statistiky:[],tymy:[],hraciTymy:[],souteze:[],zapasHraci:[],chybySouperu:[],postaveni:[],setInfo:[],udalosti:[],oddechove:[],liveZapasId:null,liveSet:1};
+const state={sezony:[],activeSeason:null,hraci:[],hraciSezony:[],zapasy:[],statistiky:[],tymy:[],hraciTymy:[],souteze:[],zapasHraci:[],chybySouperu:[],postaveni:[],setInfo:[],udalosti:[],oddechove:[],stridani:[],liveZapasId:null,liveSet:1};
 
 // Rozepsaný set si pamatujeme podle zápasu: po reloadu uprostřed třetího setu
 // by skok zpátky na první znamenal zapisovat do špatného setu.
@@ -188,7 +188,7 @@ async function apiPatch(table,id,body){
 
 async function init(){
   try{
-    const [sez,hr,hs,zap,stat,tym,ht,sout,zh,chyby,post,setinfo,udal,odd]=await Promise.all([
+    const [sez,hr,hs,zap,stat,tym,ht,sout,zh,chyby,post,setinfo,udal,odd,strid]=await Promise.all([
       // Řazení musí být jednoznačné, jinak může stránkování řádky přeskočit
       // nebo zopakovat — proto všude rozhodující sloupec navíc.
       apiAll('vb_sezony?order=id.desc'),
@@ -205,6 +205,7 @@ async function init(){
       apiAll('vb_set_info?order=zapas_id.asc,set_cislo.asc'),
       apiAll('vb_udalosti?order=id.asc'),
       apiAll('vb_oddechove_casy?order=id.asc'),
+      apiAll('vb_stridani?order=id.asc'),
     ]);
     state.sezony=sez||[];
     state.hraci=hr||[];
@@ -220,6 +221,7 @@ async function init(){
     state.setInfo=setinfo||[];
     state.udalosti=udal||[];
     state.oddechove=odd||[];
+    state.stridani=strid||[];
     state.activeSeason=(sez||[]).find(s=>s.aktivni)||null;
     renderSeasonSelect();
     renderAll();
@@ -1290,10 +1292,51 @@ function v2VyberDoZony(hracId){
   stridaniZony=0;
   closeModal('modal-v2-zona');
   if(zona){
+    // kdo z place odchází, se musí přečíst ještě před přestavěním zóny
+    const odchazi=postaveniSetu(zapasId,state.liveSet).get(zona)||null;
     postavDoZony(zapasId,state.liveSet,zona,hracId);
-    if(bylStridani)bumpSetInfo(zapasId,'stridani',1);
+    if(bylStridani)zapisStridani(zapasId,state.liveSet,odchazi,hracId);
   }
   else prepniLibero(zapasId,hracId);          // slot libera, ne zóna na hřišti
+}
+
+/* ─── STŘÍDÁNÍ ───
+   Vede se po jednom i se stavem a jmény, stejně jako time-outy: z pouhého
+   počítadla se nepozná, kdo šel z place a kdo na něj, takže se střídání
+   nedalo ukázat divákům ani dohledat po zápase (#102).
+
+   Starší zápasy mají jen počítadlo ve vb_set_info. Když k setu žádný řádek
+   není, počet se vezme odtamtud, ať se o ně nepřijde. */
+function stridaniSetu(zapasId,set){
+  return state.stridani
+    .filter(x=>x.zapas_id===zapasId&&(x.set_cislo||1)===set)
+    .sort((a,b)=>a.id-b.id);
+}
+
+function stridaniPocet(zapasId,set){
+  const radky=stridaniSetu(zapasId,set);
+  return radky.length||setInfo(zapasId,set).stridani||0;
+}
+
+async function zapisStridani(zapasId,set,ven,dovnitr){
+  if(!isLoggedIn())return;
+  const s=skoreSetu(zapasId,set);
+  const docasne={id:Number.MAX_SAFE_INTEGER,zapas_id:zapasId,set_cislo:set,
+                 skore_my:s.nase,skore_oni:s.jejich,hrac_ven:ven,hrac_dovnitr:dovnitr};
+  state.stridani.push(docasne);
+  prekresliLive(zapasId);
+  try{
+    const r=await apiRpc('vb_zapis_stridani',{p_zapas:zapasId,p_set:set,
+      p_my:s.nase,p_oni:s.jejich,p_ven:ven,p_dovnitr:dovnitr});
+    const i=state.stridani.indexOf(docasne);
+    if(i>=0){if(r&&r.id)state.stridani[i]=r;else state.stridani.splice(i,1);}
+    prekresliLive(zapasId);
+  }catch(e){
+    const i=state.stridani.indexOf(docasne);
+    if(i>=0)state.stridani.splice(i,1);
+    prekresliLive(zapasId);
+    toast('Střídání se neuložilo: '+e.message,'error');
+  }
 }
 
 function v2Stridat(){
@@ -1777,6 +1820,7 @@ function hristeInfoHtml(zapasId){
   const b=bodyPoHrackach(zapasId,set);
   const info=setInfo(zapasId,set);
   const vzate=oddechoveSetu(zapasId,set);
+  const stridanych=stridaniPocet(zapasId,set);
   const oddechovych=oddechovePocet(zapasId,set);
   const teckyOddechove=Array.from({length:Math.max(ODDECHOVE_NA_SET,oddechovych)},(_,i)=>
     `<span class="tecka${i<oddechovych?' cerpana':''}"></span>`).join('');
@@ -1801,7 +1845,7 @@ function hristeInfoHtml(zapasId){
         ${stavyOddechovych}
       </button>
       <span class="hriste-info-nazev">Střídání</span>
-      <span class="info-hodnota${info.stridani>STRIDANI_NA_SET?' prekroceno':''}">${info.stridani}/${STRIDANI_NA_SET}</span>
+      <span class="info-hodnota${stridanych>STRIDANI_NA_SET?' prekroceno':''}">${stridanych}/${STRIDANI_NA_SET}</span>
       <span class="hriste-info-souper" title="Chyby a body soupeře v tomhle setu">Soupeř ${souper}</span>
     </div>
     ${b.dela||b.dava?`<div class="hriste-info-radek">

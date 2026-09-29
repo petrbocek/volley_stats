@@ -654,3 +654,11 @@ button.hriste-dlazdice:focus-visible{outline:2px solid var(--accent);outline-off
 .divak-nehraje-ikona{font-size:40px;line-height:1.4}
 .divak-nehraje-text{font-size:18px;font-weight:700;margin-top:8px}
 .divak-nehraje-popis{font-size:13px;color:var(--muted);margin-top:4px}
+
+/* Přerušení v diváckém průběhu: time-out a střídání (#102). */
+.prubeh-radek.prerus{border-left-color:var(--muted);background:var(--surface2)}
+.prubeh-radek.prerus .prubeh-skore{color:var(--muted);font-weight:700}
+.prubeh-radek.prerus .prubeh-akce{color:var(--muted)}
+/* Jméno za jméno se na telefon nevejde na jeden řádek — u přerušení se smí
+   zalomit, ořezané „Nehrající #9…" nikomu nic neřekne. */
+.prubeh-radek.prerus .prubeh-kdo{white-space:normal;text-align:right;line-height:1.4}

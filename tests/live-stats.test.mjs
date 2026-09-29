@@ -41,6 +41,7 @@ const FIX = {
   vb_set_info: [],
   vb_udalosti: [],
   vb_oddechove_casy: [],
+  vb_stridani: [],
   vb_zapas_hraci: [{ zapas_id: 100, hrac_id: 10 }, { zapas_id: 100, hrac_id: 11 },
                    { zapas_id: 100, hrac_id: 12 }, { zapas_id: 100, hrac_id: 13 },
                    { zapas_id: 200, hrac_id: 10 }],
@@ -140,6 +141,18 @@ await page.route('**/rest/v1/rpc/vb_smaz_posledni_oddechovy', async route => {
     if (o.zapas_id === p_zapas && o.set_cislo === p_set) { FIX.vb_oddechove_casy.splice(i, 1); break; }
   }
   return route.fulfill({ status: 200, contentType: 'application/json', body: 'null' });
+});
+
+let stridaniId = 700;
+let stridaniRpc = [];
+await page.route('**/rest/v1/rpc/vb_zapis_stridani', async route => {
+  const { p_zapas, p_set, p_my, p_oni, p_ven, p_dovnitr } = route.request().postDataJSON();
+  stridaniRpc.push({ p_zapas, p_set, p_my, p_oni, p_ven, p_dovnitr });
+  const r = { id: stridaniId++, zapas_id: p_zapas, set_cislo: p_set, skore_my: p_my,
+              skore_oni: p_oni, hrac_ven: p_ven, hrac_dovnitr: p_dovnitr,
+              created_at: new Date().toISOString() };
+  FIX.vb_stridani.push(r);
+  return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(r) });
 });
 
 let chybyRpc = [];
@@ -2924,12 +2937,13 @@ pass &= ok('T44g2 pravým tlačítkem se poslední time-out vrátí (#84)',
 await page.click('.info-oddechovy');
 await page.waitForTimeout(600);
 
-// střídání se počítá samo
-// měří se proti serveru: v paměti nemusí řádek setu ještě existovat, dokud
-// se do něj nezapsalo, a nula z výchozí hodnoty by ukázala falešný přírůstek
+// střídání se počítá samo a vede se i s tím, kdo šel z place a kdo na něj
 const setNaHristi = await page.evaluate(() => state.liveSet);
-const radekSetu = () => FIX.vb_set_info.find(x => x.zapas_id === 100 && x.set_cislo === setNaHristi);
-const predStrid = (radekSetu() || { stridani: 0 }).stridani;
+const predStrid = await page.evaluate(() => stridaniPocet(100, state.liveSet));
+const predStavem = await page.evaluate(() => skoreSetu(100, state.liveSet));
+const odchazi = await page.evaluate(() =>
+  postaveniSetu(100, state.liveSet).get([...postaveniSetu(100, state.liveSet).keys()][0]));
+stridaniRpc = [];
 await page.click('.hriste .hriste-zona:not(.prazdna)');
 await page.waitForSelector('#modal-v2-akce:not(.hidden)');
 await page.click('#btn-v2-stridat');
@@ -2937,8 +2951,14 @@ await page.waitForSelector('#modal-v2-zona:not(.hidden)');
 await page.click('#v2-zona-obsah .player-card');
 await page.waitForTimeout(800);
 pass &= ok('T44h střídání se přičte samo, neklika se zvlášť (#84)',
-  radekSetu().stridani === predStrid + 1 &&
-  await page.evaluate(() => setInfo(100, state.liveSet).stridani) === predStrid + 1);
+  await page.evaluate(() => stridaniPocet(100, state.liveSet)) === predStrid + 1);
+pass &= ok('T44h2 zapíše se kdo za koho a za jakého stavu (#84, #102)',
+  stridaniRpc.length === 1 && stridaniRpc[0].p_set === setNaHristi &&
+  stridaniRpc[0].p_my === predStavem.nase && stridaniRpc[0].p_oni === predStavem.jejich &&
+  !!stridaniRpc[0].p_ven && !!stridaniRpc[0].p_dovnitr &&
+  stridaniRpc[0].p_ven !== stridaniRpc[0].p_dovnitr);
+pass &= ok('T44h3 z place odešla ta, co v zóně opravdu stála (#84, #102)',
+  stridaniRpc[0].p_ven === odchazi);
 pass &= ok('T44i a je vidět kolik z kolika (#84)', await page.evaluate(() =>
   new RegExp('\\d+/' + STRIDANI_NA_SET).test(document.querySelector('.hriste-info').textContent)));
 pass &= ok('T44i2 střídání se hraje na osm, ne na šest (#84)',
@@ -2952,13 +2972,15 @@ pass &= ok('T44j0 je koho postavit, jinak by se měřilo prázdno (#84)',
     return lavicka(100, state.liveSet).length > 0;
   }));
 await page.waitForTimeout(400);
-const predObsazenim = await page.evaluate(() => setInfo(100, state.liveSet).stridani);
+const predObsazenim = await page.evaluate(() => stridaniPocet(100, state.liveSet));
+stridaniRpc = [];
 await page.click('.hriste .hriste-zona.prazdna');
 await page.waitForSelector('#modal-v2-zona:not(.hidden)');
 await page.click('#v2-zona-obsah .player-card');
 await page.waitForTimeout(800);
 pass &= ok('T44j obsazení prázdné zóny se jako střídání nepočítá (#84)',
-  await page.evaluate(() => setInfo(100, state.liveSet).stridani) === predObsazenim);
+  await page.evaluate(() => stridaniPocet(100, state.liveSet)) === predObsazenim &&
+  stridaniRpc.length === 0);
 
 // kdo dělá body a kdo je dává
 pass &= ok('T44k je vidět, kdo dělá body a kdo je dává (#84)', await page.evaluate(() => {
