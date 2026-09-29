@@ -24,6 +24,16 @@ const FIX = {
       vitezne_sety: 3, sezona_id: 1, set1_my: null, set1_oni: null },
     { id: 8, datum: '2026-09-20', cas: null, soupet: 'Starý zápas', stav: STAV.DOKONCENY,
       vitezne_sety: 3, sezona_id: 1 },
+    // dva dohrané s výsledkem: jeden vyhraný, jeden prohraný
+    { id: 9, datum: '2026-09-27', cas: null, soupet: 'VK Trutnov', stav: STAV.DOKONCENY,
+      vitezne_sety: 3, sezona_id: 1, set1_my: 25, set1_oni: 20, set2_my: 25, set2_oni: 18,
+      set3_my: 20, set3_oni: 25, set4_my: 25, set4_oni: 22 },
+    { id: 10, datum: '2026-08-15', cas: null, soupet: 'TJ Jih', stav: STAV.DOKONCENY,
+      vitezne_sety: 3, sezona_id: 1, set1_my: 25, set1_oni: 21, set2_my: 18, set2_oni: 25,
+      set3_my: 20, set3_oni: 25, set4_my: 23, set4_oni: 25 },
+    // plánovaný: na zápase, který nezačal, není co koukat
+    { id: 11, datum: '2026-11-01', cas: '18:00:00', soupet: 'Budoucí soupeř',
+      stav: STAV.PLANOVANY, vitezne_sety: 3, sezona_id: 1 },
   ],
   vb_hraci: [
     { id: 1, jmeno: 'Alfa', cislo: 1, pozice: 'blokař', aktivni: true },
@@ -109,16 +119,78 @@ await page.route('**/rest/v1/**', async route => {
       data = data.filter(r => seznam.includes(String(r[klic])));
     }
   }
+  // order= se respektuje: pořadí v seznamu je věc dotazu, ne náhody
+  const order = url.searchParams.get('order');
+  if (order) {
+    const klice = order.split(',').map(x => {
+      const [k, smer] = x.split('.'); return { k, desc: smer === 'desc' };
+    });
+    data.sort((a, b) => {
+      for (const { k, desc } of klice) {
+        const av = a[k] ?? '', bv = b[k] ?? '';
+        if (av === bv) continue;
+        return (av > bv ? 1 : -1) * (desc ? -1 : 1);
+      }
+      return 0;
+    });
+  }
   const limit = parseInt(url.searchParams.get('limit'));
   if (limit) data = data.slice(0, limit);
   return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(data) });
 });
 
-// ── rozehraný zápas ───────────────────────────────────────────────────────
+// ── seznam zápasů ─────────────────────────────────────────────────────────
 await page.goto(`${ADRESA}/divak.html`);
+await page.waitForSelector('.divak-polozka');
+
+pass &= ok('D0a úvodní stránka je seznam, ne rovnou zápas',
+  await page.$('.divak-seznam') !== null && await page.$('.divak-skore-cisla') === null);
+pass &= ok('D0b rozehraný zápas je první', await page.evaluate(() => {
+  const prvni = document.querySelector('.divak-polozka');
+  return prvni.classList.contains('zive') && /VK Ostrava/.test(prvni.textContent);
+}));
+pass &= ok('D0c odehrané jdou od nejnovějšího', await page.evaluate(() => {
+  const jmena = [...document.querySelectorAll('.divak-polozka:not(.zive) .divak-polozka-soupet')]
+    .map(e => e.textContent.trim());
+  return JSON.stringify(jmena) === JSON.stringify(['VK Trutnov', 'Starý zápas', 'TJ Jih']);
+}));
+pass &= ok('D0d plánovaný zápas se nenabízí',
+  !/Budoucí soupeř/.test(await page.textContent('#divak')));
+pass &= ok('D0e u rozehraného je stav právě běžícího setu', await (async () => {
+  const t = (await page.textContent('.divak-polozka.zive')).replace(/\s+/g, ' ');
+  return /2\. set 3:1/.test(t) && /0:0/.test(t);
+})());
+pass &= ok('D0f u odehraného jsou sety i výsledek', await page.evaluate(() => {
+  const p = [...document.querySelectorAll('.divak-polozka')]
+    .find(e => /VK Trutnov/.test(e.textContent));
+  const t = p.textContent.replace(/\s+/g, ' ');
+  return /3:1/.test(t) && /25:20/.test(t) &&
+         p.querySelector('.divak-polozka-sety').classList.contains('vyhra');
+}));
+pass &= ok('D0g prohra se odliší od výhry', await page.evaluate(() => {
+  const p = [...document.querySelectorAll('.divak-polozka')]
+    .find(e => /TJ Jih/.test(e.textContent));
+  return p.querySelector('.divak-polozka-sety').classList.contains('prohra');
+}));
+pass &= ok('D0g2 dohraný zápas bez výsledku se nevydává za 0:0', await page.evaluate(() => {
+  const p = [...document.querySelectorAll('.divak-polozka')]
+    .find(e => /Starý zápas/.test(e.textContent));
+  return p.querySelector('.divak-polozka-sety').textContent.trim() === '\u2014';
+}));
+pass &= ok('D0h položka je odkaz na ten zápas', await page.evaluate(() =>
+  document.querySelector('.divak-polozka').getAttribute('href') === '?zapas=7'));
+pass &= ok('D0i seznam tahá jen zápasy a stav těch rozehraných',
+  dotazy.every(q => q.tabulka === 'vb_zapasy' ||
+    (['vb_statistiky', 'vb_chyby_souperu'].includes(q.tabulka) && /zapas_id=in\./.test(q.query))));
+
+const dotazySeznamu = dotazy.slice();
+
+// ── detail zápasu ─────────────────────────────────────────────────────────
+dotazy = [];
+await page.goto(`${ADRESA}/divak.html?zapas=7`);
 await page.waitForSelector('.divak-skore-cisla');
 
-pass &= ok('D1 stránka sama najde rozehraný zápas', await (async () => {
+pass &= ok('D1 odkaz otevře zápas i s hlavičkou', await (async () => {
   const t = await page.textContent('.divak-hlavicka');
   return /VK Ostrava/.test(t) && /Probíhá/.test(t);
 })());
@@ -214,14 +286,20 @@ pass &= ok('D15 tahá jen tenhle zápas, ne celou databázi',
   dotazy.every(q => q.tabulka === 'vb_zapasy' || q.tabulka === 'vb_hraci' ||
     /zapas_id=eq\.7/.test(q.query)) &&
   !dotazy.some(q => ['vb_sezony', 'vb_tymy', 'vb_souteze', 'vb_hraci_tymy'].includes(q.tabulka)));
-pass &= ok('D15b ptá se na stav, který appka opravdu zapisuje',
-  STAV.PROBIHA === 'probihajici' &&
-  dotazy.some(q => q.tabulka === 'vb_zapasy' &&
-    q.query.includes(`stav=eq.${STAV.PROBIHA}`)));
+pass &= ok('D15b ptá se na stavy, které appka opravdu zapisuje',
+  STAV.PROBIHA === 'probihajici' && STAV.DOKONCENY === 'dokonceny' &&
+  dotazySeznamu.some(q => q.tabulka === 'vb_zapasy' &&
+    q.query.includes(`stav=in.(${STAV.PROBIHA},${STAV.DOKONCENY})`)));
 pass &= ok('D16 nesahá na tabulky, které nejsou veřejné',
   !dotazy.some(q => ['vb_zapisovatele', 'vb_zaloha_smazane'].includes(q.tabulka)));
 pass &= ok('D17 nikde není tlačítko, co by zapisovalo', await page.evaluate(() =>
   document.querySelectorAll('button, input, select, [onclick]').length === 0));
+// Prolistování je odkazy, ne skriptem — ať se tím do stránky nepřinese ovládání.
+pass &= ok('D17b odkazy vedou jen po téhle stránce', await page.evaluate(() =>
+  [...document.querySelectorAll('a')].every(a => {
+    const h = a.getAttribute('href') || '';
+    return /^\?zapas=\d+(&set=\d+)?$/.test(h) || h === 'divak.html';
+  })));
 
 // ── živě ──────────────────────────────────────────────────────────────────
 pass &= ok('D18 je vidět, jak čerstvá data jsou',
@@ -247,31 +325,60 @@ pass &= ok('D20 výpadek spojení se přizná', await (async () => {
 })());
 vypadek = false;
 
-// ── jen rozehraný zápas, nic jiného ───────────────────────────────────────
-// Po ukončení zápasu se stránka nemá čím chlubit — ať to řekne, místo aby
-// ukazovala starý výsledek jako živý.
-FIX.vb_zapasy[0].stav = STAV.DOKONCENY;
-await page.waitForFunction(() => !!document.querySelector('.divak-nehraje'),
-  null, { timeout: 15000 }).catch(() => {});
-pass &= ok('D21 po ukončení zápasu stránka řekne, že se nehraje', await (async () => {
-  const t = await page.textContent('#divak');
-  return /Teď se nehraje/.test(t) && !/VK Ostrava/.test(t);
+// ── odehrané zápasy se dají prolistovat ───────────────────────────────────
+await page.goto(`${ADRESA}/divak.html?zapas=9`);
+await page.waitForSelector('.divak-hlavicka');
+pass &= ok('D21 dohraný zápas se otevře i s výsledkem', await (async () => {
+  const t = await page.textContent('.divak-hlavicka');
+  return /VK Trutnov/.test(t) && /Dokončený/.test(t) &&
+    (await page.textContent('.divak-sety-cislo')).replace(/\s/g, '') === '3:1';
 })());
-pass &= ok('D22 dohraný zápas se nevydává za živý',
-  await page.$('.divak-skore-cisla') === null);
+pass &= ok('D21c zapsaný výsledek setu platí i bez statistik', await (async () => {
+  // starší zápas nemá zapsané akce, ale výsledky setů ano — nesmí to hlásit 0:0
+  return /4\. set/.test(await page.textContent('.divak-skore-popis')) &&
+    (await page.textContent('.divak-skore-cisla')).replace(/\s/g, '') === '25:22' &&
+    await page.$$eval('.skore-sety a', els => els.length) === 4;
+})());
+pass &= ok('D21b cesta zpátky na seznam je vidět',
+  await page.getAttribute('.divak-zpet', 'href') === 'divak.html');
 
-// další zápas dne se chytne sám, bez sahání na adresu
-FIX.vb_zapasy[1].stav = STAV.PROBIHA;
-await page.waitForFunction(() => /Starý zápas/.test(document.body.textContent),
-  null, { timeout: 15000 }).catch(() => {});
-pass &= ok('D23 další rozehraný zápas se chytne sám',
-  /Starý zápas/.test(await page.textContent('.divak-hlavicka')));
+// set v adrese prolistuje zápas po setech
+await page.goto(`${ADRESA}/divak.html?zapas=7&set=1`);
+await page.waitForSelector('.divak-skore-cisla');
+pass &= ok('D22 set z adresy se ukáže, ne ten poslední', await (async () => {
+  return /1\. set/.test(await page.textContent('.divak-skore-popis')) &&
+    (await page.textContent('.divak-skore-cisla')).replace(/\s/g, '') === '2:0';
+})());
+pass &= ok('D22b sety v detailu jsou odkazy na sebe', await page.evaluate(() =>
+  [...document.querySelectorAll('.skore-sety a')].some(a =>
+    a.getAttribute('href') === '?zapas=7&set=2')));
+pass &= ok('D22c nesmyslný set v adrese spadne zpátky na rozehraný', await (async () => {
+  await page.goto(`${ADRESA}/divak.html?zapas=7&set=9`);
+  await page.waitForSelector('.divak-skore-cisla');
+  return /2\. set/.test(await page.textContent('.divak-skore-popis'));
+})());
+pass &= ok('D23 smazaný zápas v adrese nerozbije stránku', await (async () => {
+  await page.goto(`${ADRESA}/divak.html?zapas=999`);
+  await page.waitForSelector('.divak-nehraje');
+  const t = await page.textContent('#divak');
+  return /Tenhle zápas tu není/.test(t) && await page.$('.divak-zpet') !== null;
+})());
 pass &= ok('D24 zápas bez zápisu nevypadá rozbitě', await (async () => {
+  await page.goto(`${ADRESA}/divak.html?zapas=8`);
+  await page.waitForSelector('.divak-hlavicka');
   const t = await page.textContent('#divak');
   return /nezapsala/.test(t) && /žádná výměna/.test(t);
 })());
+
+// po ukončení zápasu se seznam sám srovná, aniž by kdokoli sahal na adresu
+FIX.vb_zapasy[0].stav = STAV.DOKONCENY;
+await page.goto(`${ADRESA}/divak.html`);
+await page.waitForSelector('.divak-polozka');
+pass &= ok('D25 ukončený zápas přestane být v seznamu živý', await page.evaluate(() =>
+  document.querySelector('.divak-polozka.zive') === null &&
+  !/Právě se hraje/.test(document.getElementById('divak').textContent) &&
+  /VK Ostrava/.test(document.getElementById('divak').textContent)));
 FIX.vb_zapasy[0].stav = STAV.PROBIHA;
-FIX.vb_zapasy[1].stav = STAV.DOKONCENY;
 
 await b.close();
 console.log(pass ? '\nVŠE PROŠLO' : '\nNĚCO SELHALO');
