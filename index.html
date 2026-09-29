@@ -161,6 +161,29 @@
   </div>
 </div>
 
+<!-- Střídání soupeře: jen čísla na dresech, cizí soupisku nevedeme (#107) -->
+<div class="modal-overlay hidden" id="modal-v2-souper-stridani">
+  <div class="modal">
+    <div class="modal-title" id="v2-souper-title">Střídání soupeře</div>
+    <div class="souper-stridani">
+      <label>Jde na hřiště
+        <input type="number" id="v2-souper-dovnitr" min="0" max="99" inputmode="numeric"
+               placeholder="#" onkeydown="if(event.key==='Enter')v2ZapisStridaniSoupere()" />
+      </label>
+      <span class="souper-stridani-za">za</span>
+      <label>Jde z hřiště
+        <input type="number" id="v2-souper-ven" min="0" max="99" inputmode="numeric"
+               placeholder="#" onkeydown="if(event.key==='Enter')v2ZapisStridaniSoupere()" />
+      </label>
+    </div>
+    <div class="info-proc">Čísla nejsou povinná — bez nich se zapíše aspoň to, že se střídalo a za jakého stavu.</div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('modal-v2-souper-stridani')">Zrušit</button>
+      <button class="btn btn-primary" onclick="v2ZapisStridaniSoupere()">Zapsat</button>
+    </div>
+  </div>
+</div>
+
 <!-- Dlaždice u sítě: nejdřív akce, pak kdo ji udělal -->
 <div class="modal-overlay hidden" id="modal-v2-kdo">
   <div class="modal">

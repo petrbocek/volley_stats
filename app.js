@@ -1307,27 +1307,38 @@ function v2VyberDoZony(hracId){
 
    Starší zápasy mají jen počítadlo ve vb_set_info. Když k setu žádný řádek
    není, počet se vezme odtamtud, ať se o ně nepřijde. */
-function stridaniSetu(zapasId,set){
+function stridaniSetu(zapasId,set,strana){
+  const kdo=strana||STRANY.MY;
   return state.stridani
-    .filter(x=>x.zapas_id===zapasId&&(x.set_cislo||1)===set)
+    .filter(x=>x.zapas_id===zapasId&&(x.set_cislo||1)===set&&(x.strana||STRANY.MY)===kdo)
     .sort((a,b)=>a.id-b.id);
 }
 
-function stridaniPocet(zapasId,set){
-  const radky=stridaniSetu(zapasId,set);
-  return radky.length||setInfo(zapasId,set).stridani||0;
+function stridaniPocet(zapasId,set,strana){
+  const kdo=strana||STRANY.MY;
+  const radky=stridaniSetu(zapasId,set,kdo);
+  // Staré počítadlo je jen o nás: co je v datech bez strany, je naše.
+  if(radky.length||kdo!==STRANY.MY)return radky.length;
+  return setInfo(zapasId,set).stridani||0;
 }
 
-async function zapisStridani(zapasId,set,ven,dovnitr){
+/* Naše střídání je vazba na hráčku, soupeřovo dvě čísla na dresech — jinak
+   by u jména nebylo poznat, komu patří. Zbytek (stav, pořadí v průběhu,
+   zpět) je pro obě strany stejný (#107). */
+async function zapisStridani(zapasId,set,ven,dovnitr,strana,cisloVen,cisloDovnitr){
   if(!isLoggedIn())return;
+  const kdo=strana||STRANY.MY,oni=kdo===STRANY.ONI;
   const s=skoreSetu(zapasId,set);
-  const docasne={id:Number.MAX_SAFE_INTEGER,zapas_id:zapasId,set_cislo:set,
-                 skore_my:s.nase,skore_oni:s.jejich,hrac_ven:ven,hrac_dovnitr:dovnitr};
+  const docasne={id:Number.MAX_SAFE_INTEGER,zapas_id:zapasId,set_cislo:set,strana:kdo,
+                 skore_my:s.nase,skore_oni:s.jejich,
+                 hrac_ven:oni?null:ven,hrac_dovnitr:oni?null:dovnitr,
+                 cislo_ven:oni?cisloVen??null:null,cislo_dovnitr:oni?cisloDovnitr??null:null};
   state.stridani.push(docasne);
   prekresliLive(zapasId);
   try{
     const r=await apiRpc('vb_zapis_stridani',{p_zapas:zapasId,p_set:set,
-      p_my:s.nase,p_oni:s.jejich,p_ven:ven,p_dovnitr:dovnitr});
+      p_my:s.nase,p_oni:s.jejich,p_ven:oni?null:ven,p_dovnitr:oni?null:dovnitr,
+      p_strana:kdo,p_cislo_ven:docasne.cislo_ven,p_cislo_dovnitr:docasne.cislo_dovnitr});
     const i=state.stridani.indexOf(docasne);
     if(i>=0){if(r&&r.id)state.stridani[i]=r;else state.stridani.splice(i,1);}
     prekresliLive(zapasId);
@@ -1337,6 +1348,52 @@ async function zapisStridani(zapasId,set,ven,dovnitr){
     prekresliLive(zapasId);
     toast('Střídání se neuložilo: '+e.message,'error');
   }
+}
+
+/* ─── PŘERUŠENÍ SOUPEŘE ───
+   Divák viděl přerušení jen na naší straně, i když se na druhé taky střídá
+   a bere time-out. Vede se jen to, co je z tribuny vidět: čísla na dresech,
+   ne jména — cizí soupisku nikdo needituje (#107).
+
+   Dobrovolné: když se to neklikne, všechno ostatní funguje jako dřív. */
+function v2StridaniSoupere(){
+  const zapasId=state.liveZapasId;if(!zapasId)return;
+  if(!isLoggedIn()){toast('Na zapisování se přihlas (🔒 nahoře)','error');return;}
+  document.getElementById('v2-souper-dovnitr').value='';
+  document.getElementById('v2-souper-ven').value='';
+  const s=skoreSetu(zapasId,state.liveSet);
+  document.getElementById('v2-souper-title').textContent=
+    `Střídání soupeře — ${s.nase}:${s.jejich}`;
+  openModal('modal-v2-souper-stridani');
+  setTimeout(()=>document.getElementById('v2-souper-dovnitr').focus(),50);
+}
+
+function v2ZapisStridaniSoupere(){
+  const zapasId=state.liveZapasId;if(!zapasId)return;
+  const cislo=id=>{const v=document.getElementById(id).value.trim();
+                   return v===''?null:Math.max(0,Math.min(99,parseInt(v)||0));};
+  const dovnitr=cislo('v2-souper-dovnitr'),ven=cislo('v2-souper-ven');
+  closeModal('modal-v2-souper-stridani');
+  // Čísla jsou k dobru, ne podmínka: když se nestihnou opsat, ať se aspoň ví,
+  // že se střídalo a za jakého stavu.
+  zapisStridani(zapasId,state.liveSet,null,null,STRANY.ONI,ven,dovnitr);
+}
+
+function v2StridaniSoupereZpet(){
+  const zapasId=state.liveZapasId;if(!zapasId)return;
+  if(!isLoggedIn()){toast('Na změny se přihlas (🔒 nahoře)','error');return;}
+  const set=state.liveSet;
+  const radky=stridaniSetu(zapasId,set,STRANY.ONI);
+  if(!radky.length)return;
+  const posledni=radky[radky.length-1];
+  state.stridani=state.stridani.filter(x=>x!==posledni);
+  prekresliLive(zapasId);
+  apiRpc('vb_smaz_posledni_stridani',{p_zapas:zapasId,p_set:set,p_strana:STRANY.ONI})
+    .catch(e=>{
+      state.stridani.push(posledni);
+      prekresliLive(zapasId);
+      toast('Chyba: '+e.message,'error');
+    });
 }
 
 function v2Stridat(){
@@ -1515,33 +1572,37 @@ async function bumpSetInfo(zapasId,pole,delta){
 
    Starší zápasy mají jen počítadlo ve vb_set_info, bez stavu. Když k setu
    žádný řádek není, počet se vezme odtamtud, ať se o ně nepřijde. */
-function oddechoveSetu(zapasId,set){
+function oddechoveSetu(zapasId,set,strana){
+  const s=strana||STRANY.MY;
   return state.oddechove
-    .filter(o=>o.zapas_id===zapasId&&(o.set_cislo||1)===set)
+    .filter(o=>o.zapas_id===zapasId&&(o.set_cislo||1)===set&&(o.strana||STRANY.MY)===s)
     .sort((a,b)=>a.id-b.id);
 }
 
-function oddechovePocet(zapasId,set){
-  const radky=oddechoveSetu(zapasId,set);
-  return radky.length||setInfo(zapasId,set).oddechove_casy||0;
+function oddechovePocet(zapasId,set,strana){
+  const s=strana||STRANY.MY;
+  const radky=oddechoveSetu(zapasId,set,s);
+  // Staré počítadlo je jen o nás: co je v datech bez strany, je naše.
+  if(radky.length||s!==STRANY.MY)return radky.length;
+  return setInfo(zapasId,set).oddechove_casy||0;
 }
 
-async function v2Oddechovy(){
+async function v2Oddechovy(strana){
   const zapasId=state.liveZapasId;if(!zapasId)return;
   if(!isLoggedIn()){toast('Na zapisování se přihlas (🔒 nahoře)','error');return;}
-  const set=state.liveSet;
-  if(oddechovePocet(zapasId,set)>=ODDECHOVE_NA_SET){
-    if(!confirm('Time-outy jsou vyčerpané. Přidat další?'))return;
+  const set=state.liveSet,kdo=strana||STRANY.MY;
+  if(oddechovePocet(zapasId,set,kdo)>=ODDECHOVE_NA_SET){
+    if(!confirm(`Time-outy ${kdo===STRANY.ONI?'soupeře ':''}jsou vyčerpané. Přidat další?`))return;
   }
   const s=skoreSetu(zapasId,set);
   // do stavu hned, ať se dlaždice nečeká na server; id doplní odpověď
   const docasny={id:Number.MAX_SAFE_INTEGER,zapas_id:zapasId,set_cislo:set,
-                 skore_my:s.nase,skore_oni:s.jejich};
+                 skore_my:s.nase,skore_oni:s.jejich,strana:kdo};
   state.oddechove.push(docasny);
   prekresliLive(zapasId);
   try{
     const r=await apiRpc('vb_zapis_oddechovy',
-      {p_zapas:zapasId,p_set:set,p_my:s.nase,p_oni:s.jejich});
+      {p_zapas:zapasId,p_set:set,p_my:s.nase,p_oni:s.jejich,p_strana:kdo});
     const i=state.oddechove.indexOf(docasny);
     if(i>=0){if(r&&r.id)state.oddechove[i]=r;else state.oddechove.splice(i,1);}
     prekresliLive(zapasId);
@@ -1553,21 +1614,21 @@ async function v2Oddechovy(){
   }
 }
 
-async function v2OddechovyZpet(){
+async function v2OddechovyZpet(strana){
   const zapasId=state.liveZapasId;if(!zapasId)return;
   if(!isLoggedIn()){toast('Na změny se přihlas (🔒 nahoře)','error');return;}
-  const set=state.liveSet;
-  const radky=oddechoveSetu(zapasId,set);
+  const set=state.liveSet,kdo=strana||STRANY.MY;
+  const radky=oddechoveSetu(zapasId,set,kdo);
   // Zápasy bez řádků mají jen staré počítadlo — tam se ubírá po staru.
   if(!radky.length){
-    if(setInfo(zapasId,set).oddechove_casy>0)bumpSetInfo(zapasId,'oddechove_casy',-1);
+    if(kdo===STRANY.MY&&setInfo(zapasId,set).oddechove_casy>0)bumpSetInfo(zapasId,'oddechove_casy',-1);
     return;
   }
   const posledni=radky[radky.length-1];
   state.oddechove=state.oddechove.filter(o=>o!==posledni);
   prekresliLive(zapasId);
   try{
-    await apiRpc('vb_smaz_posledni_oddechovy',{p_zapas:zapasId,p_set:set});
+    await apiRpc('vb_smaz_posledni_oddechovy',{p_zapas:zapasId,p_set:set,p_strana:kdo});
   }catch(e){
     state.oddechove.push(posledni);
     prekresliLive(zapasId);
@@ -1752,6 +1813,37 @@ function popisVymeny(krok){
   return {kdo:h?h.jmeno+(h.cislo?` #${h.cislo}`:''):'—',akce:popisAkce(krok.pole)};
 }
 
+/* Přerušení do průběhu: time-outy a střídání obou stran. Skládá je sdilene.js
+   podle stavu — stejně jako u diváka, ať se seznamy nerozejdou (#107). */
+function prerusenaSetu(zapasId,set){
+  return prerusenaZRadku(
+    state.oddechove.filter(o=>o.zapas_id===zapasId&&(o.set_cislo||1)===set),
+    state.stridani.filter(x=>x.zapas_id===zapasId&&(x.set_cislo||1)===set));
+}
+
+// Naše střídání jmény ze soupisky, soupeřovo čísly na dresech.
+function popisStridaniPrerus(p){
+  if(p.strana===STRANY.ONI){
+    const c=n=>n==null?'—':`#${n}`;
+    return `${c(p.cislo_dovnitr)} za ${c(p.cislo_ven)}`;
+  }
+  const jmeno=id=>{const h=state.hraci.find(x=>x.id===id);
+                   return h?h.jmeno+(h.cislo?` #${h.cislo}`:''):'—';};
+  return `${jmeno(p.hrac_dovnitr)} za ${jmeno(p.hrac_ven)}`;
+}
+
+function prubehRadekPrerus(p){
+  const oni=p.strana===STRANY.ONI;
+  const popis=(p.typ==='timeout'?'Time-out':'Střídání')+(oni?' soupeře':'');
+  return `<div class="prubeh-radek prerus${oni?' oni':''}">
+    <span class="prubeh-poradi">${p.typ==='timeout'?'⏸':'⇅'}</span>
+    <span class="prubeh-skore">${p.my}:${p.oni}</span>
+    <span class="prubeh-akce">${popis}</span>
+    <span class="prubeh-kdo">${p.typ==='stridani'?esc(popisStridaniPrerus(p)):''}</span>
+    <span class="prubeh-break prazdny"></span>
+  </div>`;
+}
+
 function prubehStavuHtml(zapasId,set){
   const kroky=prubehStavu(zapasId,set);
   if(!kroky.length)return '';
@@ -1781,12 +1873,14 @@ function v2OtevriPrubeh(zapasId){
   // než co je v dlaždici.
   const posledni=kroky.length?{my:kroky.at(-1).my,jejich:kroky.at(-1).oni}:null;
   const nesedi=posledni&&(posledni.my!==s.nase||posledni.jejich!==s.jejich);
+  const vse=prubehSPrerusenimi(kroky,prerusenaSetu(zapasId,set));
   const el=document.getElementById('v2-prubeh-obsah');
-  if(!kroky.length){
+  if(!vse.length){
     el.innerHTML='<div class="empty" style="padding:20px"><span class="empty-icon">📋</span><div class="empty-text">V tomhle setu zatím není žádná výměna</div></div>';
   }else{
     // nejnovější nahoře: během zápasu se kouká na to, co se právě stalo
-    el.innerHTML=`<div class="prubeh-seznam">${[...kroky].reverse().map(k=>{
+    el.innerHTML=`<div class="prubeh-seznam">${[...vse].reverse().map(k=>{
+      if(k.typ!=='vymena')return prubehRadekPrerus(k);
       const p=popisVymeny(k);
       return `<div class="prubeh-radek ${k.bod}">
         <span class="prubeh-poradi">${k.poradi}.</span>
@@ -1801,7 +1895,7 @@ function v2OtevriPrubeh(zapasId){
       ⚠ Z akcí vychází ${s.nase}:${s.jejich}, z výměn ${posledni.my}:${posledni.jejich} —
       v logu část bodů chybí (zápis z druhého zařízení, výpadek sítě).
     </div>`:''}
-    <div class="profil-legenda">⇄ = zisk podání (break). Pořadí je od poslední výměny.</div>`;
+    <div class="profil-legenda">⇄ = zisk podání (break), ⏸ time-out, ⇅ střídání. Pořadí je od poslední výměny.</div>`;
   }
   openModal('modal-v2-prubeh');
 }
@@ -1822,13 +1916,17 @@ function hristeInfoHtml(zapasId){
   const vzate=oddechoveSetu(zapasId,set);
   const stridanych=stridaniPocet(zapasId,set);
   const oddechovych=oddechovePocet(zapasId,set);
-  const teckyOddechove=Array.from({length:Math.max(ODDECHOVE_NA_SET,oddechovych)},(_,i)=>
-    `<span class="tecka${i<oddechovych?' cerpana':''}"></span>`).join('');
+  const tecky=n=>Array.from({length:Math.max(ODDECHOVE_NA_SET,n)},(_,i)=>
+    `<span class="tecka${i<n?' cerpana':''}"></span>`).join('');
   // Stavy, ve kterých se time-outy braly. U starších zápasů se nevedly, tak
   // se ukáže jen počet teček.
-  const stavyOddechovych=vzate.length
+  const stavy=radky=>radky.length
     ?`<span class="info-oddechovy-stavy" title="Stav při time-outu">${
-        vzate.map(o=>`${o.skore_my}:${o.skore_oni}`).join(' · ')}</span>`:'';
+        radky.map(o=>`${o.skore_my}:${o.skore_oni}`).join(' · ')}</span>`:'';
+  const teckyOddechove=tecky(oddechovych);
+  const stavyOddechovych=stavy(vzate);
+  const vzateOni=oddechoveSetu(zapasId,set,STRANY.ONI);
+  const stridanychOni=stridaniPocet(zapasId,set,STRANY.ONI);
 
   return `<div class="hriste-info">
     <div class="hriste-info-radek">
@@ -1847,6 +1945,22 @@ function hristeInfoHtml(zapasId){
       <span class="hriste-info-nazev">Střídání</span>
       <span class="info-hodnota${stridanych>STRIDANI_NA_SET?' prekroceno':''}">${stridanych}/${STRIDANI_NA_SET}</span>
       <span class="hriste-info-souper" title="Chyby a body soupeře v tomhle setu">Soupeř ${souper}</span>
+    </div>
+    <div class="hriste-info-radek">
+      <span class="hriste-info-nazev">Soupeř</span>
+      <button class="info-preruseni" onclick="v2Oddechovy('${STRANY.ONI}')"
+          oncontextmenu="event.preventDefault();v2OddechovyZpet('${STRANY.ONI}');return false"
+          title="Time-out soupeře — klepnutím zapíšeš i se stavem, pravým tlačítkem nebo dlouhým stiskem ho vrátíš">
+        <span class="hriste-info-nazev">Time-out</span>
+        <span class="tecky">${tecky(vzateOni.length)}</span>
+        ${stavy(vzateOni)}
+      </button>
+      <button class="info-preruseni" onclick="v2StridaniSoupere()"
+          oncontextmenu="event.preventDefault();v2StridaniSoupereZpet();return false"
+          title="Střídání soupeře — zapíšou se čísla na dresech, pravým tlačítkem nebo dlouhým stiskem se poslední vrátí">
+        <span class="hriste-info-nazev">Střídání</span>
+        <span class="info-hodnota">${stridanychOni}</span>
+      </button>
     </div>
     ${b.dela||b.dava?`<div class="hriste-info-radek">
       <span class="hriste-info-nazev">Body</span>

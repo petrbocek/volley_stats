@@ -544,9 +544,11 @@ button.hriste-dlazdice:focus-visible{outline:2px solid var(--accent);outline-off
 .info-podava{font-size:13px;font-weight:700;color:var(--accent)}
 .info-dres{color:var(--muted);font-weight:400;font-size:11px}
 .info-pristi{font-size:11px;color:var(--muted)}
-.info-oddechovy{display:flex;align-items:center;gap:5px;background:none;border:none;padding:2px 0;
+/* Soupeřova přerušení mají vlastní třídu, ať je v kódu i v testech poznat,
+   na kterou stranu sítě klik patří (#107). */
+.info-oddechovy,.info-preruseni{display:flex;align-items:center;gap:5px;background:none;border:none;padding:2px 0;
   cursor:pointer;font-family:inherit;color:inherit}
-.info-oddechovy:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.info-oddechovy:focus-visible,.info-preruseni:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .tecky{display:flex;gap:3px}
 .tecka{width:9px;height:9px;border-radius:50%;border:1px solid var(--muted)}
 .tecka.cerpana{background:var(--accent);border-color:var(--accent)}
@@ -655,10 +657,24 @@ button.hriste-dlazdice:focus-visible{outline:2px solid var(--accent);outline-off
 .divak-nehraje-text{font-size:18px;font-weight:700;margin-top:8px}
 .divak-nehraje-popis{font-size:13px;color:var(--muted);margin-top:4px}
 
-/* Přerušení v diváckém průběhu: time-out a střídání (#102). */
+/* Přerušení v průběhu: time-out a střídání, v appce i u diváka (#102, #107). */
 .prubeh-radek.prerus{border-left-color:var(--muted);background:var(--surface2)}
 .prubeh-radek.prerus .prubeh-skore{color:var(--muted);font-weight:700}
 .prubeh-radek.prerus .prubeh-akce{color:var(--muted)}
 /* Jméno za jméno se na telefon nevejde na jeden řádek — u přerušení se smí
    zalomit, ořezané „Nehrající #9…" nikomu nic neřekne. */
 .prubeh-radek.prerus .prubeh-kdo{white-space:normal;text-align:right;line-height:1.4}
+/* Soupeřovo přerušení patří na druhou stranu sítě, ať se nepletou dohromady:
+   proužek zprava místo zleva (#107). */
+.prubeh-radek.prerus.oni{border-left-color:transparent;
+  box-shadow:inset -3px 0 0 var(--red)}
+
+/* Dvě čísla vedle sebe: na telefonu se klepne na pole a naskočí numerická
+   klávesnice, pořadí je „kdo jde na hřiště za koho" jako v hlášení (#107). */
+.souper-stridani{display:flex;align-items:flex-end;gap:10px;margin-bottom:10px}
+.souper-stridani label{display:flex;flex-direction:column;gap:4px;flex:1;
+  font-size:12px;color:var(--muted)}
+.souper-stridani input{font-family:'Oswald',sans-serif;font-size:22px;text-align:center;
+  padding:8px;border:1px solid var(--border);border-radius:10px;
+  background:var(--surface2);color:var(--text)}
+.souper-stridani-za{padding-bottom:12px;font-size:13px;color:var(--muted)}

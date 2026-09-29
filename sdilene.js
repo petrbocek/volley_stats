@@ -140,3 +140,38 @@ function sideOutZVymen(vymeny,znamePrvni){
   const uhrano=prijem.filter(v=>v.bod==='my').length;
   return {pct:Math.round(uhrano/prijem.length*100),uhrano,celkem:prijem.length};
 }
+
+/* ─── PŘERUŠENÍ ───
+   Time-out a střídání nemají v logu výměn pořadí — vedou se zvlášť, každé se
+   stavem, ve kterém padlo. Do průběhu se proto vkládají podle skóre: za
+   výměnu, která na ten stav dovedla. Přesnější pořadí by znamenalo ukládat
+   i pozici ve výměnách; na zorientování stav stačí a nestojí to klik navíc.
+
+   Strana rozlišuje naše přerušení od soupeřových (#107). Řádky zapsané před
+   tím sloupec nemají — všechno, co je v datech starší, je naše. */
+const STRANY={MY:'my',ONI:'oni'};
+
+function prerusenaZRadku(oddechove,stridani){
+  const prerusy=[];
+  (oddechove||[]).forEach(o=>prerusy.push({typ:'timeout',strana:o.strana||STRANY.MY,
+    my:o.skore_my,oni:o.skore_oni,id:o.id}));
+  (stridani||[]).forEach(x=>prerusy.push({typ:'stridani',strana:x.strana||STRANY.MY,
+    my:x.skore_my,oni:x.skore_oni,id:x.id,
+    hrac_ven:x.hrac_ven||null,hrac_dovnitr:x.hrac_dovnitr||null,
+    cislo_ven:x.cislo_ven??null,cislo_dovnitr:x.cislo_dovnitr??null}));
+  return prerusy;
+}
+
+// Výměny a přerušení do jednoho seznamu, seřazené podle stavu.
+function prubehSPrerusenimi(kroky,prerusy){
+  const vymeny=(kroky||[]).map(k=>({...k,typ:'vymena'}));
+  // index poslední výměny, po které stav sedí; před první výměnou → na začátek
+  const kam=p=>{let i=-1;vymeny.forEach((k,j)=>{if(k.my<=p.my&&k.oni<=p.oni)i=j;});return i;};
+  const umisteni=(prerusy||[]).map(p=>({...p,po:kam(p)}));
+  const vysledek=[];
+  vymeny.forEach((k,i)=>{
+    vysledek.push(k);
+    umisteni.filter(r=>r.po===i).forEach(r=>vysledek.push(r));
+  });
+  return [...umisteni.filter(r=>r.po===-1),...vysledek];
+}

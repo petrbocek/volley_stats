@@ -67,11 +67,19 @@ const FIX = {
     { id: 13, zapas_id: 7, set_cislo: 2, hrac_id: null, pole: 'souper_chyba', zona1_hrac_id: 1 },
     { id: 14, zapas_id: 7, set_cislo: 2, hrac_id: 1, pole: 'pole_neutral', zona1_hrac_id: 1 },
   ],
-  vb_oddechove_casy: [{ id: 1, zapas_id: 7, set_cislo: 2, skore_my: 2, skore_oni: 0 }],
+  // řádek bez `strana` je schválně: co je v datech starší, je naše (#107)
+  vb_oddechove_casy: [
+    { id: 1, zapas_id: 7, set_cislo: 2, skore_my: 2, skore_oni: 0 },
+    { id: 2, zapas_id: 7, set_cislo: 2, skore_my: 3, skore_oni: 1, strana: 'oni' },
+  ],
   // Epsilon (5) šla z place, Nehrající (9) na něj — 9 schválně není v sestavě,
-  // ať je vidět, že se jméno dotáhne i tak
-  vb_stridani: [{ id: 1, zapas_id: 7, set_cislo: 2, skore_my: 2, skore_oni: 1,
-                  hrac_ven: 5, hrac_dovnitr: 9 }],
+  // ať je vidět, že se jméno dotáhne i tak. U soupeře se vedou jen čísla.
+  vb_stridani: [
+    { id: 1, zapas_id: 7, set_cislo: 2, skore_my: 2, skore_oni: 1,
+      hrac_ven: 5, hrac_dovnitr: 9 },
+    { id: 2, zapas_id: 7, set_cislo: 2, skore_my: 1, skore_oni: 0, strana: 'oni',
+      hrac_ven: null, hrac_dovnitr: null, cislo_ven: 4, cislo_dovnitr: 12 },
+  ],
 };
 
 let dotazy = [];
@@ -184,6 +192,22 @@ pass &= ok('D13c přerušení sedí mezi výměny podle stavu', await page.evalu
 }));
 pass &= ok('D13d přerušení se nepočítají mezi výměny',
   await page.$$eval('.prubeh-tik', els => els.length) === 4);
+
+// ── strana sítě: naše přerušení vs. soupeřova (#107) ──────────────────────
+pass &= ok('D13e soupeřova přerušení jsou od našich poznat', await page.evaluate(() => {
+  const radky = [...document.querySelectorAll('.prubeh-radek.prerus')];
+  const text = r => r.textContent.replace(/\s+/g, ' ').trim();
+  const oni = radky.filter(r => r.classList.contains('oni')).map(text);
+  const nase = radky.filter(r => !r.classList.contains('oni')).map(text);
+  return oni.length === 2 && nase.length === 2 &&
+         oni.some(t => /Time-out soupeře/.test(t) && /3:1/.test(t)) &&
+         nase.some(t => /Time-out/.test(t) && !/soupeře/.test(t));
+}));
+pass &= ok('D13f u soupeře se ukážou čísla na dresech, ne jména', await page.evaluate(() => {
+  const r = [...document.querySelectorAll('.prubeh-radek.prerus.oni')]
+    .map(e => e.textContent.replace(/\s+/g, ' ').trim());
+  return r.some(t => /Střídání soupeře/.test(t) && /#12 za #4/.test(t) && /1:0/.test(t));
+}));
 
 pass &= ok('D14 stránka nikam nezapisuje', zapisy.length === 0);
 pass &= ok('D15 tahá jen tenhle zápas, ne celou databázi',

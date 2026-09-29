@@ -203,53 +203,31 @@ function podaniHtml(){
   </div>`;
 }
 
-/* Time-outy a střídání nemají v logu výměn pořadí — vedou se zvlášť se
-   stavem, ve kterém padly. Do průběhu se proto vkládají podle skóre: za
-   výměnu, která na ten stav dovedla. Přesnější pořadí by znamenalo ukládat
-   i pozici ve výměnách; stav stačí a divák se podle něj zorientuje (#102). */
+/* Přerušení (naše i soupeřova) se do průběhu vkládají podle stavu — jak se
+   to dělá, je v sdilene.js, společné se zapisovatelskou appkou (#102, #107). */
 function prerusenaSetu(set){
-  const prerusy=[];
-  d.oddechove.filter(o=>(o.set_cislo||1)===set).forEach(o=>prerusy.push(
-    {typ:'timeout',my:o.skore_my,oni:o.skore_oni,id:o.id}));
-  d.stridani.filter(x=>(x.set_cislo||1)===set).forEach(x=>prerusy.push(
-    {typ:'stridani',my:x.skore_my,oni:x.skore_oni,id:x.id,
-     ven:hracka(x.hrac_ven),dovnitr:hracka(x.hrac_dovnitr)}));
-  return prerusy;
+  return prerusenaZRadku(d.oddechove.filter(o=>(o.set_cislo||1)===set),
+                         d.stridani.filter(x=>(x.set_cislo||1)===set));
 }
 
-// Výměny a přerušení do jednoho seznamu, seřazené podle stavu.
-function prubehSPrerusenimi(set){
-  const kroky=prubehZVymen(vymenySetu(set).vymeny).map(k=>({...k,typ:'vymena'}));
-  const radky=[];
-  prerusenaSetu(set).forEach(p=>{
-    // index poslední výměny, po které stav sedí; před první výměnou → na začátek
-    let kam=-1;
-    kroky.forEach((k,i)=>{if(k.my<=p.my&&k.oni<=p.oni)kam=i;});
-    radky.push({...p,po:kam});
-  });
-  const vysledek=[];
-  kroky.forEach((k,i)=>{
-    vysledek.push(k);
-    radky.filter(r=>r.po===i).forEach(r=>vysledek.push(r));
-  });
-  radky.filter(r=>r.po===-1).forEach(r=>vysledek.unshift(r));
-  return vysledek;
+// Soupeřovy řádky nesou čísla na dresech, naše hráčky ze soupisky.
+function popisStridani(p){
+  if(p.strana===STRANY.ONI){
+    const c=n=>n==null?'—':`#${n}`;
+    return `${c(p.cislo_dovnitr)} za ${c(p.cislo_ven)}`;
+  }
+  const jmeno=id=>{const h=hracka(id);return h?esc(h.jmeno)+(h.cislo?` #${h.cislo}`:''):'—';};
+  return `${jmeno(p.hrac_dovnitr)} za ${jmeno(p.hrac_ven)}`;
 }
 
 function radekPrerusení(p){
-  if(p.typ==='timeout')return `<div class="prubeh-radek prerus">
-    <span class="prubeh-poradi">⏸</span>
+  const oni=p.strana===STRANY.ONI;
+  const popis=(p.typ==='timeout'?'Time-out':'Střídání')+(oni?' soupeře':'');
+  return `<div class="prubeh-radek prerus${oni?' oni':''}">
+    <span class="prubeh-poradi">${p.typ==='timeout'?'⏸':'⇅'}</span>
     <span class="prubeh-skore">${p.my}:${p.oni}</span>
-    <span class="prubeh-akce">Time-out</span>
-    <span class="prubeh-kdo"></span>
-    <span class="prubeh-break prazdny"></span>
-  </div>`;
-  const jmeno=h=>h?esc(h.jmeno)+(h.cislo?` #${h.cislo}`:''):'—';
-  return `<div class="prubeh-radek prerus">
-    <span class="prubeh-poradi">⇅</span>
-    <span class="prubeh-skore">${p.my}:${p.oni}</span>
-    <span class="prubeh-akce">Střídání</span>
-    <span class="prubeh-kdo">${jmeno(p.dovnitr)} za ${jmeno(p.ven)}</span>
+    <span class="prubeh-akce">${popis}</span>
+    <span class="prubeh-kdo">${p.typ==='stridani'?popisStridani(p):''}</span>
     <span class="prubeh-break prazdny"></span>
   </div>`;
 }
@@ -257,7 +235,7 @@ function radekPrerusení(p){
 function prubehHtml(){
   const {vymeny,znamePrvni}=vymenySetu(d.set);
   const kroky=prubehZVymen(vymeny);
-  const vse=prubehSPrerusenimi(d.set);
+  const vse=prubehSPrerusenimi(kroky,prerusenaSetu(d.set));
   if(!vse.length)return '<div class="divak-prazdno">V tomhle setu zatím není zapsaná žádná výměna.</div>';
   const so=sideOutZVymen(vymeny,znamePrvni);
   const posledni=[...vse].reverse().slice(0,VYMEN_V_SEZNAMU);
