@@ -544,9 +544,11 @@ button.hriste-dlazdice:focus-visible{outline:2px solid var(--accent);outline-off
 .info-podava{font-size:13px;font-weight:700;color:var(--accent)}
 .info-dres{color:var(--muted);font-weight:400;font-size:11px}
 .info-pristi{font-size:11px;color:var(--muted)}
-.info-oddechovy{display:flex;align-items:center;gap:5px;background:none;border:none;padding:2px 0;
+/* Soupeřova přerušení mají vlastní třídu, ať je v kódu i v testech poznat,
+   na kterou stranu sítě klik patří (#107). */
+.info-oddechovy,.info-preruseni{display:flex;align-items:center;gap:5px;background:none;border:none;padding:2px 0;
   cursor:pointer;font-family:inherit;color:inherit}
-.info-oddechovy:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.info-oddechovy:focus-visible,.info-preruseni:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .tecky{display:flex;gap:3px}
 .tecka{width:9px;height:9px;border-radius:50%;border:1px solid var(--muted)}
 .tecka.cerpana{background:var(--accent);border-color:var(--accent)}
@@ -654,3 +656,56 @@ button.hriste-dlazdice:focus-visible{outline:2px solid var(--accent);outline-off
 .divak-nehraje-ikona{font-size:40px;line-height:1.4}
 .divak-nehraje-text{font-size:18px;font-weight:700;margin-top:8px}
 .divak-nehraje-popis{font-size:13px;color:var(--muted);margin-top:4px}
+
+/* Přerušení v průběhu: time-out a střídání, v appce i u diváka (#102, #107). */
+.prubeh-radek.prerus{border-left-color:var(--muted);background:var(--surface2)}
+.prubeh-radek.prerus .prubeh-skore{color:var(--muted);font-weight:700}
+.prubeh-radek.prerus .prubeh-akce{color:var(--muted)}
+/* Jméno za jméno se na telefon nevejde na jeden řádek — u přerušení se smí
+   zalomit, ořezané „Nehrající #9…" nikomu nic neřekne. */
+.prubeh-radek.prerus .prubeh-kdo{white-space:normal;text-align:right;line-height:1.4}
+/* Soupeřovo přerušení patří na druhou stranu sítě, ať se nepletou dohromady:
+   proužek zprava místo zleva (#107). */
+.prubeh-radek.prerus.oni{border-left-color:transparent;
+  box-shadow:inset -3px 0 0 var(--red)}
+
+/* Dvě čísla vedle sebe: na telefonu se klepne na pole a naskočí numerická
+   klávesnice, pořadí je „kdo jde na hřiště za koho" jako v hlášení (#107). */
+.souper-stridani{display:flex;align-items:flex-end;gap:10px;margin-bottom:10px}
+.souper-stridani label{display:flex;flex-direction:column;gap:4px;flex:1;
+  font-size:12px;color:var(--muted)}
+.souper-stridani input{font-family:'Oswald',sans-serif;font-size:22px;text-align:center;
+  padding:8px;border:1px solid var(--border);border-radius:10px;
+  background:var(--surface2);color:var(--text)}
+.souper-stridani-za{padding-bottom:12px;font-size:13px;color:var(--muted)}
+
+/* ─── SEZNAM ZÁPASŮ PRO DIVÁKY (#107) ───
+   Úvodní stránka: nahoře, co se hraje, pod tím odehrané. Položka je odkaz,
+   ne tlačítko — divácká stránka nemá žádné ovládání a tohle je prosté
+   prolistování, které zvládne i tlačítko Zpět v prohlížeči. */
+.divak-skupina{font-size:10px;text-transform:uppercase;letter-spacing:.5px;
+  color:var(--muted);font-weight:700;margin-top:4px}
+.divak-seznam{display:flex;flex-direction:column;gap:8px}
+.divak-polozka{display:flex;flex-direction:column;gap:2px;padding:10px 12px;
+  border:1px solid var(--border);border-radius:12px;background:var(--surface);
+  color:var(--text);text-decoration:none}
+.divak-polozka:active{background:var(--surface2)}
+.divak-polozka.zive{border-color:var(--accent);background:var(--surface2)}
+.divak-polozka-hlava{display:flex;align-items:center;gap:8px}
+.divak-zive{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;
+  color:var(--accent)}
+.divak-polozka-datum{font-size:11px;color:var(--muted)}
+.divak-polozka-soupet{font-size:16px;font-weight:700;line-height:1.3}
+.divak-polozka-cisla{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.divak-polozka-sety{font-family:'Oswald',sans-serif;font-size:20px;font-weight:700;
+  color:var(--muted)}
+.divak-polozka-sety.vyhra{color:var(--green)}
+.divak-polozka-sety.prohra{color:var(--red)}
+.divak-polozka-set{font-family:'Oswald',sans-serif;font-size:13px;color:var(--accent)}
+.divak-polozka-detail{font-family:'Oswald',sans-serif;font-size:11px;color:var(--muted)}
+/* Cesta zpět je vidět hned nahoře, ne až po scrollu na konec. */
+.divak-zpet{display:inline-block;font-size:12px;color:var(--muted);text-decoration:none}
+.divak-zpet:active{color:var(--accent)}
+/* Sety v detailu prolistují zápas po setech, proto odkaz — bez podtržení,
+   ať vypadá stejně jako předtím. */
+a.skore-set{text-decoration:none}
