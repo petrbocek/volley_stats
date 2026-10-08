@@ -43,6 +43,7 @@ const FIX = {
     { id: 5, jmeno: 'Epsilon', cislo: 5, pozice: 'smečař', aktivni: true },
     { id: 6, jmeno: 'Libuše', cislo: 6, pozice: 'libero', aktivni: true },
     { id: 9, jmeno: 'Nehrající', cislo: 9, pozice: 'smečař', aktivni: true },
+    { id: 12, jmeno: 'Zeta', cislo: 12, pozice: 'smečař', aktivni: true },
   ],
   vb_zapas_hraci: [
     { zapas_id: 7, hrac_id: 1, libero: false }, { zapas_id: 7, hrac_id: 2, libero: false },
@@ -57,6 +58,25 @@ const FIX = {
     { id: 2, zapas_id: 7, hrac_id: 1, set_cislo: 2, utok_plus: 1, servis_plus: 1, blok_plus: 0,
       utok_minus: 0, prijem_minus: 0, servis_minus: 0, chyba_minus: 0, pole_neutral: 3 },
     { id: 3, zapas_id: 7, hrac_id: 2, set_cislo: 2, utok_plus: 0, servis_plus: 0, blok_plus: 0,
+      utok_minus: 0, prijem_minus: 0, servis_minus: 0, chyba_minus: 0, pole_neutral: 0 },
+    // Zápas 9 má zápis ve dvou setech — žebříčky musí sčítat celý zápas.
+    // Záměrně: shoda na páté příčce (Epsilon a Nehrající), nula u Zety,
+    // a u servisu jen tři hráčky, ať je vidět i kratší žebříček.
+    { id: 20, zapas_id: 9, hrac_id: 1, set_cislo: 3, utok_plus: 2, servis_plus: 0, blok_plus: 0,
+      utok_minus: 0, prijem_minus: 0, servis_minus: 0, chyba_minus: 0, pole_neutral: 0 },
+    { id: 21, zapas_id: 9, hrac_id: 1, set_cislo: 4, utok_plus: 8, servis_plus: 2, blok_plus: 1,
+      utok_minus: 0, prijem_minus: 0, servis_minus: 0, chyba_minus: 0, pole_neutral: 4 },
+    { id: 22, zapas_id: 9, hrac_id: 2, set_cislo: 4, utok_plus: 6, servis_plus: 1, blok_plus: 2,
+      utok_minus: 0, prijem_minus: 0, servis_minus: 0, chyba_minus: 0, pole_neutral: 7 },
+    { id: 23, zapas_id: 9, hrac_id: 3, set_cislo: 4, utok_plus: 5, servis_plus: 0, blok_plus: 3,
+      utok_minus: 0, prijem_minus: 0, servis_minus: 0, chyba_minus: 0, pole_neutral: 2 },
+    { id: 24, zapas_id: 9, hrac_id: 4, set_cislo: 4, utok_plus: 4, servis_plus: 3, blok_plus: 0,
+      utok_minus: 0, prijem_minus: 0, servis_minus: 0, chyba_minus: 0, pole_neutral: 5 },
+    { id: 25, zapas_id: 9, hrac_id: 5, set_cislo: 4, utok_plus: 3, servis_plus: 0, blok_plus: 1,
+      utok_minus: 0, prijem_minus: 0, servis_minus: 0, chyba_minus: 0, pole_neutral: 9 },
+    { id: 26, zapas_id: 9, hrac_id: 9, set_cislo: 4, utok_plus: 3, servis_plus: 0, blok_plus: 1,
+      utok_minus: 0, prijem_minus: 0, servis_minus: 0, chyba_minus: 0, pole_neutral: 1 },
+    { id: 27, zapas_id: 9, hrac_id: 12, set_cislo: 4, utok_plus: 1, servis_plus: 0, blok_plus: 0,
       utok_minus: 0, prijem_minus: 0, servis_minus: 0, chyba_minus: 0, pole_neutral: 0 },
   ],
   vb_chyby_souperu: [{ zapas_id: 7, set_cislo: 2, pocet: 1, body: 1 }],
@@ -91,6 +111,13 @@ const FIX = {
       hrac_ven: null, hrac_dovnitr: null, cislo_ven: 4, cislo_dovnitr: 12 },
   ],
 };
+
+// Zápas 9, 4. set: dost výměn na víc stran, ať je co stránkovat (#107).
+const VZOREC = ['utok_plus', 'souper_chyba', 'souper_bod', 'servis_plus', 'utok_minus'];
+for (let i = 0; i < 25; i++) FIX.vb_udalosti.push({
+  id: 100 + i, zapas_id: 9, set_cislo: 4, hrac_id: 1,
+  pole: VZOREC[i % VZOREC.length], zona1_hrac_id: 1,
+});
 
 let dotazy = [];
 let zapisy = [];
@@ -298,7 +325,7 @@ pass &= ok('D17 nikde není tlačítko, co by zapisovalo', await page.evaluate((
 pass &= ok('D17b odkazy vedou jen po téhle stránce', await page.evaluate(() =>
   [...document.querySelectorAll('a')].every(a => {
     const h = a.getAttribute('href') || '';
-    return /^\?zapas=\d+(&set=\d+)?$/.test(h) || h === 'divak.html';
+    return /^\?zapas=\d+(&set=\d+)?(&prubeh=\d+)?$/.test(h) || h === 'divak.html';
   })));
 
 // ── živě ──────────────────────────────────────────────────────────────────
@@ -339,8 +366,90 @@ pass &= ok('D21c zapsaný výsledek setu platí i bez statistik', await (async (
     (await page.textContent('.divak-skore-cisla')).replace(/\s/g, '') === '25:22' &&
     await page.$$eval('.skore-sety a', els => els.length) === 4;
 })());
+// ── žebříčky ──────────────────────────────────────────────────────────────
+const zebricek = nadpis => page.evaluate(n => {
+  const blok = [...document.querySelectorAll('.divak-zebricek')]
+    .find(e => e.querySelector('.zebricek-nadpis').textContent.startsWith(n));
+  if (!blok) return null;
+  return [...blok.querySelectorAll('.zebricek-radek')].map(r => ({
+    poradi: r.querySelector('.zebricek-poradi').textContent.trim(),
+    jmeno: r.querySelector('.zebricek-jmeno').textContent.replace(/\s+/g, ' ').trim(),
+    hodnota: r.querySelector('.zebricek-hodnota').textContent.trim(),
+  }));
+}, nadpis);
+
+pass &= ok('Z1 jsou vidět všechny čtyři žebříčky', await page.evaluate(() =>
+  [...document.querySelectorAll('.zebricek-nadpis')]
+    .map(e => e.firstChild.textContent.trim()).join('|') === 'Body|Útok|Servis|Pole'));
+pass &= ok('Z2 body jsou útok, servis a blok dohromady, za celý zápas', await (async () => {
+  const b = await zebricek('Body');
+  // Alfa: 2 útoky ve 3. setu + 8 útoků, 2 esa a blok ve 4. → 13
+  return b[0].jmeno === 'Alfa #1' && b[0].hodnota === '13' && b[0].poradi === '1.';
+})());
+pass &= ok('Z3 při shodě se příčka dělí a vejdou se obě', await (async () => {
+  const b = await zebricek('Body');
+  const paty = b.filter(r => r.poradi === '5.');
+  return b.length === 6 && paty.length === 2 && paty.every(r => r.hodnota === '4') &&
+    paty.map(r => r.jmeno).sort().join('|') === 'Epsilon #5|Nehrající #9';
+})());
+pass &= ok('Z4 kdo nemá ani jeden, v žebříčku není', await (async () => {
+  const b = await zebricek('Body'), servis = await zebricek('Servis');
+  // Zeta má jediný útok, na top 5 nedosáhne; esa daly jen tři hráčky
+  return !b.some(r => /Zeta/.test(r.jmeno)) &&
+    servis.length === 3 && servis[0].jmeno === 'Delta #4' && servis[0].hodnota === '3';
+})());
+pass &= ok('Z5 pole je vlastní žebříček, ne body', await (async () => {
+  const pole = await zebricek('Pole');
+  return pole.length === 5 && pole[0].jmeno === 'Epsilon #5' && pole[0].hodnota === '9' &&
+    !pole.some(r => /Zeta/.test(r.jmeno));
+})());
+pass &= ok('Z6 žebříček nabídne jména i hráčkám mimo zapsanou sestavu', await (async () => {
+  // zápas 9 nemá vb_zapas_hraci; jména se musí dotáhnout podle statistik
+  const b = await zebricek('Útok');
+  return b.length === 6 && b.every(r => !/—/.test(r.jmeno));
+})());
+
 pass &= ok('D21b cesta zpátky na seznam je vidět',
   await page.getAttribute('.divak-zpet', 'href') === 'divak.html');
+
+// ── celý průběh na vlastní stránce ────────────────────────────────────────
+// U zápasu je posledních pár akcí, celý set je za odkazem.
+const prubehRadky = () => page.$$eval('.prubeh-seznam .prubeh-radek', els =>
+  els.map(e => e.querySelector('.prubeh-poradi').textContent.trim()));
+
+await page.goto(`${ADRESA}/divak.html?zapas=9&set=4`);
+await page.waitForSelector('.prubeh-seznam');
+pass &= ok('P1 u zápasu je jen posledních pár akcí', await (async () => {
+  const r = await prubehRadky();
+  return r.length === 12 && r[0] === '25.' && r[11] === '14.';
+})());
+pass &= ok('P2 je vidět, že zbytek je za odkazem',
+  /Zobrazit celý průběh — 25 záznamů/.test(await page.textContent('.divak-vic')));
+pass &= ok('P3 na celý průběh vede pás i odkaz pod seznamem', await page.evaluate(() => {
+  const cil = '?zapas=9&set=4&prubeh=1';
+  return document.querySelector('.prubeh-odkaz').getAttribute('href') === cil &&
+    document.querySelector('.divak-vic').getAttribute('href') === cil;
+}));
+
+await page.goto(`${ADRESA}/divak.html?zapas=9&set=4&prubeh=1`);
+await page.waitForSelector('.prubeh-seznam');
+pass &= ok('P4 celý průběh ukáže opravdu všechno', await (async () => {
+  const r = await prubehRadky();
+  return r.length === 25 && r[0] === '25.' && r[24] === '1.';
+})());
+pass &= ok('P5 a je u toho vidět, který set a jak skončil', await (async () => {
+  const t = await page.textContent('.divak-hlavicka');
+  return /4\. set — průběh/.test(t) && /25 záznamů/.test(t) &&
+    (await page.textContent('.divak-sety-cislo')).replace(/\s/g, '') === '25:22';
+})());
+pass &= ok('P6 cesta zpátky vede na ten zápas, ne na seznam',
+  await page.getAttribute('.divak-zpet', 'href') === '?zapas=9&set=4');
+pass &= ok('P7 krátký set nabídne odkaz bez počtu', await (async () => {
+  await page.goto(`${ADRESA}/divak.html?zapas=7`);
+  await page.waitForSelector('.prubeh-seznam');
+  const t = (await page.textContent('.divak-vic')).trim();
+  return t === 'Zobrazit celý průběh' && (await prubehRadky()).length > 0;
+})());
 
 // set v adrese prolistuje zápas po setech
 await page.goto(`${ADRESA}/divak.html?zapas=7&set=1`);

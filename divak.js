@@ -37,6 +37,7 @@ function cisloZAdresy(klic){
 }
 const zapasZAdresy=()=>cisloZAdresy('zapas');
 const setZAdresy=()=>cisloZAdresy('set');
+const prubehZAdresy=()=>cisloZAdresy('prubeh');
 
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -89,6 +90,7 @@ async function nactiDetail(id){
   d.setInfo=setInfo;d.udalosti=udalosti;d.oddechove=oddechove;d.stridani=stridani;
   // hráčky dotahuju až podle sestavy, ne celou kartotéku
   const ids=[...new Set([...sestava.map(s=>s.hrac_id),
+    ...statistiky.map(x=>x.hrac_id),
     ...stridani.flatMap(x=>[x.hrac_ven,x.hrac_dovnitr])].filter(Boolean))];
   d.hraci=ids.length?await ziskej(`vb_hraci?id=in.(${ids.join(',')})`):[];
   // Set z adresy platí, jen když v něm něco je — jinak by odkaz na pátý set
@@ -356,6 +358,32 @@ function radekPrerusení(p){
   </div>`;
 }
 
+/* Jeden řádek na záznam: výměna, nebo přerušení. Používá to vedle sebe
+   krátký výpis u zápasu i celý průběh na vlastní stránce. */
+function prubehRadekHtml(k){
+  if(k.typ!=='vymena')return radekPrerusení(k);
+  const h=hracka(k.hrac_id);
+  const souper=k.pole==='souper_chyba'?'Chyba soupeře':k.pole==='souper_bod'?'Bod soupeře':null;
+  return `<div class="prubeh-radek ${k.bod}">
+    <span class="prubeh-poradi">${k.poradi}.</span>
+    <span class="prubeh-skore"><b class="${k.bod==='my'?'plus':'minus'}">${k.my}</b>:<b class="${k.bod==='my'?'minus':'plus'}">${k.oni}</b></span>
+    <span class="prubeh-akce">${esc(souper||popisAkce(k.pole))}</span>
+    <span class="prubeh-kdo">${souper?'Soupeř':esc(h?h.jmeno:'—')}</span>
+    ${k.break?'<span class="prubeh-break" title="Zisk podání">⇄</span>':'<span class="prubeh-break prazdny"></span>'}
+  </div>`;
+}
+
+function pasHtml(kroky){
+  return `<span class="prubeh-pas">${kroky.map(k=>
+    `<span class="prubeh-tik ${k.bod}${k.break?' break':''}"
+      title="${k.my}:${k.oni}"></span>`).join('')}</span>`;
+}
+
+const odkazNaCelyPrubeh=()=>`?zapas=${d.zapas.id}&set=${d.set}&prubeh=1`;
+
+/* U zápasu stačí posledních pár akcí — divák sleduje, co se právě stalo.
+   Celý set je za odkazem na vlastní stránce, stejně jako je v zapisovatelské
+   appce za klepnutím na pás (#107). */
 function prubehHtml(){
   const {vymeny,znamePrvni}=vymenySetu(d.set);
   const kroky=prubehZVymen(vymeny);
@@ -363,26 +391,111 @@ function prubehHtml(){
   if(!vse.length)return '<div class="divak-prazdno">V tomhle setu zatím není zapsaná žádná výměna.</div>';
   const so=sideOutZVymen(vymeny,znamePrvni);
   const posledni=[...vse].reverse().slice(0,VYMEN_V_SEZNAMU);
-  return `<div class="divak-radek">
-      <span class="divak-nazev" title="Sytě = zisk podání">Průběh</span>
-      <span class="prubeh-pas">${kroky.map(k=>
-        `<span class="prubeh-tik ${k.bod}${k.break?' break':''}"
-          title="${k.my}:${k.oni}"></span>`).join('')}</span>
+  return `<a class="divak-radek prubeh-odkaz" href="${odkazNaCelyPrubeh()}"
+      title="Klepnutím rozbalíš celý průběh setu">
+      <span class="divak-nazev">Průběh</span>
+      ${pasHtml(kroky)}
       ${so&&so.pct!=null?`<span class="divak-proc">Side-out ${so.pct}%</span>`:''}
+    </a>
+    <div class="prubeh-seznam">${posledni.map(prubehRadekHtml).join('')}</div>
+    <a class="divak-vic" href="${odkazNaCelyPrubeh()}">${
+      vse.length>VYMEN_V_SEZNAMU
+        ? `Zobrazit celý průběh — ${vse.length} záznamů`
+        : 'Zobrazit celý průběh'}</a>`;
+}
+
+/* Celý průběh na vlastní stránce. Ne překryv jako v appce: divácká stránka
+   nemá žádné ovládání a tohle je obyčejné prolistování, takže odkaz jde
+   poslat a tlačítko Zpět funguje samo. */
+function prubehCelyHtml(){
+  const {vymeny,znamePrvni}=vymenySetu(d.set);
+  const kroky=prubehZVymen(vymeny);
+  const vse=prubehSPrerusenimi(kroky,prerusenaSetu(d.set));
+  const so=sideOutZVymen(vymeny,znamePrvni);
+  const sk=skoreKZobrazeni(d.set);
+  return `<a class="divak-zpet" href="?zapas=${d.zapas.id}&set=${d.set}">← ${esc(d.zapas.soupet)}</a>
+    <div class="divak-hlavicka">
+      <div class="divak-zapas">
+        <div class="divak-soupet">${d.set}. set — průběh</div>
+        <div class="divak-detail">${vse.length} záznamů${
+          so&&so.pct!=null?` · side-out ${so.pct}%`:''}</div>
+      </div>
+      <div class="divak-sety"><span class="divak-sety-popis">Stav</span>
+        <span class="divak-sety-cislo">${sk.nase}:${sk.jejich}</span></div>
     </div>
-    <div class="prubeh-seznam">${posledni.map(k=>{
-      if(k.typ!=='vymena')return radekPrerusení(k);
-      const h=hracka(k.hrac_id);
-      const souper=k.pole==='souper_chyba'?'Chyba soupeře':k.pole==='souper_bod'?'Bod soupeře':null;
-      return `<div class="prubeh-radek ${k.bod}">
-        <span class="prubeh-poradi">${k.poradi}.</span>
-        <span class="prubeh-skore"><b class="${k.bod==='my'?'plus':'minus'}">${k.my}</b>:<b class="${k.bod==='my'?'minus':'plus'}">${k.oni}</b></span>
-        <span class="prubeh-akce">${esc(souper||popisAkce(k.pole))}</span>
-        <span class="prubeh-kdo">${souper?'Soupeř':esc(h?h.jmeno:'—')}</span>
-        ${k.break?'<span class="prubeh-break" title="Zisk podání">⇄</span>':'<span class="prubeh-break prazdny"></span>'}
-      </div>`;
-    }).join('')}</div>
-    ${vse.length>VYMEN_V_SEZNAMU?`<div class="divak-vic">Zobrazeno posledních ${VYMEN_V_SEZNAMU} z ${vse.length} záznamů.</div>`:''}`;
+    <div class="divak-blok" id="divak-prubeh">
+      ${vse.length?`<div class="divak-radek">${pasHtml(kroky)}</div>
+      <div class="prubeh-seznam">${[...vse].reverse().map(prubehRadekHtml).join('')}</div>
+      <div class="profil-legenda">⇄ = zisk podání (break), ⏸ time-out, ⇅ střídání.
+        Pořadí je od poslední výměny.</div>`
+      :'<div class="divak-prazdno">V tomhle setu zatím není zapsaná žádná výměna.</div>'}
+    </div>`;
+}
+
+
+/* ─── ŽEBŘÍČKY ───
+   Kdo zápasu vtiskl tvář. Počítá se za celý zápas, ne za vybraný set — divák
+   chce vědět, kdo ho rozhodl, ne kdo byl nejlepší v pátém setu (#107).
+
+   Co je bod, se nevymýšlí znovu: bere se SKORE_NASE ze sdilene.js, tedy
+   totéž, z čeho se skládá skóre. */
+const TOP_N=5;
+const ZEBRICKY=[
+  {nadpis:'Body',   popis:'útok, servis a blok dohromady',
+   hodnota:a=>SKORE_NASE.reduce((n,f)=>n+(a[f]||0),0)},
+  {nadpis:'Útok',   popis:'ukončené útoky',  hodnota:a=>a.utok_plus||0},
+  {nadpis:'Servis', popis:'esa',             hodnota:a=>a.servis_plus||0},
+  {nadpis:'Pole',   popis:'vybrané balony',  hodnota:a=>a.pole_neutral||0},
+];
+
+// Součet přes všechny sety zápasu, po hráčkách.
+function soucty(){
+  const m=new Map();
+  d.statistiky.forEach(s=>{
+    if(!s.hrac_id)return;
+    const a=m.get(s.hrac_id)||{};
+    Object.keys(s).forEach(k=>{
+      if(typeof s[k]==='number'&&!META_SLOUPCE.includes(k))a[k]=(a[k]||0)+s[k];
+    });
+    m.set(s.hrac_id,a);
+  });
+  return m;
+}
+
+/* Pořadí se dělí: dvě hráčky s osmi body jsou obě druhé. Když se o pátou
+   příčku dělí víc hráček, vejdou se tam všechny — uříznout někoho se stejným
+   číslem by byla lež o tom, kdo je lepší. */
+function zebricek(soucty,hodnota){
+  const vse=[...soucty.entries()]
+    .map(([id,a])=>({hrac:hracka(id),hodnota:hodnota(a)}))
+    .filter(x=>x.hrac&&x.hodnota>0)
+    .sort((a,b)=>b.hodnota-a.hodnota||a.hrac.jmeno.localeCompare(b.hrac.jmeno,'cs'));
+  if(!vse.length)return [];
+  const mez=vse.length>TOP_N?vse[TOP_N-1].hodnota:0;
+  const vybrane=vse.filter(x=>x.hodnota>=mez);
+  let poradi=0,predchozi=null;
+  return vybrane.map((x,i)=>{
+    if(x.hodnota!==predchozi){poradi=i+1;predchozi=x.hodnota;}
+    return {...x,poradi};
+  });
+}
+
+function zebrickyHtml(){
+  const m=soucty();
+  const bloky=ZEBRICKY.map(z=>({...z,radky:zebricek(m,z.hodnota)}))
+                      .filter(z=>z.radky.length);
+  if(!bloky.length)return '';
+  return `<div class="divak-blok" id="divak-zebricky">
+    <div class="divak-radek"><span class="divak-nazev">Nejlepší v zápase</span></div>
+    <div class="divak-zebricky">${bloky.map(z=>`<div class="divak-zebricek">
+      <div class="zebricek-nadpis">${esc(z.nadpis)}<span class="zebricek-popis">${esc(z.popis)}</span></div>
+      ${z.radky.map(r=>`<div class="zebricek-radek">
+        <span class="zebricek-poradi">${r.poradi}.</span>
+        <span class="zebricek-jmeno">${jmenoSCislem(r.hrac)}</span>
+        <span class="zebricek-hodnota">${r.hodnota}</span>
+      </div>`).join('')}
+    </div>`).join('')}</div>
+  </div>`;
 }
 
 function patickaHtml(){
@@ -411,14 +524,21 @@ function vykresli(){
     document.title='Volejbal — zápasy';
     return;
   }
+  if(prubehZAdresy()){
+    el.innerHTML=prubehCelyHtml()+patickaHtml();
+    document.title=`${d.zapas.soupet} — ${d.set}. set`;
+    return;
+  }
   el.innerHTML=hlavickaHtml()+skoreHtml()+
     `<div class="divak-blok" id="divak-hriste">${hristeHtml()}${podaniHtml()}</div>`+
-    `<div class="divak-blok" id="divak-prubeh">${prubehHtml()}</div>`+patickaHtml();
+    `<div class="divak-blok" id="divak-prubeh">${prubehHtml()}</div>`+
+    zebrickyHtml()+patickaHtml();
   document.title=`${d.zapas.soupet} — živě`;
 }
 
 // Rychle jen tam, kde se čísla opravdu mění: dohraný zápas ani seznam bez
 // rozehraného se za pět vteřin nezmění a tahat kvůli tomu data je plýtvání.
+
 function naplanuj(){
   clearTimeout(obnovaTimer);
   const zive=zapasZAdresy()
