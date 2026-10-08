@@ -709,3 +709,24 @@ button.hriste-dlazdice:focus-visible{outline:2px solid var(--accent);outline-off
 /* Sety v detailu prolistují zápas po setech, proto odkaz — bez podtržení,
    ať vypadá stejně jako předtím. */
 a.skore-set{text-decoration:none}
+
+/* ─── ŽEBŘÍČKY U DIVÁKA (#107) ───
+   Čtyři krátké seznamy vedle sebe; na telefon se zalomí pod sebe, ale po dvou,
+   ať se nemusí scrollovat přes celou obrazovku kvůli pěti řádkům. */
+.divak-zebricky{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.divak-zebricek{min-width:0;padding:8px 10px;border:1px solid var(--border);
+  border-radius:10px;background:var(--surface2)}
+.zebricek-nadpis{font-family:'Oswald',sans-serif;font-size:13px;font-weight:700;
+  color:var(--accent);display:flex;flex-direction:column;margin-bottom:6px}
+.zebricek-popis{font-family:'Inter',sans-serif;font-size:10px;font-weight:400;
+  color:var(--muted);letter-spacing:0}
+.zebricek-radek{display:flex;align-items:baseline;gap:6px;padding:3px 0;
+  border-top:1px solid var(--border)}
+.zebricek-radek:first-of-type{border-top:none}
+.zebricek-poradi{font-size:10px;color:var(--muted);min-width:14px}
+.zebricek-jmeno{font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap}
+.zebricek-hodnota{font-family:'Oswald',sans-serif;font-size:15px;font-weight:700}
+@media (min-width:560px){
+  .divak-zebricky{grid-template-columns:repeat(4,minmax(0,1fr))}
+}

@@ -89,6 +89,7 @@ async function nactiDetail(id){
   d.setInfo=setInfo;d.udalosti=udalosti;d.oddechove=oddechove;d.stridani=stridani;
   // hráčky dotahuju až podle sestavy, ne celou kartotéku
   const ids=[...new Set([...sestava.map(s=>s.hrac_id),
+    ...statistiky.map(x=>x.hrac_id),
     ...stridani.flatMap(x=>[x.hrac_ven,x.hrac_dovnitr])].filter(Boolean))];
   d.hraci=ids.length?await ziskej(`vb_hraci?id=in.(${ids.join(',')})`):[];
   // Set z adresy platí, jen když v něm něco je — jinak by odkaz na pátý set
@@ -385,6 +386,71 @@ function prubehHtml(){
     ${vse.length>VYMEN_V_SEZNAMU?`<div class="divak-vic">Zobrazeno posledních ${VYMEN_V_SEZNAMU} z ${vse.length} záznamů.</div>`:''}`;
 }
 
+/* ─── ŽEBŘÍČKY ───
+   Kdo zápasu vtiskl tvář. Počítá se za celý zápas, ne za vybraný set — divák
+   chce vědět, kdo ho rozhodl, ne kdo byl nejlepší v pátém setu (#107).
+
+   Co je bod, se nevymýšlí znovu: bere se SKORE_NASE ze sdilene.js, tedy
+   totéž, z čeho se skládá skóre. */
+const TOP_N=5;
+const ZEBRICKY=[
+  {nadpis:'Body',   popis:'útok, servis a blok dohromady',
+   hodnota:a=>SKORE_NASE.reduce((n,f)=>n+(a[f]||0),0)},
+  {nadpis:'Útok',   popis:'ukončené útoky',  hodnota:a=>a.utok_plus||0},
+  {nadpis:'Servis', popis:'esa',             hodnota:a=>a.servis_plus||0},
+  {nadpis:'Pole',   popis:'vybrané balony',  hodnota:a=>a.pole_neutral||0},
+];
+
+// Součet přes všechny sety zápasu, po hráčkách.
+function soucty(){
+  const m=new Map();
+  d.statistiky.forEach(s=>{
+    if(!s.hrac_id)return;
+    const a=m.get(s.hrac_id)||{};
+    Object.keys(s).forEach(k=>{
+      if(typeof s[k]==='number'&&!META_SLOUPCE.includes(k))a[k]=(a[k]||0)+s[k];
+    });
+    m.set(s.hrac_id,a);
+  });
+  return m;
+}
+
+/* Pořadí se dělí: dvě hráčky s osmi body jsou obě druhé. Když se o pátou
+   příčku dělí víc hráček, vejdou se tam všechny — uříznout někoho se stejným
+   číslem by byla lež o tom, kdo je lepší. */
+function zebricek(soucty,hodnota){
+  const vse=[...soucty.entries()]
+    .map(([id,a])=>({hrac:hracka(id),hodnota:hodnota(a)}))
+    .filter(x=>x.hrac&&x.hodnota>0)
+    .sort((a,b)=>b.hodnota-a.hodnota||a.hrac.jmeno.localeCompare(b.hrac.jmeno,'cs'));
+  if(!vse.length)return [];
+  const mez=vse.length>TOP_N?vse[TOP_N-1].hodnota:0;
+  const vybrane=vse.filter(x=>x.hodnota>=mez);
+  let poradi=0,predchozi=null;
+  return vybrane.map((x,i)=>{
+    if(x.hodnota!==predchozi){poradi=i+1;predchozi=x.hodnota;}
+    return {...x,poradi};
+  });
+}
+
+function zebrickyHtml(){
+  const m=soucty();
+  const bloky=ZEBRICKY.map(z=>({...z,radky:zebricek(m,z.hodnota)}))
+                      .filter(z=>z.radky.length);
+  if(!bloky.length)return '';
+  return `<div class="divak-blok" id="divak-zebricky">
+    <div class="divak-radek"><span class="divak-nazev">Nejlepší v zápase</span></div>
+    <div class="divak-zebricky">${bloky.map(z=>`<div class="divak-zebricek">
+      <div class="zebricek-nadpis">${esc(z.nadpis)}<span class="zebricek-popis">${esc(z.popis)}</span></div>
+      ${z.radky.map(r=>`<div class="zebricek-radek">
+        <span class="zebricek-poradi">${r.poradi}.</span>
+        <span class="zebricek-jmeno">${jmenoSCislem(r.hrac)}</span>
+        <span class="zebricek-hodnota">${r.hodnota}</span>
+      </div>`).join('')}
+    </div>`).join('')}</div>
+  </div>`;
+}
+
 function patickaHtml(){
   if(d.chyba)return `<div class="divak-paticka chyba">Spojení vázne — ukazuju poslední načtená data.</div>`;
   if(!d.nacteno)return '';
@@ -413,7 +479,8 @@ function vykresli(){
   }
   el.innerHTML=hlavickaHtml()+skoreHtml()+
     `<div class="divak-blok" id="divak-hriste">${hristeHtml()}${podaniHtml()}</div>`+
-    `<div class="divak-blok" id="divak-prubeh">${prubehHtml()}</div>`+patickaHtml();
+    `<div class="divak-blok" id="divak-prubeh">${prubehHtml()}</div>`+
+    zebrickyHtml()+patickaHtml();
   document.title=`${d.zapas.soupet} — živě`;
 }
 
