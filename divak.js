@@ -37,6 +37,7 @@ function cisloZAdresy(klic){
 }
 const zapasZAdresy=()=>cisloZAdresy('zapas');
 const setZAdresy=()=>cisloZAdresy('set');
+const prubehZAdresy=()=>cisloZAdresy('prubeh');
 
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -357,6 +358,32 @@ function radekPrerusení(p){
   </div>`;
 }
 
+/* Jeden řádek na záznam: výměna, nebo přerušení. Používá to vedle sebe
+   krátký výpis u zápasu i celý průběh na vlastní stránce. */
+function prubehRadekHtml(k){
+  if(k.typ!=='vymena')return radekPrerusení(k);
+  const h=hracka(k.hrac_id);
+  const souper=k.pole==='souper_chyba'?'Chyba soupeře':k.pole==='souper_bod'?'Bod soupeře':null;
+  return `<div class="prubeh-radek ${k.bod}">
+    <span class="prubeh-poradi">${k.poradi}.</span>
+    <span class="prubeh-skore"><b class="${k.bod==='my'?'plus':'minus'}">${k.my}</b>:<b class="${k.bod==='my'?'minus':'plus'}">${k.oni}</b></span>
+    <span class="prubeh-akce">${esc(souper||popisAkce(k.pole))}</span>
+    <span class="prubeh-kdo">${souper?'Soupeř':esc(h?h.jmeno:'—')}</span>
+    ${k.break?'<span class="prubeh-break" title="Zisk podání">⇄</span>':'<span class="prubeh-break prazdny"></span>'}
+  </div>`;
+}
+
+function pasHtml(kroky){
+  return `<span class="prubeh-pas">${kroky.map(k=>
+    `<span class="prubeh-tik ${k.bod}${k.break?' break':''}"
+      title="${k.my}:${k.oni}"></span>`).join('')}</span>`;
+}
+
+const odkazNaCelyPrubeh=()=>`?zapas=${d.zapas.id}&set=${d.set}&prubeh=1`;
+
+/* U zápasu stačí posledních pár akcí — divák sleduje, co se právě stalo.
+   Celý set je za odkazem na vlastní stránce, stejně jako je v zapisovatelské
+   appce za klepnutím na pás (#107). */
 function prubehHtml(){
   const {vymeny,znamePrvni}=vymenySetu(d.set);
   const kroky=prubehZVymen(vymeny);
@@ -364,27 +391,47 @@ function prubehHtml(){
   if(!vse.length)return '<div class="divak-prazdno">V tomhle setu zatím není zapsaná žádná výměna.</div>';
   const so=sideOutZVymen(vymeny,znamePrvni);
   const posledni=[...vse].reverse().slice(0,VYMEN_V_SEZNAMU);
-  return `<div class="divak-radek">
-      <span class="divak-nazev" title="Sytě = zisk podání">Průběh</span>
-      <span class="prubeh-pas">${kroky.map(k=>
-        `<span class="prubeh-tik ${k.bod}${k.break?' break':''}"
-          title="${k.my}:${k.oni}"></span>`).join('')}</span>
+  return `<a class="divak-radek prubeh-odkaz" href="${odkazNaCelyPrubeh()}"
+      title="Klepnutím rozbalíš celý průběh setu">
+      <span class="divak-nazev">Průběh</span>
+      ${pasHtml(kroky)}
       ${so&&so.pct!=null?`<span class="divak-proc">Side-out ${so.pct}%</span>`:''}
-    </div>
-    <div class="prubeh-seznam">${posledni.map(k=>{
-      if(k.typ!=='vymena')return radekPrerusení(k);
-      const h=hracka(k.hrac_id);
-      const souper=k.pole==='souper_chyba'?'Chyba soupeře':k.pole==='souper_bod'?'Bod soupeře':null;
-      return `<div class="prubeh-radek ${k.bod}">
-        <span class="prubeh-poradi">${k.poradi}.</span>
-        <span class="prubeh-skore"><b class="${k.bod==='my'?'plus':'minus'}">${k.my}</b>:<b class="${k.bod==='my'?'minus':'plus'}">${k.oni}</b></span>
-        <span class="prubeh-akce">${esc(souper||popisAkce(k.pole))}</span>
-        <span class="prubeh-kdo">${souper?'Soupeř':esc(h?h.jmeno:'—')}</span>
-        ${k.break?'<span class="prubeh-break" title="Zisk podání">⇄</span>':'<span class="prubeh-break prazdny"></span>'}
-      </div>`;
-    }).join('')}</div>
-    ${vse.length>VYMEN_V_SEZNAMU?`<div class="divak-vic">Zobrazeno posledních ${VYMEN_V_SEZNAMU} z ${vse.length} záznamů.</div>`:''}`;
+    </a>
+    <div class="prubeh-seznam">${posledni.map(prubehRadekHtml).join('')}</div>
+    <a class="divak-vic" href="${odkazNaCelyPrubeh()}">${
+      vse.length>VYMEN_V_SEZNAMU
+        ? `Zobrazit celý průběh — ${vse.length} záznamů`
+        : 'Zobrazit celý průběh'}</a>`;
 }
+
+/* Celý průběh na vlastní stránce. Ne překryv jako v appce: divácká stránka
+   nemá žádné ovládání a tohle je obyčejné prolistování, takže odkaz jde
+   poslat a tlačítko Zpět funguje samo. */
+function prubehCelyHtml(){
+  const {vymeny,znamePrvni}=vymenySetu(d.set);
+  const kroky=prubehZVymen(vymeny);
+  const vse=prubehSPrerusenimi(kroky,prerusenaSetu(d.set));
+  const so=sideOutZVymen(vymeny,znamePrvni);
+  const sk=skoreKZobrazeni(d.set);
+  return `<a class="divak-zpet" href="?zapas=${d.zapas.id}&set=${d.set}">← ${esc(d.zapas.soupet)}</a>
+    <div class="divak-hlavicka">
+      <div class="divak-zapas">
+        <div class="divak-soupet">${d.set}. set — průběh</div>
+        <div class="divak-detail">${vse.length} záznamů${
+          so&&so.pct!=null?` · side-out ${so.pct}%`:''}</div>
+      </div>
+      <div class="divak-sety"><span class="divak-sety-popis">Stav</span>
+        <span class="divak-sety-cislo">${sk.nase}:${sk.jejich}</span></div>
+    </div>
+    <div class="divak-blok" id="divak-prubeh">
+      ${vse.length?`<div class="divak-radek">${pasHtml(kroky)}</div>
+      <div class="prubeh-seznam">${[...vse].reverse().map(prubehRadekHtml).join('')}</div>
+      <div class="profil-legenda">⇄ = zisk podání (break), ⏸ time-out, ⇅ střídání.
+        Pořadí je od poslední výměny.</div>`
+      :'<div class="divak-prazdno">V tomhle setu zatím není zapsaná žádná výměna.</div>'}
+    </div>`;
+}
+
 
 /* ─── ŽEBŘÍČKY ───
    Kdo zápasu vtiskl tvář. Počítá se za celý zápas, ne za vybraný set — divák
@@ -477,6 +524,11 @@ function vykresli(){
     document.title='Volejbal — zápasy';
     return;
   }
+  if(prubehZAdresy()){
+    el.innerHTML=prubehCelyHtml()+patickaHtml();
+    document.title=`${d.zapas.soupet} — ${d.set}. set`;
+    return;
+  }
   el.innerHTML=hlavickaHtml()+skoreHtml()+
     `<div class="divak-blok" id="divak-hriste">${hristeHtml()}${podaniHtml()}</div>`+
     `<div class="divak-blok" id="divak-prubeh">${prubehHtml()}</div>`+
@@ -486,6 +538,7 @@ function vykresli(){
 
 // Rychle jen tam, kde se čísla opravdu mění: dohraný zápas ani seznam bez
 // rozehraného se za pět vteřin nezmění a tahat kvůli tomu data je plýtvání.
+
 function naplanuj(){
   clearTimeout(obnovaTimer);
   const zive=zapasZAdresy()
