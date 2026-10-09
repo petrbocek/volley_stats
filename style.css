@@ -757,3 +757,12 @@ a.skore-set{text-decoration:none}
 .v2-kdo-dlazdice .v2-dlazdice{flex:0 0 auto;width:44px;min-height:46px;gap:0}
 .v2-kdo-dlazdice .v2-dlazdice-sym{font-size:18px}
 .v2-kdo-dlazdice .v2-dlazdice-cnt{font-size:11px}
+
+/* ─── VÝBĚR HRÁČEK DO SESTAVY (#107) ───
+   Karty se přepínají, přidá se celý výběr najednou. Vybraná karta musí být
+   poznat i bez barvy, proto se mění i značka vpravo. */
+.picker-karta{border-color:var(--border)}
+.picker-karta.vybrana{border-color:var(--green);background:var(--surface)}
+.picker-znak{font-size:20px;font-weight:700;color:var(--muted);flex-shrink:0;width:22px;text-align:center}
+.picker-karta.vybrana .picker-znak{color:var(--green)}
+.picker-ovladani{display:flex;gap:8px;flex-wrap:wrap}

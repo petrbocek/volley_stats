@@ -612,7 +612,8 @@ function renderLiveTable(zapasId){
     return `<tr>${cells}</tr>`;
   }).join('');
 
-  // add-player row spanning all columns
+  /* Řádek „Přidat hráčku" je nad soupiskou, ne pod ní: jak hráčky přibývaly,
+     tlačítko klesalo pod viditelnou část a muselo se k němu scrollovat (#107). */
   const totalCols=1+ACTIONS.reduce((s,a)=>s+(a.varianty?a.varianty.length:VARIANTS.length),0);
   const addRow=`<tr><td colspan="${totalCols}" style="padding:0;height:44px">
     <button onclick="openHracPicker(${zapasId})" style="width:100%;height:100%;background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;gap:6px;transition:color .15s" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--muted)'">
@@ -645,7 +646,7 @@ function renderLiveTable(zapasId){
     }).join('')}
   </tr>`:'';
   el.innerHTML=prepinac
-    +`<div class="live-table-scroll"><table class="live-table"><thead>${thead}</thead><tbody>${tymRow}${rows}${addRow}</tbody></table></div>`
+    +`<div class="live-table-scroll"><table class="live-table"><thead>${thead}</thead><tbody>${tymRow}${addRow}${rows}</tbody></table></div>`
     +(hraci.length?undoBarHtml():'');
   if(hraci.length)napovedaZpet();
 }
@@ -2113,9 +2114,11 @@ function renderLive2(zapasId){
 
   // V hřišti mají stav i soupeřova strana svoje dlaždice, takže pruhy přes
   // celou šířku odpadají — braly 129px z 654 (#84).
+  /* „Přidat hráčku" stojí nad seznamem a mimo něj — uvnitř by ho odscrolloval
+     i pohyb v soupisce, pod seznamem ho odsouvaly přibývající hráčky (#107). */
   const obsah=v2Hriste
     ? `<div class="v2-seznam">${hristeHtml(zapasId)}</div>`
-    : `<div class="v2-seznam">${prazdno}${seznam}${pridat}</div>`;
+    : `${pridat}<div class="v2-seznam">${prazdno}${seznam}</div>`;
   el.innerHTML=prepinac+(v2Hriste?'':skoreHtml(zapasId))+prepinacZobrazeni
     +(v2Hriste?'':tym)+(v2Hriste?'':chyby)+obsah+undoBarHtml('btn-undo-v2');
 }
@@ -2257,6 +2260,58 @@ function dalsiPoradi(zapasId){
   return Math.max(max,radky.length)+1;
 }
 
+/* Hráčky se do sestavy přidávaly po jedné a dialog se po každé zavřel, takže
+   nachystat sestavu znamenalo deset otevření. Teď se dají naklikat všechny
+   a přidat jedním tlačítkem (#107). */
+let pickerVyber=new Set();
+let pickerDostupni=[];
+
+function pickerKartaHtml(zapasId,h){
+  const vybrana=pickerVyber.has(h.id);
+  return playerCard(h,{
+    tridy:`picker-karta${vybrana?' vybrana':''}`,
+    atributy:`style="cursor:pointer" data-hrac="${h.id}" onclick="togglePickerVyber(${h.id})"`,
+    ovladani:`<span class="picker-znak">${vybrana?'✓':'+'}</span>`
+  });
+}
+
+function prekresliPicker(){
+  const zapasId=parseInt(document.getElementById('picker-zapas-id').value);
+  const el=document.getElementById('hrac-picker-list');
+  el.innerHTML=pickerDostupni.map(h=>pickerKartaHtml(zapasId,h)).join('');
+  const n=pickerVyber.size;
+  const btn=document.getElementById('picker-pridat');
+  btn.textContent=n?`Přidat (${n})`:'Přidat';
+  btn.disabled=!n;
+  document.getElementById('picker-vse').textContent=
+    n===pickerDostupni.length&&n?'Zrušit výběr':'Vybrat všechny';
+}
+
+function togglePickerVyber(hracId){
+  if(pickerVyber.has(hracId))pickerVyber.delete(hracId);else pickerVyber.add(hracId);
+  prekresliPicker();
+}
+
+function pickerVseNeboNic(){
+  if(pickerVyber.size===pickerDostupni.length)pickerVyber.clear();
+  else pickerDostupni.forEach(h=>pickerVyber.add(h.id));
+  prekresliPicker();
+}
+
+async function pridejVybrane(){
+  const zapasId=parseInt(document.getElementById('picker-zapas-id').value);
+  const ids=[...pickerVyber];
+  if(!ids.length)return;
+  try{
+    // po jedné: pořadí se počítá z už přidaných, souběžně by všechny dostaly
+    // stejné číslo
+    for(const id of ids)await ulozDoSestavy(zapasId,id);
+    pickerVyber.clear();
+    closeModal('modal-hrac-picker');
+  }catch(e){toast('Chyba: '+e.message,'error');}
+  prekresliLive(zapasId);
+}
+
 function openHracPicker(zapasId){
   document.getElementById('picker-zapas-id').value=zapasId;
   const z=state.zapasy.find(z=>z.id===zapasId);
@@ -2269,23 +2324,30 @@ function openHracPicker(zapasId){
   }
   const lineup=state.zapasHraci.filter(zh=>zh.zapas_id===zapasId).map(zh=>zh.hrac_id);
   const available=vsichni.filter(h=>!lineup.includes(h.id));
+  pickerVyber.clear();
+  pickerDostupni=available;
   const el=document.getElementById('hrac-picker-list');
+  const ovladani=document.getElementById('picker-ovladani');
   if(!available.length){
     el.innerHTML='<div class="empty"><span class="empty-icon">👥</span><div class="empty-text">Všechny hráčky jsou v sestavě</div></div>';
+    ovladani.style.display='none';
   }else{
-    el.innerHTML=available.map(h=>playerCard(h,{
-      atributy:`style="cursor:pointer" onclick="addDoSestava(${zapasId},${h.id})"`,
-      ovladani:'<span style="color:var(--green);font-size:20px;font-weight:700">+</span>'
-    })).join('');
+    ovladani.style.display='';
+    prekresliPicker();
   }
   openModal('modal-hrac-picker');
 }
 
+async function ulozDoSestavy(zapasId,hracId){
+  const poradi=dalsiPoradi(zapasId);
+  await apiUpsert('vb_zapas_hraci',{zapas_id:zapasId,hrac_id:hracId,poradi},'zapas_id,hrac_id');
+  if(!state.zapasHraci.some(zh=>zh.zapas_id===zapasId&&zh.hrac_id===hracId))
+    state.zapasHraci.push({zapas_id:zapasId,hrac_id:hracId,poradi});
+}
+
 async function addDoSestava(zapasId,hracId){
   try{
-    const poradi=dalsiPoradi(zapasId);
-    await apiUpsert('vb_zapas_hraci',{zapas_id:zapasId,hrac_id:hracId,poradi},'zapas_id,hrac_id');
-    if(!state.zapasHraci.some(zh=>zh.zapas_id===zapasId&&zh.hrac_id===hracId))state.zapasHraci.push({zapas_id:zapasId,hrac_id:hracId,poradi});
+    await ulozDoSestavy(zapasId,hracId);
     closeModal('modal-hrac-picker');
     prekresliLive(zapasId);
   }catch(e){toast('Chyba: '+e.message,'error');}

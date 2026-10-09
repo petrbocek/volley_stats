@@ -205,6 +205,10 @@
     <div id="hrac-picker-list" class="player-grid" style="margin-bottom:16px"></div>
     <div class="modal-footer">
       <button class="btn btn-secondary" onclick="closeModal('modal-hrac-picker')">Zavřít</button>
+      <span id="picker-ovladani" class="picker-ovladani">
+        <button class="btn btn-secondary" id="picker-vse" onclick="pickerVseNeboNic()">Vybrat všechny</button>
+        <button class="btn btn-primary" id="picker-pridat" onclick="pridejVybrane()" disabled>Přidat</button>
+      </span>
     </div>
   </div>
 </div>
