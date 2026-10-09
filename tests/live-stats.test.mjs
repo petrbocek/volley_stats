@@ -542,6 +542,56 @@ pass &= ok('T17d každá pozice má vlastní třídu, neznámá spadne na smeča
     ['pos-smec','pos-blokar','pos-nahravac','pos-libero','pos-universal','pos-smec']));
 await page.click('#modal-hrac-picker .btn-secondary');
 
+// ── #107: do sestavy se dá naklikat víc hráček najednou ───────────────────
+await page.evaluate(() => openHracPicker(100));
+await page.waitForSelector('#hrac-picker-list .picker-karta');
+const volneIds = await page.$$eval('#hrac-picker-list .picker-karta',
+  els => els.map(e => Number(e.dataset.hrac)));
+const vSestave = () => page.evaluate(() => state.zapasHraci.filter(z => z.zapas_id === 100).length);
+const predVyberem = await vSestave();
+pass &= ok('T17e0 je z čeho vybírat, jinak by se měřilo prázdno (#107)', volneIds.length > 1);
+
+await page.click('#hrac-picker-list .picker-karta');
+await page.waitForTimeout(150);
+pass &= ok('T17e klepnutí hráčku označí, ale hned ji nepřidá (#107)',
+  await page.$$eval('#hrac-picker-list .picker-karta.vybrana', els => els.length) === 1 &&
+  await vSestave() === predVyberem && await page.isVisible('#modal-hrac-picker'));
+pass &= ok('T17f tlačítko řekne, kolik jich přibude (#107)',
+  /Přidat \(1\)/.test(await page.textContent('#picker-pridat')));
+
+await page.click('#picker-vse');
+await page.waitForTimeout(150);
+pass &= ok('T17g „Vybrat všechny" označí celou nabídku (#107)',
+  await page.$$eval('#hrac-picker-list .picker-karta.vybrana', els => els.length) === volneIds.length &&
+  /Zrušit výběr/.test(await page.textContent('#picker-vse')));
+await page.click('#picker-vse');
+await page.waitForTimeout(150);
+pass &= ok('T17h druhé klepnutí výběr zruší a přidávat není co (#107)',
+  await page.$$eval('#hrac-picker-list .picker-karta.vybrana', els => els.length) === 0 &&
+  await page.evaluate(() => document.getElementById('picker-pridat').disabled));
+
+await page.click('#picker-vse');
+await page.click('#picker-pridat');
+await page.waitForTimeout(700);
+pass &= ok('T17i přidá se celý výběr najednou a dialog se zavře (#107)',
+  await vSestave() === predVyberem + volneIds.length &&
+  await page.isVisible('#modal-hrac-picker') === false);
+// Pořadí se počítá z už přidaných, takže dávka se nesmí poslat souběžně —
+// jinak by všechny dostaly stejné číslo. (Řádky z fixture pořadí nemají,
+// proto se měří jen ty nově přidané.)
+pass &= ok('T17j každá dostala svoje pořadí, ne všechny stejné (#107)',
+  await page.evaluate(ids => {
+    const p = state.zapasHraci
+      .filter(z => z.zapas_id === 100 && ids.includes(z.hrac_id)).map(z => z.poradi);
+    return p.length === ids.length && new Set(p).size === p.length && p.every(x => x > 0);
+  }, volneIds));
+// uklidit, ať další testy počítají s původní sestavou
+await page.evaluate(ids => {
+  state.zapasHraci = state.zapasHraci.filter(z => !(z.zapas_id === 100 && ids.includes(z.hrac_id)));
+  renderLiveTable(100);
+}, volneIds);
+await page.waitForTimeout(200);
+
 // ── #34: export CSV ────────────────────────────────────────────────────────
 // minimální CSV parser, ať se ověřuje význam a ne konkrétní tvar uvozovek
 function parseCsv(text) {
@@ -723,7 +773,11 @@ pass &= ok('T22a souhrn je první řádek tabulky, ne samostatný pruh (#56)',
 pass &= ok('T22b čísla sedí pod sloupci akcí, stejný počet jako u hráčky (#56)',
   await page.evaluate(() => {
     const tym = document.querySelectorAll('.live-tym-row .live-tym-num').length;
-    const hrac = document.querySelectorAll('.live-table tbody tr:nth-child(2) .live-act-btn').length;
+    // první řádek s akcemi, ne druhý v pořadí: nad soupiskou je i řádek
+    // „Přidat hráčku" (#107)
+    const prvniHrac = [...document.querySelectorAll('.live-table tbody tr')]
+      .find(tr => tr.querySelector('.live-act-btn'));
+    const hrac = prvniHrac ? prvniHrac.querySelectorAll('.live-act-btn').length : 0;
     return tym === hrac && tym > 0;
   }));
 
@@ -1620,17 +1674,22 @@ const v2Geometrie = () => page.evaluate(() => {
   const seznam = wrap.querySelector('.v2-seznam');
   const bar = wrap.querySelector('.undo-bar');
   const pridat = wrap.querySelector('.v2-pridat');
+  const pred = pridat.getBoundingClientRect().top;
   seznam.scrollTop = seznam.scrollHeight;
   return {
-    // po sjetí dolů musí být „Přidat hráčku" vidět celé — jinak je useknuté
-    pridatUseknuto: Math.round(pridat.getBoundingClientRect().bottom - seznam.getBoundingClientRect().bottom),
+    // tlačítko stojí mimo scrollovaný seznam, takže se při sjetí nehne ani
+    // nezmizí — dřív ho přibývající hráčky odsunuly pod viditelnou část
+    pridatNehneSe: Math.round(pridat.getBoundingClientRect().top - pred),
+    pridatVObalu: Math.round(wrap.getBoundingClientRect().bottom - pridat.getBoundingClientRect().bottom),
+    pridatNadSeznamem: Math.round(seznam.getBoundingClientRect().top - pridat.getBoundingClientRect().bottom),
     listaMimo: Math.round(bar.getBoundingClientRect().bottom - wrap.getBoundingClientRect().bottom),
     chybyMimo: Math.round(wrap.querySelector('.v2-souper').getBoundingClientRect().bottom - wrap.getBoundingClientRect().bottom),
     prescahuje: Math.round(document.documentElement.scrollWidth - document.documentElement.clientWidth),
   };
 });
 let vg = await v2Geometrie();
-pass &= ok('T32p „Přidat hráčku" se ve V2 nesekne o lištu (#76)', vg.pridatUseknuto <= 0);
+pass &= ok('T32p „Přidat hráčku" zůstane vidět, i když se seznam sjede dolů (#76, #107)',
+  vg.pridatNehneSe === 0 && vg.pridatVObalu >= 0 && vg.pridatNadSeznamem >= 0);
 pass &= ok('T32q lišta se vejde do obalu V2 (#76)', vg.listaMimo <= 0);
 pass &= ok('T32r V2 nepřetéká stránku do šířky (#76)', vg.prescahuje === 0);
 
@@ -1638,7 +1697,7 @@ await page.setViewportSize({ width: 390, height: 600 });
 await page.waitForTimeout(300);
 vg = await v2Geometrie();
 pass &= ok('T32s ani na nízké obrazovce (#76)',
-  vg.pridatUseknuto <= 0 && vg.listaMimo <= 0 && vg.chybyMimo <= 0);
+  vg.pridatVObalu >= 0 && vg.listaMimo <= 0 && vg.chybyMimo <= 0);
 
 // navigace se šesti položkami se musí na telefon vejít
 const navMiry = () => page.evaluate(() => {
