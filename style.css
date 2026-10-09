@@ -740,3 +740,20 @@ a.skore-set{text-decoration:none}
 .prubeh-odkaz{text-decoration:none;color:inherit}
 .divak-vic{display:block;font-size:12px;color:var(--accent);text-align:center;
   text-decoration:none;padding:4px}
+
+/* ─── DLAŽDICE U SÍTĚ: HRÁČKY POD SEBOU (#107) ───
+   Varianta je rovnou u hráčky, takže zápis stojí dva doteky místo tří.
+   Tlačítka jsou užší a nižší než v panelu hráčky — je jich na řádku víc
+   a musí se vejít vedle jména. */
+.v2-kdo-seznam{display:flex;flex-direction:column;gap:8px;margin-bottom:16px}
+.v2-kdo-radek{padding:8px 10px;gap:8px}
+/* Pozice z profilu se tu neukazuje: post plyne ze zóny, ne z karty hráčky,
+   a dvě různá označení vedle sebe by si odporovala (#84). */
+.v2-kdo-radek .player-pos{display:none}
+.v2-kdo-radek .player-num{width:32px;height:32px;font-size:14px}
+.v2-kdo-post{font-family:'Oswald',sans-serif;font-size:12px;font-weight:700;
+  flex-shrink:0;width:12px;text-align:center}
+.v2-kdo-dlazdice{display:flex;gap:5px;flex-shrink:0}
+.v2-kdo-dlazdice .v2-dlazdice{flex:0 0 auto;width:44px;min-height:46px;gap:0}
+.v2-kdo-dlazdice .v2-dlazdice-sym{font-size:18px}
+.v2-kdo-dlazdice .v2-dlazdice-cnt{font-size:11px}

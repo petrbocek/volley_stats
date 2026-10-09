@@ -1228,13 +1228,20 @@ function hraciProAkci(zapasId,key){
   });
 }
 
+/* Dlaždice u sítě otevře hráčky pod sebou a u každé rovnou plus, pokus
+   a mínus. Dřív to bylo dlaždice → hráčka → varianta, tedy tři doteky na
+   jeden zápis; teď jsou dva, protože varianta je rovnou u té hráčky (#107).
+
+   U každého tlačítka je i dosavadní počet — zapisovatelka tak vidí, co už
+   té hráčce v setu připsala, aniž by někam odbočovala. */
 function v2OtevriDlazdici(zapasId,key){
   const a=ACTIONS.find(x=>x.key===key);if(!a)return;
   const set=state.liveSet;
   const hraci=hraciProAkci(zapasId,key);
+  const varianty=a.varianty?VARIANTS.filter(v=>a.varianty.includes(v.suf)):VARIANTS;
   document.getElementById('v2-kdo-zapas').value=zapasId;
   document.getElementById('v2-kdo-akce').value=key;
-  document.getElementById('v2-kdo-title').textContent=`${a.icon} ${a.label} — kdo?`;
+  document.getElementById('v2-kdo-title').textContent=`${a.icon} ${a.label} — ${set}. set`;
   // Bez nahrávačky se posty neznají, tak ať je jasné, proč je v nabídce celá
   // šestka a čím to spravit.
   const napoveda=nahravackaSetu(zapasId,set)?''
@@ -1245,28 +1252,26 @@ function v2OtevriDlazdici(zapasId,key){
     ? hraci.map(h=>{
         const post=postHracky(zapasId,set,h.id);
         return playerCard(h,{
-          atributy:`style="cursor:pointer" onclick="v2VyberProAkci(${h.id})"`,
-          ovladani:`<span style="color:${a.color};font-size:14px;font-weight:700">${
-            post?POST_ZKRATKA[post]||'':a.icon}</span>`
+          tridy:'v2-kdo-radek',
+          ovladani:`${post?`<span class="v2-kdo-post" style="color:${a.color}">${
+              POST_ZKRATKA[post]||''}</span>`:''}
+            <div class="v2-kdo-dlazdice">${varianty.map(v=>
+              `<button class="v2-dlazdice ${v.cls}" style="border-color:${a.color}"
+                 title="${a.label} ${v.sym}" onclick="v2ZapisProAkci(${h.id},'${a.key}_${v.suf}')">
+                <span class="v2-dlazdice-sym">${v.sym}</span>
+                <span class="v2-dlazdice-cnt">${getStatVal(zapasId,h.id,`${a.key}_${v.suf}`,set)}</span>
+              </button>`).join('')}</div>`
         });
       }).join('')
     : '<div class="empty" style="padding:20px"><span class="empty-icon">👥</span><div class="empty-text">Nikdo na tuhle akci</div><div>Postav šestku na hřiště a označ nahrávačku</div></div>');
   openModal('modal-v2-kdo');
 }
 
-function v2VyberProAkci(hracId){
+function v2ZapisProAkci(hracId,field){
   const zapasId=parseInt(document.getElementById('v2-kdo-zapas').value);
-  const key=document.getElementById('v2-kdo-akce').value;
-  const a=ACTIONS.find(x=>x.key===key);if(!a)return;
+  if(!bump(hracId,zapasId,field,1))return;     // nepřihlášenému se nic nezavře
   closeModal('modal-v2-kdo');
-  // Akce s jedinou variantou (pole) není co upřesňovat — zapíše se rovnou.
-  if(a.varianty&&a.varianty.length===1){
-    if(bump(hracId,zapasId,`${a.key}_${a.varianty[0]}`,1))prekresliV2Cisla();
-    return;
-  }
-  const zona=[...postaveniSetu(zapasId,state.liveSet).entries()]
-    .find(([,id])=>id===hracId)?.[0]||0;
-  v2OtevriAkce(zapasId,hracId,zona,key);
+  prekresliV2Cisla();
 }
 
 function v2OtevriObsazeni(zapasId,zona,nahrazuje=0){
@@ -2142,7 +2147,7 @@ function prekresliV2Cisla(){
 
 // jenAkce: modal ukáže jen jednu akci — z dlaždice u sítě už je jasné, která
 // to je, a přebírat zbytek nabídky by znamenalo hledat ji znovu očima.
-function v2OtevriAkce(zapasId,hracId,zona=0,jenAkce=''){
+function v2OtevriAkce(zapasId,hracId,zona=0){
   const h=state.hraci.find(h=>h.id===hracId);if(!h)return;
   document.getElementById('v2-akce-zapas').value=zapasId;
   document.getElementById('v2-akce-hrac').value=hracId;
@@ -2161,8 +2166,7 @@ function v2OtevriAkce(zapasId,hracId,zona=0,jenAkce=''){
     ?'🏐 Není nahrávačka':'🏐 Nahrávačka';
   document.getElementById('v2-akce-title').textContent=
     `${h.jmeno}${h.cislo?' · #'+h.cislo:''} — ${state.liveSet}. set`;
-  document.getElementById('v2-akce-obsah').innerHTML=ACTIONS
-    .filter(a=>!jenAkce||a.key===jenAkce).map(a=>{
+  document.getElementById('v2-akce-obsah').innerHTML=ACTIONS.map(a=>{
     const variants=a.varianty?VARIANTS.filter(v=>a.varianty.includes(v.suf)):VARIANTS;
     return `<div class="v2-akce-radek">
       <div class="v2-akce-nazev" style="color:${a.color}">${a.icon} ${a.label}</div>
@@ -2665,6 +2669,7 @@ const STATS_SLOUPCE={
   zapasy:{hodnota:r=>r.zapasy,vychozi:'desc'},
   sp:{hodnota:r=>r.sp,vychozi:'desc'},
   sm:{hodnota:r=>r.sm,vychozi:'desc'},
+  servis_pct:{hodnota:r=>pctCislo(r.sp,r.sm,r.sn),vychozi:'desc'},
   pp:{hodnota:r=>r.pp,vychozi:'desc'},
   pm:{hodnota:r=>r.pm,vychozi:'desc'},
   prijem_pct:{hodnota:r=>pctCislo(r.pp,r.pm,r.pn),vychozi:'desc'},
@@ -2738,7 +2743,7 @@ function spocitejStatistiky(prepis=null){
     const stats=state.statistiky.filter(s=>s.hrac_id===h.id&&zapasIds.includes(s.zapas_id)
       &&(!selSet||(s.set_cislo||1)===selSet));
     const sum=(f)=>stats.reduce((acc,s)=>acc+(s[f]||0),0);
-    const sp=sum('servis_plus'),sm=sum('servis_minus');
+    const sp=sum('servis_plus'),sm=sum('servis_minus'),sn=sum('servis_neutral');
     const pp=sum('prijem_plus'),pm=sum('prijem_minus'),pn=sum('prijem_neutral');
     const up=sum('utok_plus'),um=sum('utok_minus'),un=sum('utok_neutral');
     const bp=sum('blok_plus');
@@ -2746,18 +2751,18 @@ function spocitejStatistiky(prepis=null){
     const po=sum('pole_neutral');          // vybrané balony, pokus bez vlivu na skóre
     // jeden řádek na set, takže počet zápasů je počet různých zapas_id
     const zapasy=new Set(stats.map(s=>s.zapas_id)).size;
-    return {h,sp,sm,pp,pm,pn,up,um,un,bp,cm,po,total:sp+up+bp-sm-pm-um-cm,zapasy};
+    return {h,sp,sm,sn,pp,pm,pn,up,um,un,bp,cm,po,total:sp+up+bp-sm-pm-um-cm,zapasy};
   }).filter(r=>r.zapasy>0);
   // Řadí se tady, ne až při vykreslení, ať CSV export stáhne tabulku v tom
   // pořadí, v jakém ji má člověk před očima.
   const rows=seradRadky(neserazene);
 
   const tot=rows.reduce((acc,r)=>({
-    zapasy:acc.zapasy+r.zapasy,sp:acc.sp+r.sp,sm:acc.sm+r.sm,
+    zapasy:acc.zapasy+r.zapasy,sp:acc.sp+r.sp,sm:acc.sm+r.sm,sn:acc.sn+r.sn,
     pp:acc.pp+r.pp,pm:acc.pm+r.pm,pn:acc.pn+r.pn,
     up:acc.up+r.up,um:acc.um+r.um,un:acc.un+r.un,
     bp:acc.bp+r.bp,cm:acc.cm+r.cm,po:acc.po+r.po,total:acc.total+r.total
-  }),{zapasy:0,sp:0,sm:0,pp:0,pm:0,pn:0,up:0,um:0,un:0,bp:0,cm:0,po:0,total:0});
+  }),{zapasy:0,sp:0,sm:0,sn:0,pp:0,pm:0,pn:0,up:0,um:0,un:0,bp:0,cm:0,po:0,total:0});
 
   return {stav:'ok',sid,vsechnyHraci,zapasyPoCsoutezi,seasonSouteze,rows,tot,zapasIds,
           selTym,selSoutez,selZapas,selHrac,selSet};
@@ -2782,7 +2787,7 @@ function sZnamenkem(v){
 }
 
 /* ─── EXPORT CSV ─── */
-const CSV_HLAVICKA=['Poř.','Hráčka','Číslo','Záp.','Servis Es','Servis chyby',
+const CSV_HLAVICKA=['Poř.','Hráčka','Číslo','Záp.','Servis Es','Servis chyby','Servis % es',
   'Příjem výb.','Příjem chyby','Příjem % výb.','Útok výb.','Útok chyby','Útok % výb.',
   'Bloky','Pole','Chyby','Celkem'];
 
@@ -2796,10 +2801,12 @@ function statsCsv(d){
   const radky=[csvRadek(CSV_HLAVICKA)];
   d.rows.forEach((r,i)=>radky.push(csvRadek([
     i+1,r.h.jmeno,r.h.cislo??'',r.zapasy,r.sp,r.sm,
+    pctCislo(r.sp,r.sm,r.sn),
     r.pp,r.pm,pctCislo(r.pp,r.pm,r.pn),
     r.up,r.um,pctCislo(r.up,r.um,r.un),
     r.bp,r.po,r.cm,r.total])));
   radky.push(csvRadek(['','Σ Celkem','',d.tot.zapasy,d.tot.sp,d.tot.sm,
+    pctCislo(d.tot.sp,d.tot.sm,d.tot.sn),
     d.tot.pp,d.tot.pm,pctCislo(d.tot.pp,d.tot.pm,d.tot.pn),
     d.tot.up,d.tot.um,pctCislo(d.tot.up,d.tot.um,d.tot.un),
     d.tot.bp,d.tot.po,d.tot.cm,d.tot.total]));
@@ -2906,7 +2913,7 @@ function renderStatistiky(){
         <th rowspan="2">#</th>
         ${th('jmeno','Hráčka','rowspan="2"')}
         ${th('zapasy','Záp.','rowspan="2"')}
-        <th colspan="2">🎯 Servis</th>
+        <th colspan="3">🎯 Servis</th>
         <th colspan="3">🤲 Příjem</th>
         <th colspan="3">💥 Útok</th>
         ${th('bp','🛡️ Blok','rowspan="2"')}
@@ -2915,7 +2922,7 @@ function renderStatistiky(){
         ${th('total','Celkem','rowspan="2"')}
       </tr>
       <tr>
-        ${th('sp','Es')}${th('sm','Chyby')}
+        ${th('sp','Es')}${th('sm','Chyby')}${th('servis_pct','%')}
         ${th('pp','Výb.')}${th('pm','Chyby')}${th('prijem_pct','%')}
         ${th('up','Výb.')}${th('um','Chyby')}${th('utok_pct','%')}
       </tr>
@@ -2925,7 +2932,7 @@ function renderStatistiky(){
         <td style="color:var(--muted);font-weight:700">${i+1}</td>
         <td><a href="#" onclick="event.preventDefault();otevriProfil(${row.h.id})" style="color:var(--text);text-decoration:underline;text-decoration-color:var(--border);text-underline-offset:3px"><strong>${esc(row.h.jmeno)}</strong></a>${row.h.cislo?` <span style="color:var(--muted);font-size:11px">#${row.h.cislo}</span>`:''}</td>
         <td style="${muted}">${row.zapasy}</td>
-        <td style="${g}">${row.sp}</td><td style="${r}">${row.sm}</td>
+        <td style="${g}">${row.sp}</td><td style="${r}">${row.sm}</td><td style="${b}">${pct(row.sp,row.sm,row.sn)}</td>
         <td style="${g}">${row.pp}</td><td style="${r}">${row.pm}</td><td style="${b}">${pct(row.pp,row.pm,row.pn)}</td>
         <td style="${g}">${row.up}</td><td style="${r}">${row.um}</td><td style="${b}">${pct(row.up,row.um,row.un)}</td>
         <td style="${g}">${row.bp}</td>
@@ -2938,7 +2945,7 @@ function renderStatistiky(){
       <tr style="background:var(--surface2);border-top:2px solid var(--border)">
         <td colspan="2" style="padding:10px 12px;font-family:'Oswald',sans-serif;font-size:13px;font-weight:700;color:var(--text);letter-spacing:.3px">Σ Celkem</td>
         <td style="${muted}">${tot.zapasy}</td>
-        <td style="${g}">${tot.sp}</td><td style="${r}">${tot.sm}</td>
+        <td style="${g}">${tot.sp}</td><td style="${r}">${tot.sm}</td><td style="${b}">${pct(tot.sp,tot.sm,tot.sn)}</td>
         <td style="${g}">${tot.pp}</td><td style="${r}">${tot.pm}</td><td style="${b}">${pct(tot.pp,tot.pm,tot.pn)}</td>
         <td style="${g}">${tot.up}</td><td style="${r}">${tot.um}</td><td style="${b}">${pct(tot.up,tot.um,tot.un)}</td>
         <td style="${g}">${tot.bp}</td>
@@ -3014,7 +3021,7 @@ function profilHracky(hracId,celaSezona=false){
     const v=f=>castiSetu.reduce((a,s)=>a+(s[f]||0),0);
     return {z,
       sety:new Set(castiSetu.map(s=>s.set_cislo||1)).size,
-      sp:v('servis_plus'),sm:v('servis_minus'),
+      sp:v('servis_plus'),sm:v('servis_minus'),sn:v('servis_neutral'),
       pp:v('prijem_plus'),pm:v('prijem_minus'),pn:v('prijem_neutral'),
       up:v('utok_plus'),um:v('utok_minus'),un:v('utok_neutral'),
       bp:v('blok_plus'),cm:v('chyba_minus'),po:v('pole_neutral'),
@@ -3087,6 +3094,8 @@ function otevriProfil(hracId,celaSezona=false){
     ${kostka(souhrn.zapasy,'Zápasů')}
     ${kostka(souhrn.total,'Celkem','var(--accent)')}
     ${kostka(souhrn.sp,'Esa','var(--green)')}
+    ${kostka(pctCislo(souhrn.sp,souhrn.sm,souhrn.sn)??'—','Servis % es')}
+    ${kostka(sZnamenkem(uspesnost(souhrn.sp,souhrn.sm,souhrn.sn)),'Servis úsp.')}
     ${kostka(pctCislo(souhrn.up,souhrn.um,souhrn.un)??'—','Útok % výb.')}
     ${kostka(sZnamenkem(uspesnost(souhrn.up,souhrn.um,souhrn.un)),'Útok úsp.')}
     ${kostka(pctCislo(souhrn.pp,souhrn.pm,souhrn.pn)??'—','Příjem % výb.')}
@@ -3114,10 +3123,11 @@ function otevriProfil(hracId,celaSezona=false){
         :'V tomhle filtru nemá hráčka žádný zápas se záznamem.'}</div>`;
 
   const tabulka=radky.length?`<div style="overflow-x:auto"><table class="profil-tabulka">
-    <thead><tr><th>Zápas</th><th>Es</th><th>Příj&nbsp;%</th><th>Útok&nbsp;%</th><th>Blok</th><th title="Vybrané balony">Pole</th><th>Chyb</th><th>Celk.</th></tr></thead>
+    <thead><tr><th>Zápas</th><th>Es</th><th>Serv&nbsp;%</th><th>Příj&nbsp;%</th><th>Útok&nbsp;%</th><th>Blok</th><th title="Vybrané balony">Pole</th><th>Chyb</th><th>Celk.</th></tr></thead>
     <tbody>${radky.map(r=>`<tr>
       <td><div class="profil-zapas-datum">${fmtDate(r.z.datum).slice(0,6)} ${vysledekZnacka(r.z)}</div><div class="profil-zapas-soupet">${esc(r.z.soupet)}</div></td>
       <td>${r.sp}</td>
+      <td>${pctCislo(r.sp,r.sm,r.sn)??'—'}<div class="profil-usp">${sZnamenkem(uspesnost(r.sp,r.sm,r.sn))}</div></td>
       <td>${pctCislo(r.pp,r.pm,r.pn)??'—'}<div class="profil-usp">${sZnamenkem(uspesnost(r.pp,r.pm,r.pn))}</div></td>
       <td>${pctCislo(r.up,r.um,r.un)??'—'}<div class="profil-usp">${sZnamenkem(uspesnost(r.up,r.um,r.un))}</div></td>
       <td>${r.bp}</td>
@@ -3214,6 +3224,8 @@ function otevriTymDetail(tymId){
     <div class="profil-souhrn">
       ${kostka(tot.total,'Celkem','var(--accent)')}
       ${kostka(tot.sp,'Esa','var(--green)')}
+      ${kostka((pctCislo(tot.sp,tot.sm,tot.sn)??'—')+(pctCislo(tot.sp,tot.sm,tot.sn)==null?'':'%'),'Servis % es')}
+      ${kostka(sZnamenkem(uspesnost(tot.sp,tot.sm,tot.sn)),'Servis úsp.')}
       ${kostka((pctCislo(tot.up,tot.um,tot.un)??'—')+(pctCislo(tot.up,tot.um,tot.un)==null?'':'%'),'Útok % výb.')}
       ${kostka(sZnamenkem(uspesnost(tot.up,tot.um,tot.un)),'Útok úsp.')}
       ${kostka((pctCislo(tot.pp,tot.pm,tot.pn)??'—')+(pctCislo(tot.pp,tot.pm,tot.pn)==null?'':'%'),'Příjem % výb.')}

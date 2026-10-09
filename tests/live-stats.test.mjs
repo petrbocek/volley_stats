@@ -601,11 +601,29 @@ pass &= ok('T14e jméno se středníkem a uvozovkami zůstane jedna buňka (#34)
 const tab = await page.$$eval('.stats-table tbody tr', trs =>
   trs.map(tr => [...tr.children].map(td => td.textContent.trim())));
 const tabDelta = tab.find(r => r[1].includes('Delta'));
+/* Sloupce se hledají podle jména v hlavičce, ne podle čísla — přidaný sloupec
+   má znamenat zápis navíc, ne přepisování indexů v testu. V tabulce je číslo
+   dresu u jména, takže od „Záp." dál sedí tabulkový index o jedna níž. */
+const csvIdx = nazev => page.evaluate(n => CSV_HLAVICKA.indexOf(n), nazev);
+const iUtokVyb = await csvIdx('Útok výb.'), iUtokPct = await csvIdx('Útok % výb.');
 pass &= ok('T14f čísla v CSV sedí na tabulku (#34)',
-  csvDelta[4] === tabDelta[3] && csvDelta[9] === tabDelta[8] &&
+  csvDelta[4] === tabDelta[3] && csvDelta[iUtokVyb] === tabDelta[iUtokVyb - 1] &&
   csvDelta[posledni] === tabDelta[tabDelta.length - 1]);
 pass &= ok('T14g procenta jsou číslo bez %, ať se v Excelu počítá (#34)',
-  csvDelta[11] === '60' && tabDelta[10] === '60%');
+  csvDelta[iUtokPct] === '60' && tabDelta[iUtokPct - 1] === '60%');
+
+/* Servis měl v tabulce jen esa a chyby; procento chybělo a neutrální podání
+   se nikde nečetlo. Úspěšnost se počítá ze všech podání, ne jen z těch,
+   co něco rozhodla (#107). */
+pass &= ok('T14i procento servisu se počítá ze všech podání (#107)',
+  await page.evaluate(() => pctCislo(3, 1, 6) === 30 && uspesnost(3, 1, 6) === 20));
+pass &= ok('T14j a servis má v tabulce i v exportu svůj sloupec (#107)',
+  await csvIdx('Servis % es') > 0 &&
+  await page.evaluate(() => {
+    const th = [...document.querySelectorAll('.stats-table thead tr:first-child th')]
+      .find(e => /Servis/.test(e.textContent));
+    return !!th && th.getAttribute('colspan') === '3';
+  }));
 
 const csvSoucet = csv[csv.length - 1];
 const tabSoucet = await page.$$eval('.stats-table tfoot td', tds => tds.map(td => td.textContent.trim()));
@@ -669,7 +687,7 @@ const radekAlfa = await page.$$eval('.stats-table tbody tr', trs => {
   return tr ? [...tr.children].map(td => td.textContent.trim()) : null;
 });
 pass &= ok('T20j součet přes sety v tabulce statistik (#32)',
-  radekAlfa && Number(radekAlfa[8]) === poPrvnim + 2);
+  radekAlfa && Number(radekAlfa[iUtokVyb - 1]) === poPrvnim + 2);
 pass &= ok('T20k hráčka se třemi sety má pořád jeden zápas, ne tři (#32)',
   radekAlfa && radekAlfa[2] === '1');
 
@@ -681,7 +699,8 @@ const jenSet2 = await page.$$eval('.stats-table tbody tr', trs => {
   const tr = trs.find(t => t.textContent.includes('Alfa'));
   return tr ? [...tr.children].map(td => td.textContent.trim()) : null;
 });
-pass &= ok('T20m filtr na set ukáže jen ten set (#32)', jenSet2 && Number(jenSet2[8]) === 2);
+pass &= ok('T20m filtr na set ukáže jen ten set (#32)',
+  jenSet2 && Number(jenSet2[iUtokVyb - 1]) === 2);
 await page.selectOption('#stats-set-sel', '');
 await page.waitForTimeout(200);
 
@@ -793,8 +812,10 @@ const radkyTab = await page.$$eval('.profil-tabulka tbody tr', trs =>
 pass &= ok('T18g tabulka má řádek na zápas, vzestupně podle data (#36)',
   radkyTab.length === 2 && radkyTab[0][0].includes('10.09') && radkyTab[1][0].includes('17.09'));
 // buňka nese i úspěšnost (#37), procenta jsou první textový uzel
+const iProfUtok = await page.$$eval('.profil-tabulka thead th',
+  els => els.findIndex(e => /Útok/.test(e.textContent)));
 const procentaUtok = await page.$$eval('.profil-tabulka tbody tr',
-  trs => trs.map(tr => tr.children[3].childNodes[0].textContent.trim()));
+  (trs, i) => trs.map(tr => tr.children[i].childNodes[0].textContent.trim()), iProfUtok);
 pass &= ok('T18h procenta v tabulce sedí na data (#36)',
   procentaUtok[0] === '60' && procentaUtok[1] === '20');
 
@@ -820,10 +841,10 @@ pass &= ok('T19c souhrn ukazuje úspěšnost vedle % výborných (#37)',
   kostky.some(k => k.lbl === 'Útok % výb.') && kostky.some(k => k.lbl === 'Útok úsp.') &&
   kostky.some(k => k.lbl === 'Příjem úsp.'));
 
-const uspTab = await page.$$eval('.profil-tabulka tbody tr', trs => trs.map(tr => ({
-  utok: tr.children[3].childNodes[0].textContent.trim(),
-  utokUsp: tr.children[3].querySelector('.profil-usp')?.textContent,
-})));
+const uspTab = await page.$$eval('.profil-tabulka tbody tr', (trs, i) => trs.map(tr => ({
+  utok: tr.children[i].childNodes[0].textContent.trim(),
+  utokUsp: tr.children[i].querySelector('.profil-usp')?.textContent,
+})), iProfUtok);
 pass &= ok('T19d dva zápasy se stejným % pokusů se už nepletou (#37)',
   uspTab[0].utok === '60' && uspTab[0].utokUsp === '+40' &&
   uspTab[1].utok === '20' && uspTab[1].utokUsp === '-40');
@@ -1200,11 +1221,16 @@ await page.waitForTimeout(250);
 
 const sloupec = n => page.$$eval(`.stats-table tbody tr td:nth-child(${n})`,
   els => els.map(e => e.textContent.trim()));
-const klikHlavicku = txt => page.evaluate(t => {
+// Podle klíče řazení, ne podle popisku: „%" mají tři sloupce (servis, příjem,
+// útok), takže text hlavičku neurčí (#107).
+const klikHlavicku = klic => page.evaluate(k => {
   const th = [...document.querySelectorAll('.stats-table th.sortable')]
-    .find(e => e.textContent.trim().startsWith(t));
+    .find(e => (e.getAttribute('onclick') || '').includes(`'${k}'`));
   th.click();
-}, txt);
+}, klic);
+// Sloupec v tabulce odpovídá pořadí v exportu: v tabulce je číslo dresu
+// u jména, takže nth-child sedí přímo na index v CSV hlavičce.
+const iPrijemPct = await csvIdx('Příjem % výb.');
 const cisla = a => a.map(v => parseInt(v)).filter(v => !Number.isNaN(v));
 const klesa = a => a.every((v, i) => i === 0 || a[i - 1] >= v);
 const roste = a => a.every((v, i) => i === 0 || a[i - 1] <= v);
@@ -1213,14 +1239,14 @@ pass &= ok('T29a výchozí pořadí je pořád nejlepší nahoře (#72)',
   klesa(cisla(await sloupec(14))) &&
   /▼/.test(await page.textContent('.stats-table th.sort-aktivni')));
 
-await klikHlavicku('Celkem');
+await klikHlavicku('total');
 await page.waitForTimeout(200);
 pass &= ok('T29b klik na aktivní sloupec otočí směr (#72)',
   roste(cisla(await sloupec(14))));
 pass &= ok('T29c otočený směr pozná i šipka (#72)',
   /▲/.test(await page.textContent('.stats-table th.sort-aktivni')));
 
-await klikHlavicku('Hráčka');
+await klikHlavicku('jmeno');
 await page.waitForTimeout(200);
 const jmenaRazeni = (await sloupec(2)).map(t => t.replace(/#\d+$/, '').trim());
 pass &= ok('T29d jméno se řadí abecedně, a česky (#72)',
@@ -1239,14 +1265,14 @@ await page.evaluate(() => {
 });
 await page.waitForTimeout(200);
 pass &= ok('T29f0 hráčka bez jediného pokusu má v procentech „—", ne 0 % (#72)',
-  (await sloupec(8)).includes('—'));
+  (await sloupec(iPrijemPct)).includes('—'));
 
-await klikHlavicku('%');
+await klikHlavicku('prijem_pct');
 await page.waitForTimeout(200);
-const pctDesc = await sloupec(8);   // příjem %
-await klikHlavicku('%');
+const pctDesc = await sloupec(iPrijemPct);   // příjem %
+await klikHlavicku('prijem_pct');
 await page.waitForTimeout(200);
-const pctAsc = await sloupec(8);
+const pctAsc = await sloupec(iPrijemPct);
 const pomlckyNaKonci = a => {
   const i = a.findIndex(v => v === '—');
   return i === -1 || a.slice(i).every(v => v === '—');
@@ -3811,17 +3837,22 @@ pass &= ok('T53d na útok všichni kromě liber a nahrávaček (#84)',
   proUtok.includes(sm) && proUtok.includes(bl) && proUtok.includes(uni) &&
   !proUtok.includes(lib) && !proUtok.includes(nah));
 
-// vybraná hráčka → panel jen s tou akcí, ne celá nabídka
-await page.click(`#v2-kdo-obsah .player-card:has-text("${sm}")`);
-await page.waitForSelector('#modal-v2-akce:not(.hidden)');
-pass &= ok('T53e po výběru hráčky se ukáže jen ta akce, ne celý panel (#84)',
-  await page.$$eval('#modal-v2-akce .v2-akce-radek', els => els.length) === 1 &&
-  /Útok/.test(await page.textContent('#modal-v2-akce .v2-akce-nazev')));
+// varianta je rovnou u hráčky — žádné druhé okno (#107)
+const radekSm = `#v2-kdo-obsah .player-card:has-text("${sm}")`;
+pass &= ok('T53e u hráčky jsou rovnou plus, pokus i mínus (#84, #107)',
+  JSON.stringify(await page.$$eval(`${radekSm} .v2-dlazdice-sym`,
+    els => els.map(e => e.textContent.trim()))) === JSON.stringify(['+', '/', '−']));
 const predUtokem53 = await page.evaluate(() => getStatVal(100, 11, 'utok_plus', 2));
-await page.click('#modal-v2-akce .v2-dlazdice.plus');
+pass &= ok('T53e2 u tlačítka je dosavadní počet, ať se nemusí nikam odbočovat (#107)',
+  (await page.textContent(`${radekSm} .v2-dlazdice.plus .v2-dlazdice-cnt`)).trim()
+    === String(predUtokem53));
+await page.click(`${radekSm} .v2-dlazdice.plus`);
 await page.waitForTimeout(600);
 pass &= ok('T53f zápis z dlaždice jde do statistiky té hráčky (#84)',
   await page.evaluate(() => getStatVal(100, 11, 'utok_plus', 2)) === predUtokem53 + 1);
+pass &= ok('T53f2 druhé okno se po cestě neotevře (#107)',
+  await page.isVisible('#modal-v2-akce') === false &&
+  await page.isVisible('#modal-v2-kdo') === false);
 
 // pole: jen počet, zapíše se rovnou a skóre nechá být
 await page.click('.hriste-akce .hriste-akce-dlazdice:nth-of-type(3)');
@@ -3835,7 +3866,10 @@ const predPolem = await page.evaluate(() => ({
   pole: getStatVal(100, 10, 'pole_neutral', 2), skore: skoreSetu(100, 2),
   vymen: prubehSetu(100, 2).vymeny.length }));
 rpcCalls = [];
-await page.click(`#v2-kdo-obsah .player-card:has-text("${nah}")`);
+pass &= ok('T53g2 pole má jedinou variantu, tak je u hráčky jedno tlačítko (#84, #107)',
+  await page.$$eval(`#v2-kdo-obsah .player-card:has-text("${nah}") .v2-dlazdice`,
+    els => els.length) === 1);
+await page.click(`#v2-kdo-obsah .player-card:has-text("${nah}") .v2-dlazdice`);
 await page.waitForTimeout(700);
 pass &= ok('T53h pole se zapíše rovnou, bez ptaní na variantu (#84)',
   await page.isVisible('#modal-v2-akce') === false &&
