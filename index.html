@@ -120,6 +120,7 @@
       <button class="btn btn-secondary" id="btn-v2-libero" onclick="v2PrepniLibero()" title="Libero se nominuje pro tenhle zápas, nezávisle na pozici hráčky">🎽 Libero</button>
       <button class="btn btn-secondary" id="btn-v2-nahravacka" onclick="v2PrepniNahravacku()" title="Od nahrávačky se odvozují posty celé šestky: po zónách N-S-B-U-S-B">🏐 Nahrávačka</button>
       <button class="btn btn-secondary" id="btn-v2-podava" style="display:none" onclick="v2TahlePodava()" title="Srovná postavení, když se jeden servis nezapsal">🔄 Tahle podává</button>
+      <button class="btn btn-secondary" id="btn-v2-opravit" style="display:none" onclick="v2Opravit()" title="Překlep v šestce — přestaví se bez započtení střídání">✏️ Opravit postavení</button>
       <button class="btn btn-secondary" id="btn-v2-stridat" style="display:none" onclick="v2Stridat()">⇄ Střídat</button>
       <button class="btn btn-red" onclick="v2OdeberZeSestavy()">Odebrat ze sestavy</button>
     </div>
@@ -143,6 +144,7 @@
     <div class="modal-title" id="v2-zona-title">Kdo stojí v zóně?</div>
     <input type="hidden" id="v2-zona-zapas" />
     <input type="hidden" id="v2-zona-cislo" />
+    <input type="hidden" id="v2-zona-rezim" />
     <div id="v2-zona-obsah" class="player-grid" style="margin-bottom:16px"></div>
     <div class="modal-footer">
       <button class="btn btn-secondary" onclick="closeModal('modal-v2-zona')">Zrušit</button>

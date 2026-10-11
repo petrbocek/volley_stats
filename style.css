@@ -70,7 +70,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 .modal-overlay.hidden{display:none}
 .modal{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:24px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto}
 .modal-title{font-family:'Oswald',sans-serif;font-size:20px;font-weight:700;margin-bottom:20px}
-.modal-footer{display:flex;gap:10px;justify-content:flex-end;margin-top:20px}
+.modal-footer{display:flex;gap:10px;justify-content:flex-end;margin-top:20px;flex-wrap:wrap}
 
 /* FORMS */
 .form-group{margin-bottom:14px}
@@ -766,3 +766,11 @@ a.skore-set{text-decoration:none}
 .picker-znak{font-size:20px;font-weight:700;color:var(--muted);flex-shrink:0;width:22px;text-align:center}
 .picker-karta.vybrana .picker-znak{color:var(--green)}
 .picker-ovladani{display:flex;gap:8px;flex-wrap:wrap}
+
+/* ─── OPRAVA POSTAVENÍ (#107) ───
+   V opravě se nabízí i šestka na place: překlep v zahajovacím postavení bývá
+   prohozená dvojice a tu z lavičky nespravíš. Karta hráčky z place vypadá
+   jinak, ať je jasné, že se s ní zóna prohodí, nikdo nepřibude. */
+.player-card.z-place{border-style:dashed;border-color:var(--accent)}
+.z-place-zona{font-size:11px;color:var(--accent);font-family:'Oswald',sans-serif;
+  white-space:nowrap;flex-shrink:0}
