@@ -2308,6 +2308,83 @@ await page.waitForTimeout(500);
 pass &= ok('T38m střídání zónu opravdu přeobsadí (#84)',
   await page.evaluate(z => postaveniSetu(100, 1).get(z), zonaStridani) !== predStridanim);
 
+// ── #107: překlep v zahajovací šestce se opraví bez započtení střídání ────
+// Dvě obsazené zóny jsou předpoklad: prohodit se dá jen to, co stojí.
+const dvojice = await page.evaluate(() => {
+  const m = postaveniSetu(100, 1);
+  const stoji = [...m.values()];
+  const lav = lavicka(100, 1).map(h => h.id);
+  const a = stoji[0] ?? lav[0];
+  const b = stoji.find(id => id !== a) ?? lav.find(id => id !== a);
+  postavDoZony(100, 1, 1, a);
+  postavDoZony(100, 1, 2, b);
+  return { a, b };
+});
+await page.waitForTimeout(500);
+pass &= ok('T38m2a je co prohazovat, jinak by se měřilo prázdno (#107)',
+  !!dvojice.a && !!dvojice.b && dvojice.a !== dvojice.b);
+
+const stridaniPoctu = () => page.evaluate(() => stridaniPocet(100, 1));
+const setBezi = await page.evaluate(() => prubehSetu(100, 1).vymeny.length > 0);
+await page.evaluate(() => v2OtevriAkce(100, postaveniSetu(100, 1).get(1), 1));
+await page.waitForSelector('#modal-v2-akce:not(.hidden)');
+pass &= ok('T38m2 u hráčky v zóně je vedle střídání i oprava (#107)',
+  await page.isVisible('#btn-v2-opravit'));
+/* Patička panelu má po přibytí opravy sedm tlačítek. Bez zalamování se na
+   telefonu přetekla a „Zavřít" vyjelo mimo modál — klikalo se do prázdna. */
+pass &= ok('T38m2b tlačítka panelu se vejdou do modálu i na telefon (#107)',
+  await page.evaluate(() => {
+    const m = document.querySelector('#modal-v2-akce .modal');
+    const r = m.getBoundingClientRect();
+    // schovaná tlačítka mají nulový obdélník, ta se neměří
+    const btn = [...m.querySelectorAll('.modal-footer button')]
+      .filter(b => b.getBoundingClientRect().width > 0);
+    return r.width > 100 && btn.length >= 4 &&
+      btn.every(b => {
+        const q = b.getBoundingClientRect();
+        return q.left >= r.left - 1 && q.right <= r.right + 1;
+      });
+  }));
+const predOpravou = await stridaniPoctu();
+
+let zeptalSe = false;
+const naDialog = d => { zeptalSe = true; d.accept(); };
+page.on('dialog', naDialog);
+await page.click('#btn-v2-opravit');
+await page.waitForSelector('#modal-v2-zona:not(.hidden)');
+page.off('dialog', naDialog);
+pass &= ok('T38m3 v rozehraném setu se appka na opravu zeptá, v nerozehraném ne (#107)',
+  zeptalSe === setBezi);
+pass &= ok('T38m4 oprava nabídne i šestku na place, ne jen lavičku (#107)',
+  await page.$$eval('#v2-zona-obsah .player-card.z-place', els => els.length) > 0 &&
+  /nepočítá jako střídání/i.test(await page.textContent('#v2-zona-obsah')));
+
+await page.click('#v2-zona-obsah .player-card.z-place');
+await page.waitForTimeout(600);
+pass &= ok('T38m5 hráčka z place se s cílovou zónou prohodí, nepřesune (#107)',
+  await page.evaluate(d => {
+    const m = postaveniSetu(100, 1);
+    return m.get(1) === d.b && m.get(2) === d.a;
+  }, dvojice));
+pass &= ok('T38m6 oprava se nezapočítá jako střídání (#107)',
+  await stridaniPoctu() === predOpravou);
+
+// zóna se dá nechat i prázdná, když se tam hráčka postavila omylem
+await page.evaluate(() => v2OtevriAkce(100, postaveniSetu(100, 1).get(1), 1));
+await page.waitForSelector('#modal-v2-akce:not(.hidden)');
+page.on('dialog', naDialog);
+await page.click('#btn-v2-opravit');
+await page.waitForSelector('#modal-v2-zona:not(.hidden)');
+page.off('dialog', naDialog);
+await page.click('#v2-zona-obsah .btn-secondary');
+await page.waitForTimeout(600);
+pass &= ok('T38m7 zónu jde nechat prázdnou a pořád to není střídání (#107)',
+  await page.evaluate(() => !postaveniSetu(100, 1).has(1)) &&
+  await stridaniPoctu() === predOpravou);
+// vrátit, ať další testy počítají s obsazenou zónou
+await page.evaluate(d => postavDoZony(100, 1, 1, d.b), dvojice);
+await page.waitForTimeout(400);
+
 // jedna hráčka nemůže stát ve dvou zónách
 pass &= ok('T38n přesun hráčky uvolní její původní zónu (#84)', await page.evaluate(() => {
   const zdroj = [...postaveniSetu(100, 1).keys()][0];

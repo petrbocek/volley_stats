@@ -869,15 +869,31 @@ function lavicka(zapasId,set){
 // Všechno postavení jde jednou cestou: stav se upraví v paměti a odešle celý.
 // Dva požadavky za sebou (smaž tam, zapiš sem) můžou skončit v půlce a nechat
 // set bez hráčky.
+function ulozPostaveniZMapy(zapasId,set,m){
+  state.postaveni=state.postaveni.filter(p=>!(p.zapas_id===zapasId&&(p.set_cislo||1)===set));
+  state.postaveni.push(...[...m.entries()].map(([z,id])=>({zapas_id:zapasId,set_cislo:set,zona:z,hrac_id:id})));
+  ulozPostaveni(zapasId,set);
+  prekresliLive(zapasId);
+}
+
 function postavDoZony(zapasId,set,zona,hracId){
   if(!isLoggedIn()){toast('Na změny se přihlas (🔒 nahoře)','error');return;}
   const m=postaveniSetu(zapasId,set);
   [...m.entries()].forEach(([z,id])=>{if(id===hracId)m.delete(z);});   // jen jednou na hřišti
   m.set(zona,hracId);
-  state.postaveni=state.postaveni.filter(p=>!(p.zapas_id===zapasId&&(p.set_cislo||1)===set));
-  state.postaveni.push(...[...m.entries()].map(([z,id])=>({zapas_id:zapasId,set_cislo:set,zona:z,hrac_id:id})));
-  ulozPostaveni(zapasId,set);
-  prekresliLive(zapasId);
+  ulozPostaveniZMapy(zapasId,set,m);
+}
+
+/* Oprava šestky nejčastěji znamená, že si dvě hráčky prohodily zóny. Proto
+   výměna, ne přesun: kdyby se hráčka jen přestavěla, zóna po ní zůstane
+   prázdná a chyba se jen posune jinam (#107). */
+function prohodZony(zapasId,set,zonaA,zonaB){
+  if(!isLoggedIn()){toast('Na změny se přihlas (🔒 nahoře)','error');return;}
+  const m=postaveniSetu(zapasId,set);
+  const a=m.get(zonaA)||null,b=m.get(zonaB)||null;
+  if(b)m.set(zonaA,b);else m.delete(zonaA);
+  if(a)m.set(zonaB,a);else m.delete(zonaB);
+  ulozPostaveniZMapy(zapasId,set,m);
 }
 
 function vyndejZeZony(zapasId,set,zona){
@@ -1275,35 +1291,70 @@ function v2ZapisProAkci(hracId,field){
   prekresliV2Cisla();
 }
 
-function v2OtevriObsazeni(zapasId,zona,nahrazuje=0){
+/* Režim rozhoduje, co se zápisem: „stridani" je skutečná výměna a počítá se
+   do osmi, „oprava" je překlep v zahajovací šestce a do ničeho se nepočítá.
+   Dřív existovalo jen střídání, takže špatně postavená hráčka se dala spravit
+   jedině tím, že se spotřebovalo střídání (#107). */
+function v2OtevriObsazeni(zapasId,zona,rezim='obsazeni'){
+  const set=state.liveSet;
   document.getElementById('v2-zona-zapas').value=zapasId;
   document.getElementById('v2-zona-cislo').value=zona;
+  document.getElementById('v2-zona-rezim').value=rezim;
   document.getElementById('v2-zona-title').textContent=
-    nahrazuje?`Střídání do zóny ${zona}`:`Kdo stojí v zóně ${zona}?`;
-  const volne=lavicka(zapasId,state.liveSet);
+    rezim==='stridani'?`Střídání do zóny ${zona}`
+    :rezim==='oprava'?`Oprava — kdo má stát v zóně ${zona}?`
+    :`Kdo stojí v zóně ${zona}?`;
+  const m=postaveniSetu(zapasId,set);
+  const volne=lavicka(zapasId,set);
+  // Při opravě se nabídne i šestka na place: překlep bývá prohozená dvojice
+  // a tu z lavičky nespravíš.
+  const naPlace=rezim==='oprava'
+    ? [...m.entries()].filter(([z])=>z!==zona)
+        .map(([z,id])=>({z,h:state.hraci.find(x=>x.id===id)})).filter(x=>x.h)
+    : [];
   const el=document.getElementById('v2-zona-obsah');
-  el.innerHTML=volne.length
-    ? volne.map(h=>playerCard(h,{
-        atributy:`style="cursor:pointer" onclick="v2VyberDoZony(${h.id})"`,
-        ovladani:'<span style="color:var(--green);font-size:20px;font-weight:700">+</span>'
-      })).join('')
-    : '<div class="empty" style="padding:20px"><span class="empty-icon">👥</span><div class="empty-text">Na lavičce nikdo nezbyl</div><div>Přidej hráčku do sestavy v seznamu</div></div>';
+  const napoveda=rezim==='oprava'
+    ? '<div class="v2-kdo-napoveda">Hráčka z place se s touhle zónou prohodí. Oprava se nepočítá jako střídání.</div>'
+    : '';
+  const uvolnit=rezim==='oprava'&&m.get(zona)
+    ? `<button class="btn btn-secondary" style="width:100%" onclick="v2UvolnitZonu()">Nechat zónu prázdnou</button>`
+    : '';
+  const karty=volne.map(h=>playerCard(h,{
+      atributy:`style="cursor:pointer" onclick="v2VyberDoZony(${h.id})"`,
+      ovladani:'<span style="color:var(--green);font-size:20px;font-weight:700">+</span>'
+    })).join('')
+    +naPlace.map(x=>playerCard(x.h,{
+      tridy:'z-place',
+      atributy:`style="cursor:pointer" onclick="v2VyberDoZony(${x.h.id})"`,
+      ovladani:`<span class="z-place-zona">zóna ${x.z} ⇄</span>`
+    })).join('');
+  el.innerHTML=napoveda+(karty
+    ? karty+uvolnit
+    : '<div class="empty" style="padding:20px"><span class="empty-icon">👥</span><div class="empty-text">Na lavičce nikdo nezbyl</div><div>Přidej hráčku do sestavy v seznamu</div></div>'+uvolnit);
   openModal('modal-v2-zona');
+}
+
+function v2UvolnitZonu(){
+  const zapasId=parseInt(document.getElementById('v2-zona-zapas').value);
+  const zona=parseInt(document.getElementById('v2-zona-cislo').value);
+  closeModal('modal-v2-zona');
+  if(zona)vyndejZeZony(zapasId,state.liveSet,zona);
 }
 
 function v2VyberDoZony(hracId){
   const zapasId=parseInt(document.getElementById('v2-zona-zapas').value);
   const zona=parseInt(document.getElementById('v2-zona-cislo').value);
-  const bylStridani=stridaniZony===zona&&zona>0;
-  stridaniZony=0;
+  const rezim=document.getElementById('v2-zona-rezim').value||'obsazeni';
   closeModal('modal-v2-zona');
-  if(zona){
-    // kdo z place odchází, se musí přečíst ještě před přestavěním zóny
-    const odchazi=postaveniSetu(zapasId,state.liveSet).get(zona)||null;
-    postavDoZony(zapasId,state.liveSet,zona,hracId);
-    if(bylStridani)zapisStridani(zapasId,state.liveSet,odchazi,hracId);
-  }
-  else prepniLibero(zapasId,hracId);          // slot libera, ne zóna na hřišti
+  if(!zona){prepniLibero(zapasId,hracId);return;}   // slot libera, ne zóna na hřišti
+  const set=state.liveSet;
+  const m=postaveniSetu(zapasId,set);
+  const zOdkud=[...m.entries()].find(([,id])=>id===hracId)?.[0]||0;
+  if(rezim==='oprava'&&zOdkud){prohodZony(zapasId,set,zona,zOdkud);return;}
+  // kdo z place odchází, se musí přečíst ještě před přestavěním zóny
+  const odchazi=m.get(zona)||null;
+  postavDoZony(zapasId,set,zona,hracId);
+  if(rezim==='stridani')zapisStridani(zapasId,set,odchazi,hracId);
 }
 
 /* ─── STŘÍDÁNÍ ───
@@ -1406,13 +1457,21 @@ function v2Stridat(){
   const zapasId=parseInt(document.getElementById('v2-akce-zapas').value);
   const zona=parseInt(document.getElementById('v2-akce-zona').value)||0;
   closeModal('modal-v2-akce');
-  if(zona){
-    stridaniZony=zona;          // ať se pozná, že další obsazení je střídání
-    v2OtevriObsazeni(zapasId,zona,1);
-  }
+  if(zona)v2OtevriObsazeni(zapasId,zona,'stridani');
 }
-// Střídání se nepočítá ručně: je to akce, kterou appka zná, tak se přičte sama.
-let stridaniZony=0;
+
+/* Oprava zahajovací šestky. Dokud set nezačal, je to prostě překlep a appka
+   se neptá; v rozehraném setu se zeptá, protože tam je přestavění skoro vždy
+   střídání a tohle by ho schovalo před počítadlem. */
+function v2Opravit(){
+  const zapasId=parseInt(document.getElementById('v2-akce-zapas').value);
+  const zona=parseInt(document.getElementById('v2-akce-zona').value)||0;
+  closeModal('modal-v2-akce');
+  if(!zona)return;
+  if(prubehSetu(zapasId,state.liveSet).vymeny.length&&
+     !confirm('Set už běží. Opravit postavení, aniž by se to započítalo jako střídání?'))return;
+  v2OtevriObsazeni(zapasId,zona,'oprava');
+}
 
 // Zóny 7 a 8 jsou sloty pro libera mimo hřiště. Nejsou v databázi — plynou
 // z nominace v sestavě, takže neexistují dvě pravdy o tom, kdo je libero.
@@ -1991,6 +2050,7 @@ function hristeInfoHtml(zapasId){
 function v2NominujLibero(zapasId){
   document.getElementById('v2-zona-zapas').value=zapasId;
   document.getElementById('v2-zona-cislo').value=0;       // 0 = nominace, ne zóna
+  document.getElementById('v2-zona-rezim').value='obsazeni';
   document.getElementById('v2-zona-title').textContent='Kdo bude libero?';
   const volni=lavicka(zapasId,state.liveSet);
   const el=document.getElementById('v2-zona-obsah');
@@ -2158,6 +2218,7 @@ function v2OtevriAkce(zapasId,hracId,zona=0){
   // střídání i ruční srovnání rotace dávají smysl jen u hráčky, která na
   // hřišti opravdu stojí
   document.getElementById('btn-v2-stridat').style.display=zona?'':'none';
+  document.getElementById('btn-v2-opravit').style.display=zona?'':'none';
   document.getElementById('btn-v2-podava').style.display=zona&&zona!==1?'':'none';
   const btnLib=document.getElementById('btn-v2-libero');
   btnLib.textContent=jeLibero(zapasId,hracId)?'🎽 Zrušit libero':'🎽 Libero';
