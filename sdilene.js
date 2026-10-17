@@ -143,6 +143,42 @@ function sideOutZVymen(vymeny,znamePrvni){
   return {pct:Math.round(uhrano/prijem.length*100),uhrano,celkem:prijem.length};
 }
 
+/* ─── ŠESTKA SOUPEŘE ───
+   Zapisuje se jen zahajovací postavení setu — šest čísel z dresů v pořadí
+   zón. Soupeř rotuje přesně tehdy, když získá podání, a to v logu výměn
+   už je, takže aktuální rotace se dopočítá a nestojí ani klik navíc. Je to
+   stejná úvaha, na které stojí rotace naší šestky (#84, #107). */
+
+/* Síť je vlevo a strana je překlopená v obou osách: u sítě jejich 2-3-4
+   (shora dolů), vzadu 1-6-5. Jejich dvojka tak stojí proti naší čtyřce —
+   tedy proti sobě ti, kdo se přes síť opravdu vidí. */
+const ZONY_ROZLOZENI_SOUPER=[[2,1],[3,6],[4,5]];
+
+// O kolik zón soupeř od začátku setu zrotoval. Bez prvního podání se nepozná,
+// kdo kterou výměnu podával — pak se nic nehádá a vrací se null.
+function souperRotaci(vymeny,znamePrvni){
+  if(!znamePrvni)return null;
+  return (vymeny||[]).filter(v=>v.bod===STRANY.ONI&&v.podaval===STRANY.MY).length;
+}
+
+// Čísla po zónách tak, jak soupeř stojí teď. `sestava` je pole šesti čísel
+// v pořadí zón 1-6, prázdná zóna je null.
+function souperPostaveni(sestava,kroku){
+  const m=new Map();
+  if(!Array.isArray(sestava)||sestava.length!==6)return m;
+  sestava.forEach((cislo,i)=>m.set(poRotaci(i+1,kroku||0),cislo??null));
+  return m;
+}
+
+/* Opačný směr: z toho, jak stojí teď, zpátky na zahajovací šestku. Tím se
+   rozešlá rotace (po jejich střídání) srovná jedním zadáním a dopočet
+   zůstane jediným pravidlem — nevznikne druhá pravda o tom, kde kdo stojí. */
+function souperSestavaZeTed(m,kroku){
+  const out=[];
+  for(let z=1;z<=6;z++)out.push(m.get(poRotaci(z,kroku||0))??null);
+  return out;
+}
+
 /* ─── PŘERUŠENÍ ───
    Time-out a střídání nemají v logu výměn pořadí — vedou se zvlášť, každé se
    stavem, ve kterém padlo. Do průběhu se proto vkládají podle skóre: za
@@ -188,9 +224,13 @@ function prubehSPrerusenimi(kroky,prerusy){
    rotovalo: co se nehnulo, má nulový rozdíl a nic se nekreslí. */
 const ROTACE_MS=360;
 
+/* Animuje se i soupeřova strana, když je zadaná (#107) — klíčem je tam číslo
+   na dresu s předponou, aby se nepotkalo s id našich hráček. */
+const ZONY_K_ANIMACI='.hriste .hriste-zona[data-hrac],.hriste-souper .hriste-zona[data-hrac]';
+
 function zmerZony(){
   const m=new Map();
-  document.querySelectorAll('.hriste .hriste-zona[data-hrac]')
+  document.querySelectorAll(ZONY_K_ANIMACI)
     .forEach(el=>m.set(el.dataset.hrac,el.getBoundingClientRect()));
   return m;
 }
@@ -199,7 +239,7 @@ function dojedZony(pred){
   if(!pred||!pred.size)return;
   // kdo si vypnul animace v systému, ten je tu mít nemá
   if(window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches)return;
-  document.querySelectorAll('.hriste .hriste-zona[data-hrac]').forEach(el=>{
+  document.querySelectorAll(ZONY_K_ANIMACI).forEach(el=>{
     const r=pred.get(el.dataset.hrac);
     if(!r)return;
     const n=el.getBoundingClientRect();

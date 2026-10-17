@@ -1453,6 +1453,117 @@ function v2StridaniSoupereZpet(){
     });
 }
 
+/* ─── ŠESTKA SOUPEŘE (#107) ───
+   V datech je jen zahajovací postavení setu, šest čísel v pořadí zón; kde
+   se rotace veze na logu výměn, je v sdilene.js. Zadává se jednou za set
+   a je to volitelné — bez ní se appka chová jako dosud. */
+function souperSestavaSetu(zapasId,set){
+  const s=setInfo(zapasId,set).souper_sestava;
+  return Array.isArray(s)&&s.length===6?s:null;
+}
+
+/* Jak soupeř stojí teď. Když se rotace nedá dopočítat (chybí první podání),
+   platí aspoň zahajovací šestka — proto se počítá s nulou, ale `zname` to
+   přizná, ať se nikde netvrdí, že je to aktuální stav.
+
+   Rotace se počítá i bez zadané šestky: zadání jde do pole právě podle ní,
+   takže by se první šestka uložila nepootočená a soupeř by se o ten jeden
+   krok rozešel. */
+function souperNaHristi(zapasId,set){
+  const p=prubehSetu(zapasId,set);
+  const kroku=souperRotaci(p.vymeny,p.znamePrvni);
+  const sestava=souperSestavaSetu(zapasId,set);
+  return {m:sestava?souperPostaveni(sestava,kroku||0):new Map(),kroku,zname:kroku!=null};
+}
+
+// Podává soupeř? Stejné pravidlo jako u nás, jen z druhé strany sítě.
+function podavaSouper(zapasId,set){
+  const p=prubehSetu(zapasId,set);
+  return p.znamePrvni&&p.podavaTed===STRANY.ONI;
+}
+
+function v2SouperSestava(){
+  const zapasId=state.liveZapasId;if(!zapasId)return;
+  if(!isLoggedIn()){toast('Na zapisování se přihlas (🔒 nahoře)','error');return;}
+  const set=state.liveSet;
+  const so=souperNaHristi(zapasId,set);
+  document.getElementById('v2-sestava-zapas').value=zapasId;
+  document.getElementById('v2-sestava-title').textContent=`Šestka soupeře — ${set}. set`;
+  document.getElementById('v2-sestava-napoveda').textContent=so.zname
+    ? 'Opiš čísla z dresů tak, jak soupeř stojí teď. Rotace se pak dopočítá sama z průběhu — zadává se jednou za set a po jejich střídání se tady opraví.'
+    : 'Dokud není zadané první podání v setu, rotace se nedopočítá — čísla se uloží jako zahajovací šestka.';
+  // Síť vlevo, zrcadlově k naší straně: proti sobě stojí ti, kdo se vidí.
+  document.getElementById('v2-sestava-mrizka').innerHTML=
+    `<div class="hriste-sit"><span>síť</span></div>
+     <div class="souper-sestava-zony">${ZONY_ROZLOZENI_SOUPER.map(rada=>
+      `<div class="hriste-rada">${rada.map(z=>`<label class="souper-zona">
+        <span class="hriste-cislo-zony">${z}${z===1?' • podání':''}</span>
+        <input type="number" id="v2-sestava-z${z}" min="0" max="99" inputmode="numeric"
+               placeholder="#" value="${so.m.get(z)??''}"
+               onkeydown="if(event.key==='Enter')v2SestavaUlozit()" />
+      </label>`).join('')}</div>`).join('')}</div>`;
+  // Čísla soupeře se mezi sety skoro nemění, tak ať se nepřepisují znovu.
+  const prevzit=document.getElementById('v2-sestava-prevzit');
+  const minuly=set>1?souperSestavaSetu(zapasId,set-1):null;
+  prevzit.classList.toggle('hidden',!minuly);
+  prevzit.textContent=minuly?`Převzít z ${set-1}. setu`:'';
+  openModal('modal-v2-souper-sestava');
+}
+
+function v2SestavaPrevzit(){
+  const zapasId=parseInt(document.getElementById('v2-sestava-zapas').value);
+  const set=state.liveSet;
+  const minuly=souperSestavaSetu(zapasId,set-1);
+  if(!minuly)return;
+  minuly.forEach((cislo,i)=>{
+    const el=document.getElementById(`v2-sestava-z${i+1}`);
+    if(el)el.value=cislo??'';
+  });
+}
+
+function v2SestavaUlozit(){
+  const zapasId=parseInt(document.getElementById('v2-sestava-zapas').value);
+  if(!zapasId)return;
+  const set=state.liveSet;
+  const m=new Map();
+  for(let z=1;z<=6;z++){
+    const v=(document.getElementById(`v2-sestava-z${z}`).value||'').trim();
+    if(v!=='')m.set(z,Math.max(0,Math.min(99,parseInt(v)||0)));
+  }
+  if(!m.size){v2SestavaVymazat();return;}
+  const cisla=[...m.values()];
+  if(new Set(cisla).size!==cisla.length){
+    toast('Dvě stejná čísla na hřišti — oprav to','error');return;
+  }
+  // Ukládá se zahajovací šestka, i když se zadává aktuální postavení: rotace
+  // má zůstat odvozená, jinak by o tom, kde kdo stojí, byly dvě pravdy.
+  const kroku=souperNaHristi(zapasId,set).kroku||0;
+  closeModal('modal-v2-souper-sestava');
+  ulozSouperSestavu(zapasId,set,souperSestavaZeTed(m,kroku));
+}
+
+function v2SestavaVymazat(){
+  const zapasId=parseInt(document.getElementById('v2-sestava-zapas').value);
+  if(!zapasId)return;
+  closeModal('modal-v2-souper-sestava');
+  ulozSouperSestavu(zapasId,state.liveSet,null);
+}
+
+// Šestka patří k setu jako první podání nebo nahrávačka — jeden upsert, žádné
+// „smaž a vlož" ve dvou požadavcích, které může skončit v půlce.
+async function ulozSouperSestavu(zapasId,set,sestava){
+  if(!isLoggedIn()){toast('Na změny se přihlas (🔒 nahoře)','error');return;}
+  const info=setInfo(zapasId,set);
+  const i=state.setInfo.findIndex(x=>x.zapas_id===zapasId&&(x.set_cislo||1)===set);
+  const novy={...info,souper_sestava:sestava};
+  if(i>=0)state.setInfo[i]=novy;else state.setInfo.push(novy);
+  prekresliLive(zapasId);
+  try{
+    await apiUpsert('vb_set_info',
+      {zapas_id:zapasId,set_cislo:set,souper_sestava:sestava},'zapas_id,set_cislo');
+  }catch(e){toast('Chyba: '+e.message,'error');}
+}
+
 function v2Stridat(){
   const zapasId=parseInt(document.getElementById('v2-akce-zapas').value);
   const zona=parseInt(document.getElementById('v2-akce-zona').value)||0;
@@ -2005,6 +2116,15 @@ function hristeInfoHtml(zapasId){
   const stavyOddechovych=stavy(vzate);
   const vzateOni=oddechoveSetu(zapasId,set,STRANY.ONI);
   const stridanychOni=stridaniPocet(zapasId,set,STRANY.ONI);
+  /* Z šestky soupeře je tady zajímavé jedno číslo: kdo u nich stojí v jedničce,
+     tedy kdo podává (nebo bude, až podání získají). Celá šestka se zadává
+     a opravuje v modalu, na place ji zapisovatel vidí očima (#107). */
+  const soSest=souperNaHristi(zapasId,set);
+  const cisloVJednicce=soSest.m.get(1);
+  const sestavaLabel=!soSest.m.size?'zadat'
+    :soSest.zname?(cisloVJednicce!=null?`#${cisloVJednicce}`:'—')
+    :'zadáno';
+  const micOni=!!soSest.m.size&&soSest.zname&&podavaSouper(zapasId,set);
 
   return `<div class="hriste-info">
     <div class="hriste-info-radek">
@@ -2029,15 +2149,23 @@ function hristeInfoHtml(zapasId){
       <button class="info-preruseni" onclick="v2Oddechovy('${STRANY.ONI}')"
           oncontextmenu="event.preventDefault();v2OddechovyZpet('${STRANY.ONI}');return false"
           title="Time-out soupeře — klepnutím zapíšeš i se stavem, pravým tlačítkem nebo dlouhým stiskem ho vrátíš">
-        <span class="hriste-info-nazev">Time-out</span>
+        <span class="info-znak" aria-label="Time-out">⏸</span>
         <span class="tecky">${tecky(vzateOni.length)}</span>
         ${stavy(vzateOni)}
       </button>
       <button class="info-preruseni" onclick="v2StridaniSoupere()"
           oncontextmenu="event.preventDefault();v2StridaniSoupereZpet();return false"
           title="Střídání soupeře — zapíšou se čísla na dresech, pravým tlačítkem nebo dlouhým stiskem se poslední vrátí">
-        <span class="hriste-info-nazev">Střídání</span>
+        <span class="info-znak" aria-label="Střídání">⇅</span>
         <span class="info-hodnota">${stridanychOni}</span>
+      </button>
+      <button class="info-preruseni" onclick="v2SouperSestava()"
+          title="${soSest.m.size
+            ?'Šestka soupeře — číslo v jejich zóně 1, tedy kdo podává. Klepnutím se dá opravit (po jejich střídání)'
+            :'Šestka soupeře — opiš šest čísel z dresů. Rotace se pak dopočítá z průběhu, zadává se jednou za set'}">
+        <span class="hriste-info-nazev">Šestka</span>
+        <span class="info-hodnota">${sestavaLabel}</span>
+        ${micOni?'<span class="hriste-mic" title="Podává soupeř">🏐</span>':''}
       </button>
     </div>
     ${b.dela||b.dava?`<div class="hriste-info-radek">

@@ -4607,6 +4607,178 @@ await page.waitForTimeout(400);
 pass &= ok('T58g prázdný set pás ani nenabídne (#84)',
   await page.$('.prubeh-pas') === null);
 
+
+// ── #107 část S2: šestka soupeře ───────────────────────────────────────────
+// Nejdřív pravidlo samo, bez DOM: soupeř rotuje jen když získá podání.
+pass &= ok('T60a soupeř rotuje jen při zisku podání (#107)', await page.evaluate(() => {
+  const v = [{ bod: 'oni', podaval: 'my' },      // jejich break → rotace
+             { bod: 'oni', podaval: 'oni' },     // bod z vlastního podání → ne
+             { bod: 'my', podaval: 'oni' },      // náš break → rotujeme my
+             { bod: 'oni', podaval: 'my' }];     // jejich break → rotace
+  return souperRotaci(v, true) === 2 && souperRotaci(v, false) === null;
+}));
+pass &= ok('T60b zahajovací šestka a aktuální postavení jsou jedno pravidlo (#107)',
+  await page.evaluate(() => {
+    const zacatek = [7, 3, 9, 1, 4, 2];
+    const m = souperPostaveni(zacatek, 2);
+    // po dvou rotacích stojí ta ze zóny 1 v pětce a dopočet jde i zpátky
+    return m.get(5) === 7 &&
+      JSON.stringify(souperSestavaZeTed(m, 2)) === JSON.stringify(zacatek);
+  }));
+
+/* 4. set: naše šestka, naše první podání a jeden bod soupeře z našeho podání —
+   tím soupeř získal podání a jednou zrotoval. */
+await page.evaluate(() => {
+  const set = 4;
+  const bez = pole => state[pole].filter(x => !(x.zapas_id === 100 && (x.set_cislo || 1) === set));
+  state.postaveni = bez('postaveni');
+  [10, 11, 12, 13, 14].forEach((id, i) => state.postaveni.push(
+    { zapas_id: 100, set_cislo: set, zona: i + 1, hrac_id: id }));
+  state.udalosti = bez('udalosti');
+  state.udalosti.push({ id: 90001, zapas_id: 100, set_cislo: set, hrac_id: 10, pole: 'utok_minus' });
+  state.setInfo = bez('setInfo');
+  state.setInfo.push({ zapas_id: 100, set_cislo: set, prvni_podani: 'my' });
+  state.liveSet = set;
+  renderLive2(100);
+});
+await page.waitForTimeout(400);
+
+const DLAZDICE_SESTAVA = '.hriste-info .info-preruseni[onclick*="v2SouperSestava"]';
+pass &= ok('T60c bez zadané šestky panel jen nabídne ji zadat (#107)',
+  /zadat/.test(await page.textContent(DLAZDICE_SESTAVA)));
+
+// Palec na dlaždice přerušení: plocha ke klepnutí je roztažená mimo tok, takže
+// se měří tím, co opravdu vrací elementFromPoint (#107).
+pass &= ok('T60d na dlaždice přerušení se dá klepnout palcem (#107)', await page.evaluate(() => {
+  const chipy = [...document.querySelectorAll('.hriste-info .info-oddechovy,.hriste-info .info-preruseni')];
+  if (chipy.length < 4) return false;
+  return chipy.every(el => {
+    const r = el.getBoundingClientRect();
+    const x = r.left + r.width / 2;
+    return r.width >= 40 && r.height >= 32 &&
+      document.elementFromPoint(x, r.top - 1) === el &&
+      document.elementFromPoint(x, r.bottom + 1) === el;
+  });
+}));
+
+await page.click(DLAZDICE_SESTAVA);
+await page.waitForSelector('#modal-v2-souper-sestava:not(.hidden)');
+pass &= ok('T60e šestka se zadává po zónách a jednička je podávající (#107)',
+  await page.$$eval('#v2-sestava-mrizka input', els => els.length) === 6 &&
+  /• podání/.test(await page.textContent('#v2-sestava-mrizka')));
+
+otherWrites = [];
+await page.evaluate(() => {
+  const ted = { 1: 7, 2: 3, 3: 9, 4: 1, 5: 4, 6: 2 };
+  Object.entries(ted).forEach(([z, c]) => { document.getElementById(`v2-sestava-z${z}`).value = c; });
+});
+await page.click('#modal-v2-souper-sestava .btn-primary');
+await page.waitForTimeout(600);
+// zadává se aktuální postavení, ukládá se zahajovací: po jedné jejich rotaci
+// je ta ze zóny 1 v šestce, takže se celé pole pootočí zpátky
+pass &= ok('T60f ukládá se zahajovací šestka, i když se zadává to aktuální (#107)',
+  JSON.stringify(await page.evaluate(() => setInfo(100, 4).souper_sestava)) ===
+    JSON.stringify([2, 7, 3, 9, 1, 4]) &&
+  otherWrites.some(w => w.table === 'vb_set_info' && w.body && w.body.set_cislo === 4 &&
+    JSON.stringify(w.body.souper_sestava) === JSON.stringify([2, 7, 3, 9, 1, 4])));
+pass &= ok('T60g na place pak stojí to, co se naklikalo (#107)',
+  JSON.stringify(await page.evaluate(() =>
+    [1, 2, 3, 4, 5, 6].map(z => souperNaHristi(100, 4).m.get(z)))) ===
+  JSON.stringify([7, 3, 9, 1, 4, 2]));
+pass &= ok('T60h v panelu je číslo z jejich jedničky a míč, protože podávají (#107)',
+  await page.evaluate(sel => {
+    const b = document.querySelector(sel);
+    return /#7/.test(b.textContent) && !!b.querySelector('.hriste-mic');
+  }, DLAZDICE_SESTAVA));
+
+// náš bod při jejich podání je náš break: rotujeme my, oni ne
+await page.evaluate(() => {
+  state.udalosti.push({ id: 90002, zapas_id: 100, set_cislo: 4, hrac_id: 10, pole: 'utok_plus' });
+  renderLive2(100);
+});
+await page.waitForTimeout(300);
+pass &= ok('T60i náš break jejich šestkou nehýbe a míč u nich zmizí (#107)',
+  await page.evaluate(sel => {
+    const b = document.querySelector(sel);
+    return souperNaHristi(100, 4).m.get(1) === 7 && /#7/.test(b.textContent) &&
+      !b.querySelector('.hriste-mic');
+  }, DLAZDICE_SESTAVA));
+
+// dvě stejná čísla na place být nemůžou
+await page.click(DLAZDICE_SESTAVA);
+await page.waitForSelector('#modal-v2-souper-sestava:not(.hidden)');
+otherWrites = [];
+await page.evaluate(() => {
+  document.getElementById('v2-sestava-z2').value = document.getElementById('v2-sestava-z1').value;
+});
+await page.click('#modal-v2-souper-sestava .btn-primary');
+await page.waitForTimeout(400);
+pass &= ok('T60j dvě stejná čísla na hřišti se nepustí (#107)',
+  await page.isVisible('#modal-v2-souper-sestava') &&
+  !otherWrites.some(w => w.table === 'vb_set_info'));
+await page.click('#modal-v2-souper-sestava .modal-footer .btn-secondary');
+await page.waitForTimeout(300);
+
+// převzetí z předchozího setu: čísla soupeře se mezi sety skoro nemění
+await page.evaluate(() => {
+  let r = state.setInfo.find(x => x.zapas_id === 100 && (x.set_cislo || 1) === 3);
+  if (!r) { r = { zapas_id: 100, set_cislo: 3 }; state.setInfo.push(r); }
+  r.souper_sestava = [5, 6, 7, 8, 9, 10];
+});
+await page.click(DLAZDICE_SESTAVA);
+await page.waitForSelector('#modal-v2-souper-sestava:not(.hidden)');
+pass &= ok('T60k nabídne převzít čísla z předchozího setu (#107)',
+  await page.isVisible('#v2-sestava-prevzit') &&
+  /3\. setu/.test(await page.textContent('#v2-sestava-prevzit')));
+await page.click('#v2-sestava-prevzit');
+pass &= ok('T60l převzetí čísla naplní (#107)',
+  JSON.stringify(await page.evaluate(() =>
+    [1, 2, 3, 4, 5, 6].map(z => +document.getElementById(`v2-sestava-z${z}`).value))) ===
+  JSON.stringify([5, 6, 7, 8, 9, 10]));
+
+// vymazání: zadání se dá vzít zpět a druhá strana sítě zmizí
+otherWrites = [];
+await page.click('#modal-v2-souper-sestava .modal-footer button[onclick*="v2SestavaVymazat"]');
+await page.waitForTimeout(600);
+pass &= ok('T60m šestka se dá vymazat (#107)',
+  await page.evaluate(() => setInfo(100, 4).souper_sestava) === null &&
+  otherWrites.some(w => w.table === 'vb_set_info' && w.body && w.body.souper_sestava === null) &&
+  /zadat/.test(await page.textContent(DLAZDICE_SESTAVA)));
+
+// bez prvního podání se rotace nedopočítá — appka to řekne a uloží zahajovací
+await page.evaluate(() => {
+  const r = state.setInfo.find(x => x.zapas_id === 100 && (x.set_cislo || 1) === 4);
+  r.prvni_podani = null;
+  renderLive2(100);
+});
+await page.waitForTimeout(300);
+await page.click(DLAZDICE_SESTAVA);
+await page.waitForSelector('#modal-v2-souper-sestava:not(.hidden)');
+pass &= ok('T60n bez prvního podání se rotace nehádá a modal to přizná (#107)',
+  /první podání/.test(await page.textContent('#v2-sestava-napoveda')) &&
+  await page.evaluate(() => souperNaHristi(100, 4).zname === false));
+await page.evaluate(() => {
+  [8, 2, 5, 11, 6, 4].forEach((c, i) => { document.getElementById(`v2-sestava-z${i + 1}`).value = c; });
+});
+await page.click('#modal-v2-souper-sestava .btn-primary');
+await page.waitForTimeout(600);
+pass &= ok('T60o bez rotace se uloží přesně to, co se naklikalo (#107)',
+  JSON.stringify(await page.evaluate(() => setInfo(100, 4).souper_sestava)) ===
+    JSON.stringify([8, 2, 5, 11, 6, 4]) &&
+  /zadáno/.test(await page.textContent(DLAZDICE_SESTAVA)));
+
+// po sobě uklidit: 4. set i vypůjčená šestka ve 3. setu
+await page.evaluate(() => {
+  state.postaveni = state.postaveni.filter(p => !(p.zapas_id === 100 && (p.set_cislo || 1) === 4));
+  state.udalosti = state.udalosti.filter(u => !(u.zapas_id === 100 && (u.set_cislo || 1) === 4));
+  state.setInfo = state.setInfo.filter(x => !(x.zapas_id === 100 && (x.set_cislo || 1) === 4));
+  const t = state.setInfo.find(x => x.zapas_id === 100 && (x.set_cislo || 1) === 3);
+  if (t) delete t.souper_sestava;
+  state.liveSet = 1;
+  renderLive2(100);
+});
+await page.waitForTimeout(300)
+
 await page.evaluate(() => {
   state.postaveni = state.postaveni.filter(p => !(p.zapas_id === 100 && (p.set_cislo || 1) === 5));
   state.setInfo = state.setInfo.filter(x => !(x.zapas_id === 100 && (x.set_cislo || 1) === 5));

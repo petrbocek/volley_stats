@@ -87,8 +87,11 @@ const FIX = {
     { zapas_id: 7, set_cislo: 2, zona: 4, hrac_id: 4 },
     { zapas_id: 7, set_cislo: 2, zona: 5, hrac_id: 5 },
   ],
+  // souper_sestava je zahajovací šestka soupeře po zónách; rotace se dopočítá
+  // z logu výměn, v tomhle setu zrotovali jednou (#107)
   vb_set_info: [{ zapas_id: 7, set_cislo: 2, oddechove_casy: 1, stridani: 0,
-                  prvni_podani: 'oni', nahravacka_hrac_id: 3 }],
+                  prvni_podani: 'oni', nahravacka_hrac_id: 3,
+                  souper_sestava: [11, 12, 13, 14, 15, 16] }],
   // podává soupeř: side-out → eso z vlastního podání → ztráta → chyba soupeře
   vb_udalosti: [
     { id: 10, zapas_id: 7, set_cislo: 2, hrac_id: 1, pole: 'utok_plus', zona1_hrac_id: 5 },
@@ -232,7 +235,7 @@ pass &= ok('D4 vedle je i průběh po setech',
 
 // ── postavení ─────────────────────────────────────────────────────────────
 pass &= ok('D5 hřiště ukáže šestku po zónách', await page.evaluate(() =>
-  document.querySelectorAll('.divak-plocha .hriste-zona:not(.prazdna):not(.libero)').length === 5));
+  document.querySelectorAll('.divak-plocha .hriste .hriste-zona:not(.prazdna):not(.libero)').length === 5));
 pass &= ok('D6 posty plynou z nahrávačky, ne z profilu hráčky', await page.evaluate(() => {
   const zony = [...document.querySelectorAll('.divak-plocha .hriste .hriste-zona')];
   const post = c => zony.find(z => z.textContent.trim().startsWith(c))
@@ -248,6 +251,54 @@ pass &= ok('D6b míč je u podávající, protože podání v téhle chvíli má
   }));
 pass &= ok('D6c karty hřiště nesou id hráčky kvůli animaci rotace (#107)',
   await page.$$eval('.hriste .hriste-zona[data-hrac]', els => els.length) > 0);
+
+// ── šestka soupeře za sítí (#107) ─────────────────────────────────────────
+pass &= ok('D6d za sítí stojí šestka soupeře, jen čísla z dresů (#107)',
+  await page.$$eval('.hriste-souper .hriste-zona', els => els.length) === 6 &&
+  !/Soupeř \d+ · [A-Za-zÁ-ž]/.test(await page.textContent('.hriste-souper')));
+// zahajovací [11..16] + jedna jejich rotace → v jedničce stojí 12
+pass &= ok('D6e jejich rotace se dopočítá z logu, nezapisuje se (#107)',
+  await page.evaluate(() => {
+    const so = souperNaHristi(d.set);
+    return so.zname && so.m.get(1) === 12 && so.m.get(6) === 11;
+  }));
+pass &= ok('D6f míč u nich není, protože podání máme my (#107)',
+  await page.$('.hriste-souper .drzi-mic') === null);
+pass &= ok('D6g i jejich karty nesou klíč kvůli animaci rotace (#107)',
+  await page.$$eval('.hriste-souper .hriste-zona[data-hrac]', els => els.length) === 6);
+pass &= ok('D6h bez zadané šestky se druhá strana sítě neukáže (#107)',
+  await page.evaluate(() => souperNaHristi(1).m.size === 0));
+
+// když podání získají oni, je na řadě jejich číslo a míč přejde za síť
+await page.evaluate(() => {
+  d.udalosti.push({ id: 99, zapas_id: 7, set_cislo: 2, hrac_id: null,
+                    pole: 'souper_bod', zona1_hrac_id: 1 });
+  vykresli();
+});
+pass &= ok('D6i když podává soupeř, je na řadě jeho číslo (#107)', await (async () => {
+  const t = await page.textContent('.divak-radek');
+  return /Podává/.test(t) && /Soupeř/.test(t) && /#13/.test(t);
+})());
+pass &= ok('D6j míč drží jejich jednička (#107)',
+  !!await page.$('.hriste-souper .hriste-zona.drzi-mic .hriste-mic') &&
+  await page.$('.hriste .hriste-zona.podava .hriste-mic') === null);
+await page.evaluate(() => { d.udalosti = d.udalosti.filter(u => u.id !== 99); vykresli(); });
+
+// bez prvního podání se rotace nedá dopočítat — stránka to přizná
+await page.evaluate(() => {
+  const r = d.setInfo.find(x => (x.set_cislo || 1) === d.set);
+  r.prvni_podani = null;
+  vykresli();
+});
+pass &= ok('D6k bez prvního podání je to zahajovací šestka, ne aktuální (#107)',
+  /zahajovací/.test(await page.textContent('.hriste-souper')) &&
+  await page.evaluate(() => souperNaHristi(d.set).zname === false) &&
+  await page.$('.hriste-souper .drzi-mic') === null);
+await page.evaluate(() => {
+  const r = d.setInfo.find(x => (x.set_cislo || 1) === d.set);
+  r.prvni_podani = 'oni';
+  vykresli();
+});
 pass &= ok('D7 libero je stranou hřiště',
   /Libuše/.test(await page.textContent('.divak-libera')));
 pass &= ok('D8 je vidět, kdo podává a kdo je na řadě', await (async () => {

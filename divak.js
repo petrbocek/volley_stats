@@ -198,6 +198,17 @@ function vymenySetu(set){
                      setInfoSetu(set).prvni_podani||null);
 }
 
+/* Šestka soupeře: v datech je jen zahajovací postavení setu, rotace se
+   dopočítá z logu výměn (pravidlo je v sdilene.js, #107). Když ji zapisovatel
+   nezadal, druhá strana sítě se vůbec neukáže — prázdná šestka by lhala. */
+function souperNaHristi(set){
+  const sestava=setInfoSetu(set).souper_sestava;
+  if(!Array.isArray(sestava)||sestava.length!==6)return {m:new Map(),zname:false};
+  const v=vymenySetu(set);
+  const kroku=souperRotaci(v.vymeny,v.znamePrvni);
+  return {m:souperPostaveni(sestava,kroku||0),zname:kroku!=null};
+}
+
 /* ─── VYKRESLENÍ ─── */
 function jmenoSCislem(h){return h?esc(h.jmeno)+(h.cislo?` <span class="divak-dres">#${h.cislo}</span>`:''):'—';}
 
@@ -314,20 +325,58 @@ function hristeHtml(){
     </div>`;
   };
   const libera=d.sestava.filter(z=>z.libero).map(z=>hracka(z.hrac_id)).filter(Boolean);
+
+  /* Za sítí jen čísla z dresů. Míč u jejich jedničky se ukáže jen tehdy, když
+     podání opravdu mají; dokud se rotace nedá dopočítat, je to zahajovací
+     šestka a stránka to řekne nahlas místo tvrzení, kde kdo stojí teď. */
+  const so=souperNaHristi(d.set);
+  const souperKarta=zona=>{
+    const c=so.m.get(zona);
+    const micOni=zona===1&&so.zname&&v.podavaTed===STRANY.ONI;
+    return `<div class="hriste-zona souper${micOni?' drzi-mic':''}"${
+        c!=null?` data-hrac="s${c}"`:''}>
+      <span class="hriste-cislo-zony">${zona}${micOni
+        ?' <span class="hriste-mic" title="Podává soupeř">🏐</span>':''}</span>
+      <span class="hriste-dres">${c!=null?'#'+c:'—'}</span>
+    </div>`;
+  };
+  const souperBlok=so.m.size?`<div class="hriste-souper">
+    <span class="hriste-souper-popis" title="${so.zname
+      ?'Rotace dopočítaná z průběhu setu'
+      :'Bez zadaného prvního podání se rotace nedopočítá'}">Soupeř${so.zname?'':' · zahajovací'}</span>
+    ${ZONY_ROZLOZENI_SOUPER.map(rada=>
+      `<div class="hriste-rada">${rada.map(souperKarta).join('')}</div>`).join('')}
+  </div>`:'';
+
+  const vpravo=[souperBlok,
+    libera.length?`<div class="divak-libera">${libera.map(h=>
+      `<div class="hriste-zona libero"><span class="hriste-cislo-zony">Libero</span>
+        <span class="hriste-jmeno">${esc(h.jmeno)}</span>
+        <span class="hriste-dres">${h.cislo?'#'+h.cislo:''}</span></div>`).join('')}</div>`:''
+  ].filter(Boolean).join('');
+
   return `<div class="divak-plocha">
     <div class="hriste">${ZONY_ROZLOZENI.map(rada=>
       `<div class="hriste-rada">${rada.map(karta).join('')}</div>`).join('')}</div>
     <div class="hriste-sit"><span>síť</span></div>
-    ${libera.length?`<div class="divak-libera">${libera.map(h=>
-      `<div class="hriste-zona libero"><span class="hriste-cislo-zony">Libero</span>
-        <span class="hriste-jmeno">${esc(h.jmeno)}</span>
-        <span class="hriste-dres">${h.cislo?'#'+h.cislo:''}</span></div>`).join('')}</div>`:''}
+    ${vpravo?`<div class="divak-vpravo">${vpravo}</div>`:''}
   </div>`;
 }
 
 function podaniHtml(){
   const m=postaveniSetu(d.set);
   const ted=hracka(m.get(1)),pristi=hracka(m.get(2));
+  /* Když podává soupeř, je na řadě jeho číslo — naše zóna 1 jen čeká na míč.
+     Bez zadané šestky soupeře se to nepozná, tak zůstane naše podávající. */
+  const v=vymenySetu(d.set);
+  const so=souperNaHristi(d.set);
+  if(v.znamePrvni&&v.podavaTed===STRANY.ONI&&so.zname&&so.m.get(1)!=null){
+    return `<div class="divak-radek">
+      <span class="divak-nazev">Podává</span>
+      <span class="divak-hodnota">Soupeř <span class="divak-dres">#${so.m.get(1)}</span></span>
+      ${ted?`<span class="divak-pristi">u nás na řadě ${jmenoSCislem(ted)}</span>`:''}
+    </div>`;
+  }
   if(!ted)return '';
   return `<div class="divak-radek">
     <span class="divak-nazev">Podává</span>
