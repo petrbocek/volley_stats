@@ -2385,6 +2385,84 @@ pass &= ok('T38m7 zónu jde nechat prázdnou a pořád to není střídání (#1
 await page.evaluate(d => postavDoZony(100, 1, 1, d.b), dvojice);
 await page.waitForTimeout(400);
 
+// ── #107: míč u podávající a animace rotace ──────────────────────────────
+/* Měří se na setu bez výměn: tam podání drží ten, kdo ho měl na začátku.
+   V rozehraném setu se po prvním side-outu začátek „zapomene", takže
+   obrácení prvního podání nemusí obrátit toho, kdo podává teď. */
+const micVSetu = () => page.evaluate(() => {
+  const set = 4;
+  const zaloha = {
+    liveSet: state.liveSet,
+    udalosti: state.udalosti.filter(u => u.zapas_id === 100 && (u.set_cislo || 1) === set),
+    postaveni: state.postaveni.filter(p => p.zapas_id === 100 && (p.set_cislo || 1) === set),
+  };
+  const bezSetu = pole => state[pole].filter(x =>
+    !(x.zapas_id === 100 && (x.set_cislo || 1) === set));
+  state.udalosti = bezSetu('udalosti');
+  state.postaveni = bezSetu('postaveni');
+  state.postaveni.push({ zapas_id: 100, set_cislo: set, zona: 1, hrac_id: 10 });
+  let r = state.setInfo.find(x => x.zapas_id === 100 && (x.set_cislo || 1) === set);
+  const pridany = !r;
+  if (!r) { r = { zapas_id: 100, set_cislo: set }; state.setInfo.push(r); }
+  const puvodniPodani = r.prvni_podani;
+  state.liveSet = set;
+
+  const zkus = kdo => {
+    r.prvni_podani = kdo; renderLive2(100);
+    return { mic: !!document.querySelector('.hriste .hriste-mic'),
+             nase: podavameMy(100, set),
+             podava: document.querySelectorAll('.hriste .hriste-zona.podava').length };
+  };
+  const vysledek = { nase: zkus('my'), jejich: zkus('oni'), nezname: zkus(null) };
+
+  r.prvni_podani = puvodniPodani;
+  if (pridany) state.setInfo = state.setInfo.filter(x => x !== r);
+  state.udalosti = bezSetu('udalosti').concat(zaloha.udalosti);
+  state.postaveni = bezSetu('postaveni').concat(zaloha.postaveni);
+  state.liveSet = zaloha.liveSet;
+  renderLive2(100);
+  return vysledek;
+});
+
+const mic = await micVSetu();
+pass &= ok('T38x míč je u podávající, když podání máme (#107)',
+  mic.nase.nase === true && mic.nase.mic === true);
+pass &= ok('T38x2 při soupeřově podání míč není, ale zóna 1 zůstane odlišená (#107)',
+  mic.jejich.nase === false && mic.jejich.mic === false && mic.jejich.podava === 1);
+pass &= ok('T38x3 bez zadaného prvního podání se nehádá (#107)',
+  mic.nezname.nase === false && mic.nezname.mic === false);
+
+pass &= ok('T38y karty hřiště nesou id hráčky, jinak se nemá co animovat (#107)',
+  await page.$$eval('.hriste .hriste-zona[data-hrac]', els => els.length) > 0);
+pass &= ok('T38z posun karty se dojede transformem, neskočí (#107)',
+  await page.evaluate(() => {
+    const karta = document.querySelector('.hriste .hriste-zona[data-hrac]');
+    const r = karta.getBoundingClientRect();
+    const pred = new Map([[karta.dataset.hrac,
+      new DOMRect(r.left + 40, r.top + 25, r.width, r.height)]]);
+    dojedZony(pred);
+    return karta.style.transform === 'translate(40px, 25px)' &&
+           karta.classList.contains('rotuje');
+  }));
+pass &= ok('T38z2 co se nehnulo, se neanimuje (#107)',
+  await page.evaluate(() => {
+    const karta = document.querySelector('.hriste .hriste-zona[data-hrac]');
+    karta.style.transform = ''; karta.classList.remove('rotuje');
+    dojedZony(zmerZony());
+    return karta.style.transform === '' && !karta.classList.contains('rotuje');
+  }));
+await page.emulateMedia({ reducedMotion: 'reduce' });
+pass &= ok('T38z3 kdo má animace vypnuté, ten je nedostane (#107)',
+  await page.evaluate(() => {
+    const karta = document.querySelector('.hriste .hriste-zona[data-hrac]');
+    karta.style.transform = ''; karta.classList.remove('rotuje');
+    const r = karta.getBoundingClientRect();
+    dojedZony(new Map([[karta.dataset.hrac,
+      new DOMRect(r.left + 40, r.top + 25, r.width, r.height)]]));
+    return karta.style.transform === '' && !karta.classList.contains('rotuje');
+  }));
+await page.emulateMedia({ reducedMotion: 'no-preference' });
+
 // jedna hráčka nemůže stát ve dvou zónách
 pass &= ok('T38n přesun hráčky uvolní její původní zónu (#84)', await page.evaluate(() => {
   const zdroj = [...postaveniSetu(100, 1).keys()][0];

@@ -295,12 +295,19 @@ function hristeHtml(){
   if(!m.size)return '<div class="divak-prazdno">Sestava na hřišti se zatím nezapsala.</div>';
   const nid=setInfoSetu(d.set).nahravacka_hrac_id||null;
   const zonaN=nid?[...m.entries()].find(([,id])=>id===nid)?.[0]:null;
+  /* Zóna 1 je podávající zóna vždycky, ale míč se ukáže jen když podání
+     opravdu máme — jinak by to tvrdilo, že podáváme, i když servíruje
+     soupeř. Bez zadaného prvního podání se to neví, tak se nehádá (#107). */
+  const v=vymenySetu(d.set);
+  const mic=v.znamePrvni&&v.podavaTed==='my';
   const karta=zona=>{
     const h=hracka(m.get(zona));
     if(!h)return `<div class="hriste-zona prazdna"><span class="hriste-cislo-zony">${zona}</span></div>`;
     const post=postZony(zona,zonaN);
-    return `<div class="hriste-zona${zona===1?' podava':''}">
-      <span class="hriste-cislo-zony">${zona}${zona===1?' • podání':''}${
+    return `<div class="hriste-zona${zona===1?' podava':''}${zona===1&&mic?' mame-mic':''}"
+        data-hrac="${h.id}">
+      <span class="hriste-cislo-zony">${zona}${zona===1
+        ?(mic?' <span class="hriste-mic" title="Podáváme">🏐</span>':' • podání'):''}${
         post?` <span class="hriste-post">${POST_ZKRATKA[post]}</span>`:''}</span>
       <span class="hriste-jmeno">${esc(h.jmeno)}</span>
       <span class="hriste-dres">${h.cislo?'#'+h.cislo:''}</span>
@@ -529,10 +536,12 @@ function vykresli(){
     document.title=`${d.zapas.soupet} — ${d.set}. set`;
     return;
   }
+  const predRotaci=zmerZony();
   el.innerHTML=hlavickaHtml()+skoreHtml()+
     `<div class="divak-blok" id="divak-hriste">${hristeHtml()}${podaniHtml()}</div>`+
     `<div class="divak-blok" id="divak-prubeh">${prubehHtml()}</div>`+
     zebrickyHtml()+patickaHtml();
+  dojedZony(predRotaci);
   document.title=`${d.zapas.soupet} — živě`;
 }
 
