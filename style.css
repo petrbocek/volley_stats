@@ -830,3 +830,24 @@ a.skore-set{text-decoration:none}
 /* Značky přerušení na soupeřově řádku — stejné jako v průběhu setu, aby se
    tři dlaždice vedle sebe vešly na jeden řádek i na telefonu (#107). */
 .info-znak{font-size:13px;color:var(--muted);line-height:1}
+
+/* ─── OPRAVA PŘERUŠENÍ (#107) ───
+   Řádek přerušení v průběhu je tlačítko: klepnutím se otevře oprava nebo
+   smazání. Vypadat má dál jako řádek, ne jako tlačítko. */
+button.prubeh-radek{width:100%;border-top:0;border-right:0;font-family:inherit;
+  font-size:inherit;color:inherit;text-align:left;cursor:pointer}
+button.prubeh-radek:active{filter:brightness(1.2)}
+.prubeh-radek.prerus .prubeh-break{color:var(--muted);font-size:11px}
+.prerus-popis{font-size:14px;font-weight:600;margin-bottom:8px}
+/* Dlouhý stisk nesmí skončit označením textu nebo nabídkou „kopírovat" —
+   na telefonu je to jediná cesta, jak vzít přerušení zpět. */
+.info-oddechovy,.info-preruseni{user-select:none;-webkit-user-select:none;
+  -webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+/* Stav a strana u opravy přerušení — dvě malá pole vedle sebe, na telefonu
+   s numerickou klávesnicí jako u střídání soupeře (#107). */
+.prerus-pole{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.prerus-pole label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
+.prerus-pole input,.prerus-pole select{font-family:'Oswald',sans-serif;font-size:18px;
+  text-align:center;padding:8px;border:1px solid var(--border);border-radius:10px;
+  background:var(--surface2);color:var(--text);min-height:44px}
+.prerus-pole input{width:72px}

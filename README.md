@@ -72,6 +72,14 @@ Ve Statistikách se sety sčítají. Filtrem „set" se dají rozpadnout zpátky
 Pozor: zápasy z doby před zavedením setů (#32) mají všechno pod 1. setem,
 takže u nich rozpad nic neřekne.
 
+Time-out se bere klepnutím na dlaždici v panelu u hřiště, **dlouhý stisk ho
+vrátí** — stejné gesto jako u počítadel. Starší přerušení (i to pět výměn
+zpátky) se opraví nebo smaže **v průběhu setu**: klepnutím na jeho řádek.
+U time-outu jde přepsat stav i to, čí byl, u soupeřova střídání čísla na
+dresech, u našeho se dá vrátit i hráčka zpátky do své zóny. Stav rozhoduje
+o tom, kam se přerušení v průběhu zařadí, takže se tím srovná i time-out
+zapsaný o výměnu později.
+
 Zapisovat může víc lidí najednou; posílají se přírůstky, ne celé řádky, takže
 se zápisy nepřebíjejí. Čísla z druhého zařízení se dorovnají zhruba do deseti
 sekund.
