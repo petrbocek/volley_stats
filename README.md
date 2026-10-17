@@ -94,10 +94,17 @@ sestav i správy týmů, ale statistiky zůstanou a v Archivu jde kdykoli obnovi
 `divak.html` ukazuje **stav, postavení a průběh akcí** lidem v hale. Jen
 koukání: žádné přihlášení, žádné zapisování, umí jedinou HTTP metodu (GET).
 
-Adresa je jedna pro celou halu a **ukazuje vždy rozehraný zápas** — nikdo nic
-nevybírá. Na co se ptá, to se ptá při každé obnově, takže se po ukončení
-zápasu sama přepne na další a mezi zápasy řekne „teď se nehraje". Počítá se
+Adresa je jedna pro celou halu. Bez parametru je to **seznam zápasů** —
+nahoře rozehraný, pod ním odehrané od nejnovějšího; `?zapas=30` je detail
+a `&prubeh=1` celý průběh setu. Seznam se ptá při každé obnově, takže se po
+ukončení zápasu srovná sám a mezi zápasy řekne „teď se nehraje". Počítá se
 s telefonem; varianta pro velkou obrazovku zatím není.
+
+Za sítí stojí **šestka soupeře**, když ji zapisovatel zadal — jen čísla
+z dresů, nic jiného o něm nevedeme. Zadává se jednou za set a jejich rotace
+se dál dopočítává z logu výměn (rotuje ten, kdo získal podání), takže to
+zapisovatele nestojí žádné další klikání. Bez zadané šestky se druhá strana
+sítě vůbec neukáže.
 
 Data se dotahují po 5 s, když zápas běží, jinak po 30 s; schovaná záložka
 nestahuje nic. Tahá se jen jeden zápas, ne celá databáze jako v appce. Když

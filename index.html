@@ -186,6 +186,22 @@
   </div>
 </div>
 
+<!-- Šestka soupeře: šest čísel z dresů, rotace se pak dopočítá z průběhu (#107) -->
+<div class="modal-overlay hidden" id="modal-v2-souper-sestava">
+  <div class="modal">
+    <div class="modal-title" id="v2-sestava-title">Šestka soupeře</div>
+    <input type="hidden" id="v2-sestava-zapas" />
+    <div class="info-proc" id="v2-sestava-napoveda"></div>
+    <div class="souper-sestava" id="v2-sestava-mrizka"></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('modal-v2-souper-sestava')">Zrušit</button>
+      <button class="btn btn-secondary hidden" id="v2-sestava-prevzit" onclick="v2SestavaPrevzit()"></button>
+      <button class="btn btn-secondary" onclick="v2SestavaVymazat()">Vymazat</button>
+      <button class="btn btn-primary" onclick="v2SestavaUlozit()">Uložit</button>
+    </div>
+  </div>
+</div>
+
 <!-- Dlaždice u sítě: nejdřív akce, pak kdo ji udělal -->
 <div class="modal-overlay hidden" id="modal-v2-kdo">
   <div class="modal">

@@ -550,11 +550,24 @@ button.hriste-dlazdice:focus-visible{outline:2px solid var(--accent);outline-off
 .info-pristi{font-size:11px;color:var(--muted)}
 /* Soupeřova přerušení mají vlastní třídu, ať je v kódu i v testech poznat,
    na kterou stranu sítě klik patří (#107). */
-.info-oddechovy,.info-preruseni{display:flex;align-items:center;gap:5px;background:none;border:none;padding:2px 0;
-  cursor:pointer;font-family:inherit;color:inherit}
+/* Byla to jen řádka textu vysoká 18 px — na telefonu se do ní mířilo mezi
+   ostatní popisky. Teď je to dlaždice s vlastním rámem a plocha ke klepnutí
+   se přes ::after roztahuje na 40 px, tedy na velikost palce. Roztažení je
+   schválně mimo tok: hřiště nad panelem má pevnou výšku a každý pixel, který
+   si panel vezme, mu ubere z karet (#107). */
+.info-oddechovy,.info-preruseni{position:relative;display:flex;align-items:center;gap:6px;
+  min-height:36px;padding:4px 10px;border:1px solid var(--border);border-radius:10px;
+  background:var(--surface2);cursor:pointer;font-family:inherit;color:inherit}
+/* Odsazení se měří od vnitřní hrany, takže -3 px přes 1px rám znamená 2 px
+   nad i pod dlaždicí: 36 + 2 + 2 = 40 px na klepnutí. Přesně tolik, kolik je
+   mezi řádky — plochy dvou dlaždic nad sebou se tak dotknou, ale nepřekryjí,
+   a klepnutí vedle našeho time-outu nevezme time-out soupeři o řádek níž. */
+.info-oddechovy::after,.info-preruseni::after{content:'';position:absolute;
+  left:0;right:0;top:-3px;bottom:-3px}
+.info-oddechovy:active,.info-preruseni:active{background:var(--surface)}
 .info-oddechovy:focus-visible,.info-preruseni:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .tecky{display:flex;gap:3px}
-.tecka{width:9px;height:9px;border-radius:50%;border:1px solid var(--muted)}
+.tecka{width:10px;height:10px;border-radius:50%;border:1px solid var(--muted)}
 .tecka.cerpana{background:var(--accent);border-color:var(--accent)}
 .info-hodnota{font-family:'Oswald',sans-serif;font-size:13px;font-weight:700}
 .info-hodnota.prekroceno{color:var(--red)}
@@ -783,3 +796,37 @@ a.skore-set{text-decoration:none}
 /* Karta, která zrovna dojíždí na nové místo, musí být nad ostatními, jinak
    při míjení podjede sousední zónu. */
 .hriste .hriste-zona.rotuje{position:relative;z-index:2}
+
+/* ─── ŠESTKA SOUPEŘE (#107) ───
+   Za sítí jsou jen čísla z dresů — jména cizích hráček nevedeme a na place
+   je vidět stejně jen číslo. Zóny jsou zrcadlem naší strany, takže proti
+   sobě stojí ti, kdo se na place opravdu vidí. */
+.hriste-souper{display:flex;flex-direction:column;gap:6px;min-width:0}
+.hriste-souper .hriste-rada{display:grid;grid-template-columns:repeat(2,1fr);gap:6px;flex:1}
+.hriste-souper .hriste-zona{min-height:40px;align-items:center;justify-content:center;
+  gap:2px;text-align:center}
+.hriste-souper .hriste-zona .hriste-dres{font-family:'Oswald',sans-serif;font-size:15px;
+  font-weight:700;color:var(--text)}
+.hriste-souper-popis{font-size:10px;text-transform:uppercase;letter-spacing:.5px;
+  color:var(--muted);font-weight:700}
+/* Prsten kolem karty s míčem je stejný na obou stranách sítě, jen se jinak
+   jmenuje: u nás „máme míč", u nich „drží míč". */
+.hriste-souper .hriste-zona.drzi-mic{box-shadow:inset 0 0 0 1px var(--accent)}
+/* Pravý sloupec diváka: za sítí šestka soupeře, pod ní naše libera. */
+.divak-vpravo{flex:0 0 32%;display:flex;flex-direction:column;gap:8px;min-width:0}
+.divak-vpravo .divak-libera{flex:0 0 auto}
+
+/* Zadávání šestky v appce: síť vlevo, pod ní šest políček na čísla. Klepnutím
+   naskočí numerická klávesnice, stejně jako u střídání soupeře. */
+.souper-sestava{display:flex;gap:8px;align-items:stretch;margin:10px 0 12px}
+.souper-sestava .hriste-sit{border-left:0;border-right:3px solid var(--muted)}
+.souper-sestava-zony{flex:1;display:flex;flex-direction:column;gap:6px;min-width:0}
+.souper-zona{display:flex;flex-direction:column;gap:3px;padding:6px;
+  border:1px solid var(--border);border-radius:10px;background:var(--surface2)}
+.souper-zona input{font-family:'Oswald',sans-serif;font-size:20px;text-align:center;
+  padding:6px;border:1px solid var(--border);border-radius:8px;background:var(--surface);
+  color:var(--text);width:100%;box-sizing:border-box}
+.btn.hidden{display:none}
+/* Značky přerušení na soupeřově řádku — stejné jako v průběhu setu, aby se
+   tři dlaždice vedle sebe vešly na jeden řádek i na telefonu (#107). */
+.info-znak{font-size:13px;color:var(--muted);line-height:1}
