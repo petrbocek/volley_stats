@@ -240,6 +240,14 @@ pass &= ok('D6 posty plynou z nahrávačky, ne z profilu hráčky', await page.e
   // nahrávačka ve trojce → 3 N, 4 S, 5 B, 1 S, 2 B
   return post('3') === 'N' && post('4') === 'S' && post('5') === 'B' && post('1') === 'S';
 }));
+pass &= ok('D6b míč je u podávající, protože podání v téhle chvíli máme (#107)',
+  await page.evaluate(() => {
+    const v = vymenySetu(d.set);
+    return v.znamePrvni && v.podavaTed === 'my' &&
+      !!document.querySelector('.hriste .hriste-zona.podava .hriste-mic');
+  }));
+pass &= ok('D6c karty hřiště nesou id hráčky kvůli animaci rotace (#107)',
+  await page.$$eval('.hriste .hriste-zona[data-hrac]', els => els.length) > 0);
 pass &= ok('D7 libero je stranou hřiště',
   /Libuše/.test(await page.textContent('.divak-libera')));
 pass &= ok('D8 je vidět, kdo podává a kdo je na řadě', await (async () => {

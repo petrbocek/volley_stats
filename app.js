@@ -1476,9 +1476,21 @@ function v2Opravit(){
 // Zóny 7 a 8 jsou sloty pro libera mimo hřiště. Nejsou v databázi — plynou
 // z nominace v sestavě, takže neexistují dvě pravdy o tom, kdo je libero.
 
+/* Zóna 1 je podávající zóna vždycky — z ní se čte rotace. Míč se ale ukáže
+   jen když podání opravdu máme: jinak by to tvrdilo, že podáváme, i když
+   servíruje soupeř. Dokud není zadané první podání, se neví, tak se nehádá. */
+function podavameMy(zapasId,set){
+  const p=prubehSetu(zapasId,set);
+  return p.znamePrvni&&p.podavaTed==='my';
+}
+
 function hristeHtml(zapasId){
   const set=state.liveSet;
   const m=postaveniSetu(zapasId,set);
+  const mic=podavameMy(zapasId,set);
+  const popisZony=zona=>zona===1
+    ?(mic?' <span class="hriste-mic" title="Podáváme">🏐</span>':' • podání')
+    :'';
   const prazdnych=6-m.size;
   const libera=liberaSestavy(zapasId);
 
@@ -1496,8 +1508,9 @@ function hristeHtml(zapasId){
       <span class="hriste-prazdno">+</span></button>`;
     // Post se nebere z profilu hráčky, ale z místa v šestce vůči nahrávačce.
     const post=postVZone(zapasId,set,zona);
-    return `<button class="hriste-zona${zona===1?' podava':''}" onclick="v2OtevriZonu(${zapasId},${zona})">
-      <span class="hriste-cislo-zony">${zona}${zona===1?' • podání':''}${
+    return `<button class="hriste-zona${zona===1?' podava':''}${zona===1&&mic?' mame-mic':''}"
+        data-hrac="${h.id}" onclick="v2OtevriZonu(${zapasId},${zona})">
+      <span class="hriste-cislo-zony">${zona}${popisZony(zona)}${
         post?` <span class="hriste-post" title="${post}">${POST_ZKRATKA[post]}</span>`:''}</span>
       <span class="hriste-jmeno">${esc(h.jmeno)}</span>
       <span class="hriste-dres">${h.cislo?'#'+h.cislo:''}</span>
@@ -2179,8 +2192,10 @@ function renderLive2(zapasId){
   const obsah=v2Hriste
     ? `<div class="v2-seznam">${hristeHtml(zapasId)}</div>`
     : `${pridat}<div class="v2-seznam">${prazdno}${seznam}</div>`;
+  const predRotaci=zmerZony();
   el.innerHTML=prepinac+(v2Hriste?'':skoreHtml(zapasId))+prepinacZobrazeni
     +(v2Hriste?'':tym)+(v2Hriste?'':chyby)+obsah+undoBarHtml('btn-undo-v2');
+  dojedZony(predRotaci);
 }
 
 // Čísla se mění s každým klikem; překreslovat kvůli nim celý seznam by bylo

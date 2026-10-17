@@ -8,7 +8,9 @@ const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZ
    jednou se rozejdou a nikdo nepozná, která má pravdu (#102).
 
    Jsou to čisté funkce nad předanými daty — žádné sahání do stavu appky,
-   žádné DOM. Kdo chce pracovat se `state`, obalí si je u sebe. */
+   žádné DOM. Kdo chce pracovat se `state`, obalí si je u sebe. Jedinou
+   výjimkou je animace rotace na konci souboru: kreslí hřiště obou stránek
+   a dvě kopie by se časem rozešly. */
 
 /* Slovník stavů zápasu. Psát si ho po paměti znamená přehlédnout, že
    „probíhající" je v datech `probihajici` — divácká stránka se přesně na tom
@@ -174,4 +176,45 @@ function prubehSPrerusenimi(kroky,prerusy){
     umisteni.filter(r=>r.po===i).forEach(r=>vysledek.push(r));
   });
   return [...umisteni.filter(r=>r.po===-1),...vysledek];
+}
+
+/* ─── ANIMACE ROTACE ───
+   Jediné místo v tomhle souboru, které sahá na DOM. Je tu proto, že hřiště
+   kreslí appka i divácká stránka a rotace má vypadat stejně v obou — dvě
+   kopie téhle funkce by se časem rozešly (#107).
+
+   Karty se překreslují celé, takže se poloha musí změřit před překreslením
+   a po něm a rozdíl dojet transformem. Nehlídá se, jestli se opravdu
+   rotovalo: co se nehnulo, má nulový rozdíl a nic se nekreslí. */
+const ROTACE_MS=360;
+
+function zmerZony(){
+  const m=new Map();
+  document.querySelectorAll('.hriste .hriste-zona[data-hrac]')
+    .forEach(el=>m.set(el.dataset.hrac,el.getBoundingClientRect()));
+  return m;
+}
+
+function dojedZony(pred){
+  if(!pred||!pred.size)return;
+  // kdo si vypnul animace v systému, ten je tu mít nemá
+  if(window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+  document.querySelectorAll('.hriste .hriste-zona[data-hrac]').forEach(el=>{
+    const r=pred.get(el.dataset.hrac);
+    if(!r)return;
+    const n=el.getBoundingClientRect();
+    const dx=Math.round(r.left-n.left),dy=Math.round(r.top-n.top);
+    if(!dx&&!dy)return;
+    el.style.transition='none';
+    el.style.transform=`translate(${dx}px,${dy}px)`;
+    el.classList.add('rotuje');
+    // dvakrát: první snímek usadí výchozí pozici, teprve druhý se animuje
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{
+      el.style.transition=`transform ${ROTACE_MS}ms cubic-bezier(.2,.7,.3,1)`;
+      el.style.transform='';
+      setTimeout(()=>{
+        el.style.transition='';el.style.transform='';el.classList.remove('rotuje');
+      },ROTACE_MS);
+    }));
+  });
 }

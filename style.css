@@ -774,3 +774,12 @@ a.skore-set{text-decoration:none}
 .player-card.z-place{border-style:dashed;border-color:var(--accent)}
 .z-place-zona{font-size:11px;color:var(--accent);font-family:'Oswald',sans-serif;
   white-space:nowrap;flex-shrink:0}
+
+/* ─── MÍČ U PODÁVAJÍCÍ A ANIMACE ROTACE (#107) ───
+   Míč se ukazuje jen když podání opravdu máme; zóna 1 zůstává odlišená vždy,
+   protože z ní se čte rotace. */
+.hriste-mic{font-size:12px;line-height:1}
+.hriste .hriste-zona.mame-mic{box-shadow:inset 0 0 0 1px var(--accent)}
+/* Karta, která zrovna dojíždí na nové místo, musí být nad ostatními, jinak
+   při míjení podjede sousední zónu. */
+.hriste .hriste-zona.rotuje{position:relative;z-index:2}
