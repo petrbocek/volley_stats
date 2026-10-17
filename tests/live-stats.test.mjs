@@ -4779,6 +4779,135 @@ await page.evaluate(() => {
 });
 await page.waitForTimeout(300)
 
+
+// ── #107: přerušení jde vrátit dlouhým stiskem i opravit z průběhu ─────────
+// Dlaždice uměly „zpět" jen přes pravé tlačítko, které na telefonu není.
+await page.evaluate(() => {
+  const set = 4;
+  const bez = pole => state[pole].filter(x => !(x.zapas_id === 100 && (x.set_cislo || 1) === set));
+  state.postaveni = bez('postaveni');
+  [10, 11, 12, 13].forEach((id, i) => state.postaveni.push(
+    { zapas_id: 100, set_cislo: set, zona: i + 1, hrac_id: id }));
+  state.udalosti = bez('udalosti');
+  state.udalosti.push({ id: 90101, zapas_id: 100, set_cislo: set, hrac_id: 10, pole: 'utok_plus' });
+  state.setInfo = bez('setInfo');
+  // bez prvního podání se místo pásu průběhu nabízí jeho zadání
+  state.setInfo.push({ zapas_id: 100, set_cislo: set, prvni_podani: 'my' });
+  state.oddechove = bez('oddechove');
+  state.stridani = bez('stridani');
+  state.liveSet = set;
+  renderLive2(100);
+});
+await page.waitForTimeout(400);
+
+await page.click('.hriste-info .info-oddechovy');
+await page.waitForTimeout(500);
+pass &= ok('T61a klepnutí na dlaždici vezme time-out (#107)',
+  await page.evaluate(() => oddechoveSetu(100, 4).length) === 1);
+pass &= ok('T61a2 a rovnou řekne, jak ho vzít zpět (#107)',
+  /dlouhým stiskem/.test(await page.textContent('#toast')));
+await longPress('.hriste-info .info-oddechovy');
+await page.waitForTimeout(600);
+pass &= ok('T61b dlouhý stisk ho vrátí a klepnutí po něm nic nepřidá (#107)',
+  await page.evaluate(() => oddechoveSetu(100, 4).length) === 0);
+// po dlouhém stisku musí další klepnutí zase normálně zapsat
+await page.click('.hriste-info .info-oddechovy');
+await page.waitForTimeout(500);
+pass &= ok('T61c příznak dlouhého stisku nezůstane viset (#107)',
+  await page.evaluate(() => oddechoveSetu(100, 4).length) === 1);
+
+// druhý náš time-out, soupeřův a soupeřovo střídání — ať je co otevírat
+await page.evaluate(async () => {
+  await v2Oddechovy();
+  await v2Oddechovy(STRANY.ONI);
+  await zapisStridani(100, 4, null, null, STRANY.ONI, 4, 12);
+});
+await page.waitForTimeout(600);
+
+await page.click('.hriste-info .prubeh-pas');
+await page.waitForSelector('#modal-v2-prubeh:not(.hidden)');
+pass &= ok('T61d přerušení v průběhu jsou tlačítka, co otevřou opravu (#107)',
+  await page.$$eval('#v2-prubeh-obsah button.prubeh-radek.prerus', els =>
+    els.length === 4 && els.every(e => /v2OtevriPreruseni/.test(e.getAttribute('onclick')))));
+
+// smazat jde kterýkoli, ne jen poslední
+otherWrites = [];
+const prvniTimeout = await page.evaluate(() => oddechoveSetu(100, 4)[0].id);
+await page.evaluate(id => v2OtevriPreruseni('timeout', id), prvniTimeout);
+await page.waitForSelector('#modal-v2-preruseni:not(.hidden)');
+pass &= ok('T61e otevřený time-out řekne, o který jde (#107)',
+  /Time-out/.test(await page.textContent('#v2-prerus-title')));
+await page.click('#v2-prerus-footer .btn-red');
+await page.waitForTimeout(600);
+pass &= ok('T61f smaže se ten otevřený, ne poslední (#107)',
+  await page.evaluate(() => oddechoveSetu(100, 4).length) === 1 &&
+  await page.evaluate(id => oddechoveSetu(100, 4).every(o => o.id !== id), prvniTimeout) &&
+  otherWrites.some(w => w.table === 'vb_oddechove_casy' && w.method === 'DELETE' &&
+    w.url.includes(`id=eq.${prvniTimeout}`)));
+
+// soupeřovo střídání: čísla se opraví rovnou v okně
+otherWrites = [];
+const idSouper = await page.evaluate(() => stridaniSetu(100, 4, STRANY.ONI).at(-1).id);
+await page.evaluate(id => v2OtevriPreruseni('stridani', id), idSouper);
+await page.waitForSelector('#modal-v2-preruseni:not(.hidden)');
+pass &= ok('T61g soupeřovo střídání nabídne opravu čísel (#107)',
+  await page.inputValue('#v2-prerus-dovnitr') === '12' &&
+  await page.inputValue('#v2-prerus-ven') === '4');
+await page.fill('#v2-prerus-dovnitr', '7');
+await page.fill('#v2-prerus-ven', '9');
+await page.click('#v2-prerus-footer .btn-primary');
+await page.waitForTimeout(600);
+pass &= ok('T61h oprava změní jen čísla, stav zůstane (#107)',
+  await page.evaluate(id => {
+    const r = state.stridani.find(x => x.id === id);
+    return r.cislo_dovnitr === 7 && r.cislo_ven === 9 && r.skore_my != null;
+  }, idSouper) &&
+  otherWrites.some(w => w.table === 'vb_stridani' && w.method === 'PATCH' &&
+    w.body && w.body.cislo_dovnitr === 7 && w.body.cislo_ven === 9));
+
+// naše střídání: vrácení zpět smaže zápis a postaví hráčku do její zóny
+await page.evaluate(() => { postavDoZony(100, 4, 2, 14); zapisStridani(100, 4, 11, 14); });
+await page.waitForTimeout(600);
+const idNase = await page.evaluate(() => stridaniSetu(100, 4).at(-1).id);
+await page.evaluate(id => v2OtevriPreruseni('stridani', id), idNase);
+await page.waitForSelector('#modal-v2-preruseni:not(.hidden)');
+pass &= ok('T61i naše střídání nabídne vrátit hráčku na hřiště (#107)',
+  await page.$('#v2-prerus-footer .btn-primary') !== null);
+await page.click('#v2-prerus-footer .btn-primary');
+await page.waitForTimeout(700);
+pass &= ok('T61j vrácení smaže zápis a šestka je zpátky (#107)',
+  await page.evaluate(() => postaveniSetu(100, 4).get(2)) === 11 &&
+  await page.evaluate(() => stridaniSetu(100, 4).length) === 0);
+
+// když ta, co šla na hřiště, už nestojí, není co vracet — jen smazat
+await page.evaluate(() => zapisStridani(100, 4, 11, 999));
+await page.waitForTimeout(500);
+const idSirota = await page.evaluate(() => stridaniSetu(100, 4).at(-1).id);
+await page.evaluate(id => v2OtevriPreruseni('stridani', id), idSirota);
+await page.waitForSelector('#modal-v2-preruseni:not(.hidden)');
+pass &= ok('T61k bez hráčky na hřišti se šestka vracet nenabízí (#107)',
+  await page.$('#v2-prerus-footer .btn-primary') === null &&
+  /nedá/.test(await page.textContent('#v2-prerus-obsah')));
+await page.click('#v2-prerus-footer .btn-red');
+await page.waitForTimeout(600);
+pass &= ok('T61l i tak se dá smazat (#107)',
+  await page.evaluate(() => stridaniSetu(100, 4).length) === 0);
+await page.click('#modal-v2-prubeh .modal-footer .btn-secondary');
+await page.waitForTimeout(300);
+
+await page.evaluate(() => {
+  const set = 4;
+  const bez = pole => state[pole].filter(x => !(x.zapas_id === 100 && (x.set_cislo || 1) === set));
+  state.postaveni = bez('postaveni');
+  state.udalosti = bez('udalosti');
+  state.setInfo = bez('setInfo');
+  state.oddechove = bez('oddechove');
+  state.stridani = bez('stridani');
+  state.liveSet = 1;
+  renderLive2(100);
+});
+await page.waitForTimeout(300);
+
 await page.evaluate(() => {
   state.postaveni = state.postaveni.filter(p => !(p.zapas_id === 100 && (p.set_cislo || 1) === 5));
   state.setInfo = state.setInfo.filter(x => !(x.zapas_id === 100 && (x.set_cislo || 1) === 5));

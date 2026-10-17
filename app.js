@@ -1795,6 +1795,9 @@ async function v2Oddechovy(strana){
     const i=state.oddechove.indexOf(docasny);
     if(i>=0){if(r&&r.id)state.oddechove[i]=r;else state.oddechove.splice(i,1);}
     prekresliLive(zapasId);
+    // Jediné místo, kde se dá říct, jak se překlik vrací: nápověda v titulku
+    // je na telefonu neviditelná a time-out se bere párkrát za set (#107).
+    toast('Time-out zapsán — dlouhým stiskem ho vrátíš','success');
   }catch(e){
     const i=state.oddechove.indexOf(docasny);
     if(i>=0)state.oddechove.splice(i,1);
@@ -1823,6 +1826,153 @@ async function v2OddechovyZpet(strana){
     prekresliLive(zapasId);
     toast('Chyba: '+e.message,'error');
   }
+}
+
+/* ─── DLOUHÝ STISK NA DLAŽDICÍCH PŘERUŠENÍ ───
+   Dlaždice uměly „zpět" jen přes pravé tlačítko. Na telefonu žádné není
+   a `oncontextmenu` se z dotyku spolehlivě nespustí — iOS místo toho nabídne
+   kopírování. Proto stejný mechanismus jako u počítadel (#29): klepnutí
+   zapíše, půl vteřiny stisku vezme zpět (#107).
+
+   Příznak je mimo tlačítko schválně: vrácení překreslí panel, takže uzel,
+   na kterém stisk začal, v tu chvíli už neexistuje a klik po něm přistane
+   na novém. Bez společného příznaku by hned zapsal, co se právě vrátilo. */
+let prerusDlouhy=false,prerusTimer=null;
+
+function prerusStisk(ev,fn){
+  if(ev.button!==0)return;                 // pravé tlačítko řeší oncontextmenu
+  prerusDlouhy=false;
+  clearTimeout(prerusTimer);
+  prerusTimer=setTimeout(()=>{prerusDlouhy=true;fn();},500);
+}
+function prerusPustit(){clearTimeout(prerusTimer);}
+function prerusKlik(fn){
+  clearTimeout(prerusTimer);
+  if(prerusDlouhy){prerusDlouhy=false;return;}   // vrácení už proběhlo
+  fn();
+}
+
+/* ─── OPRAVA A MAZÁNÍ PŘERUŠENÍ ───
+   Dlouhý stisk vrací poslední. Tohle je na všechno ostatní: každé přerušení
+   v průběhu setu se dá otevřít a opravit nebo smazat, i když po něm padlo
+   deset výměn — a je to vidět, na rozdíl od gesta (#107). */
+function preruseniPodleId(typ,id){
+  const pole=typ==='timeout'?state.oddechove:state.stridani;
+  return pole.find(x=>x.id===id)||null;
+}
+
+function popisPreruseni(r,typ){
+  const oni=(r.strana||STRANY.MY)===STRANY.ONI;
+  return (typ==='timeout'?'Time-out':'Střídání')+(oni?' soupeře':'');
+}
+
+function v2OtevriPreruseni(typ,id){
+  if(!isLoggedIn()){toast('Na změny se přihlas (🔒 nahoře)','error');return;}
+  if(id===Number.MAX_SAFE_INTEGER){toast('Záznam se ještě ukládá, zkus to za chvíli','error');return;}
+  const r=preruseniPodleId(typ,id);
+  if(!r){toast('Takový záznam už tu není','error');return;}
+  const oni=(r.strana||STRANY.MY)===STRANY.ONI;
+  document.getElementById('v2-prerus-title').textContent=
+    `${popisPreruseni(r,typ)} · ${r.skore_my}:${r.skore_oni}`;
+  const obsah=document.getElementById('v2-prerus-obsah');
+  const footer=document.getElementById('v2-prerus-footer');
+  const smazat=`<button class="btn btn-red" onclick="smazPreruseni('${typ}',${id})">Smazat</button>`;
+  const zavrit=`<button class="btn btn-secondary" onclick="closeModal('modal-v2-preruseni')">Zavřít</button>`;
+
+  if(typ==='stridani'&&oni){
+    // Soupeřovo střídání jsou dvě čísla — opravit je jde rovnou tady.
+    obsah.innerHTML=`<div class="souper-stridani">
+      <label>Jde na hřiště
+        <input type="number" id="v2-prerus-dovnitr" min="0" max="99" inputmode="numeric"
+               placeholder="#" value="${r.cislo_dovnitr??''}" /></label>
+      <span class="souper-stridani-za">za</span>
+      <label>Jde z hřiště
+        <input type="number" id="v2-prerus-ven" min="0" max="99" inputmode="numeric"
+               placeholder="#" value="${r.cislo_ven??''}" /></label>
+    </div>
+    <div class="info-proc">Stav, ve kterém se střídalo, zůstane — mění se jen čísla.</div>`;
+    footer.innerHTML=zavrit+smazat+
+      `<button class="btn btn-primary" onclick="ulozPreruseniCisla(${id})">Uložit čísla</button>`;
+  }else if(typ==='stridani'){
+    const jmeno=hid=>{const h=state.hraci.find(x=>x.id===hid);
+                      return h?esc(h.jmeno)+(h.cislo?` #${h.cislo}`:''):'—';};
+    const zona=zonaHracky(r.zapas_id,r.set_cislo||1,r.hrac_dovnitr);
+    obsah.innerHTML=`<div class="prerus-popis">${jmeno(r.hrac_dovnitr)} za ${jmeno(r.hrac_ven)}</div>
+      <div class="info-proc">${zona
+        ?'„Vrátit zpět" smaže zápis a postaví hráčku, co šla z place, zase do své zóny. Samotné „Smazat" nechá šestku, jak je — na opravu, komu se střídání připsalo, stačí ho smazat a naklikat znovu z hřiště.'
+        :'Hráčka, co šla na hřiště, tam už nestojí, takže se šestka vracet nedá — smazat jde jen zápis.'}</div>`;
+    footer.innerHTML=zavrit+smazat+(zona
+      ?`<button class="btn btn-primary" onclick="smazPreruseni('stridani',${id},true)">Vrátit zpět</button>`:'');
+  }else{
+    obsah.innerHTML=`<div class="prerus-popis">Vzatý za stavu ${r.skore_my}:${r.skore_oni}</div>`;
+    footer.innerHTML=zavrit+smazat;
+  }
+  openModal('modal-v2-preruseni');
+}
+
+function zonaHracky(zapasId,set,hracId){
+  if(!hracId)return 0;
+  return [...postaveniSetu(zapasId,set).entries()].find(([,id])=>id===hracId)?.[0]||0;
+}
+
+/* Smazat zápis nestačí, když střídání vůbec nemělo být: hráčka patří zpátky
+   na place. Zóna se hledá podle té, co šla na hřiště — rotace mezitím mohla
+   šestkou pootočit, ale hráčka je pořád tatáž. */
+function vratStridaniNaHriste(r){
+  const set=r.set_cislo||1;
+  const zona=zonaHracky(r.zapas_id,set,r.hrac_dovnitr);
+  if(!zona||!r.hrac_ven)return false;
+  postavDoZony(r.zapas_id,set,zona,r.hrac_ven);
+  return true;
+}
+
+async function smazPreruseni(typ,id,vratit){
+  const r=preruseniPodleId(typ,id);
+  if(!r)return;
+  const zapasId=r.zapas_id;
+  closeModal('modal-v2-preruseni');
+  const pole=typ==='timeout'?'oddechove':'stridani';
+  const zaloha=state[pole];
+  state[pole]=state[pole].filter(x=>x!==r);
+  if(vratit)vratStridaniNaHriste(r);
+  prekresliLive(zapasId);
+  obnovPrubeh(zapasId);
+  try{
+    await apiDelete(typ==='timeout'?'vb_oddechove_casy':'vb_stridani',`id=eq.${id}`);
+    toast('Smazáno','success');
+  }catch(e){
+    state[pole]=zaloha;
+    prekresliLive(zapasId);
+    obnovPrubeh(zapasId);
+    toast('Chyba: '+e.message,'error');
+  }
+}
+
+async function ulozPreruseniCisla(id){
+  const r=preruseniPodleId('stridani',id);
+  if(!r)return;
+  const cislo=el=>{const v=(document.getElementById(el).value||'').trim();
+                   return v===''?null:Math.max(0,Math.min(99,parseInt(v)||0));};
+  const telo={cislo_dovnitr:cislo('v2-prerus-dovnitr'),cislo_ven:cislo('v2-prerus-ven')};
+  const zaloha={cislo_dovnitr:r.cislo_dovnitr,cislo_ven:r.cislo_ven};
+  closeModal('modal-v2-preruseni');
+  Object.assign(r,telo);
+  prekresliLive(r.zapas_id);
+  obnovPrubeh(r.zapas_id);
+  try{
+    await apiPatch('vb_stridani',id,telo);
+  }catch(e){
+    Object.assign(r,zaloha);
+    prekresliLive(r.zapas_id);
+    obnovPrubeh(r.zapas_id);
+    toast('Chyba: '+e.message,'error');
+  }
+}
+
+// Seznam průběhu je pod opravou otevřený — ať pod ní nezůstane stará verze.
+function obnovPrubeh(zapasId){
+  if(!document.getElementById('modal-v2-prubeh').classList.contains('hidden'))
+    v2OtevriPrubeh(zapasId);
 }
 
 /* ─── LOG VÝMĚN ───
@@ -2024,13 +2174,15 @@ function popisStridaniPrerus(p){
 function prubehRadekPrerus(p){
   const oni=p.strana===STRANY.ONI;
   const popis=(p.typ==='timeout'?'Time-out':'Střídání')+(oni?' soupeře':'');
-  return `<div class="prubeh-radek prerus${oni?' oni':''}">
+  return `<button class="prubeh-radek prerus${oni?' oni':''}"
+      onclick="v2OtevriPreruseni('${p.typ}',${p.id})"
+      title="Klepnutím ${p.typ==='stridani'?'opravíš nebo ':''}smažeš">
     <span class="prubeh-poradi">${p.typ==='timeout'?'⏸':'⇅'}</span>
     <span class="prubeh-skore">${p.my}:${p.oni}</span>
     <span class="prubeh-akce">${popis}</span>
     <span class="prubeh-kdo">${p.typ==='stridani'?esc(popisStridaniPrerus(p)):''}</span>
-    <span class="prubeh-break prazdny"></span>
-  </div>`;
+    <span class="prubeh-break">✎</span>
+  </button>`;
 }
 
 function prubehStavuHtml(zapasId,set){
@@ -2084,7 +2236,8 @@ function v2OtevriPrubeh(zapasId){
       ⚠ Z akcí vychází ${s.nase}:${s.jejich}, z výměn ${posledni.my}:${posledni.jejich} —
       v logu část bodů chybí (zápis z druhého zařízení, výpadek sítě).
     </div>`:''}
-    <div class="profil-legenda">⇄ = zisk podání (break), ⏸ time-out, ⇅ střídání. Pořadí je od poslední výměny.</div>`;
+    <div class="profil-legenda">⇄ = zisk podání (break), ⏸ time-out, ⇅ střídání. Pořadí je od poslední
+      výměny. Na time-out i střídání se dá klepnout a opravit ho nebo smazat.</div>`;
   }
   openModal('modal-v2-prubeh');
 }
@@ -2133,9 +2286,11 @@ function hristeInfoHtml(zapasId){
       ${p.pristi?`<span class="info-pristi" title="Na řadě po zisku podání">→ ${esc(p.pristi.jmeno)}${p.pristi.cislo?` #${p.pristi.cislo}`:''}</span>`:''}
     </div>
     <div class="hriste-info-radek">
-      <button class="info-oddechovy" onclick="v2Oddechovy()"
-          oncontextmenu="event.preventDefault();v2OddechovyZpet();return false"
-          title="Klepnutím vezmeš time-out (zapíše se i stav), pravým tlačítkem nebo dlouhým stiskem ho vrátíš">
+      <button class="info-oddechovy" onclick="prerusKlik(()=>v2Oddechovy())"
+          onpointerdown="prerusStisk(event,()=>v2OddechovyZpet())"
+          onpointerup="prerusPustit()" onpointerleave="prerusPustit()"
+          oncontextmenu="event.preventDefault();prerusPustit();v2OddechovyZpet();return false"
+          title="Klepnutím vezmeš time-out (zapíše se i stav), dlouhým stiskem ho vrátíš">
         <span class="hriste-info-nazev">Time-out</span>
         <span class="tecky">${teckyOddechove}</span>
         ${stavyOddechovych}
@@ -2146,16 +2301,20 @@ function hristeInfoHtml(zapasId){
     </div>
     <div class="hriste-info-radek">
       <span class="hriste-info-nazev">Soupeř</span>
-      <button class="info-preruseni" onclick="v2Oddechovy('${STRANY.ONI}')"
-          oncontextmenu="event.preventDefault();v2OddechovyZpet('${STRANY.ONI}');return false"
-          title="Time-out soupeře — klepnutím zapíšeš i se stavem, pravým tlačítkem nebo dlouhým stiskem ho vrátíš">
+      <button class="info-preruseni" onclick="prerusKlik(()=>v2Oddechovy(STRANY.ONI))"
+          onpointerdown="prerusStisk(event,()=>v2OddechovyZpet(STRANY.ONI))"
+          onpointerup="prerusPustit()" onpointerleave="prerusPustit()"
+          oncontextmenu="event.preventDefault();prerusPustit();v2OddechovyZpet(STRANY.ONI);return false"
+          title="Time-out soupeře — klepnutím zapíšeš i se stavem, dlouhým stiskem ho vrátíš">
         <span class="info-znak" aria-label="Time-out">⏸</span>
         <span class="tecky">${tecky(vzateOni.length)}</span>
         ${stavy(vzateOni)}
       </button>
-      <button class="info-preruseni" onclick="v2StridaniSoupere()"
-          oncontextmenu="event.preventDefault();v2StridaniSoupereZpet();return false"
-          title="Střídání soupeře — zapíšou se čísla na dresech, pravým tlačítkem nebo dlouhým stiskem se poslední vrátí">
+      <button class="info-preruseni" onclick="prerusKlik(()=>v2StridaniSoupere())"
+          onpointerdown="prerusStisk(event,()=>v2StridaniSoupereZpet())"
+          onpointerup="prerusPustit()" onpointerleave="prerusPustit()"
+          oncontextmenu="event.preventDefault();prerusPustit();v2StridaniSoupereZpet();return false"
+          title="Střídání soupeře — zapíšou se čísla na dresech, dlouhým stiskem se poslední vrátí">
         <span class="info-znak" aria-label="Střídání">⇅</span>
         <span class="info-hodnota">${stridanychOni}</span>
       </button>
