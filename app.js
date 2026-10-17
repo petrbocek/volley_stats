@@ -1874,13 +1874,34 @@ function v2OtevriPreruseni(typ,id){
   const oni=(r.strana||STRANY.MY)===STRANY.ONI;
   document.getElementById('v2-prerus-title').textContent=
     `${popisPreruseni(r,typ)} · ${r.skore_my}:${r.skore_oni}`;
+
+  /* Stav se dá přepsat u obojího: přerušení se v průběhu řadí podle něj, takže
+     time-out zapsaný o dvě výměny později sedí jinde, než kde opravdu padl.
+     Čí je, se opravuje jen u time-outu — střídání se stranou mění i to, co
+     v něm je (naše jména vs. jejich čísla), a to je na nové zadání (#107). */
+  const stav=`<div class="prerus-pole">
+    <label>Náš stav<input type="number" id="v2-prerus-my" min="0" max="99"
+      inputmode="numeric" value="${r.skore_my??''}" /></label>
+    <span class="souper-stridani-za">:</span>
+    <label>Soupeř<input type="number" id="v2-prerus-oni" min="0" max="99"
+      inputmode="numeric" value="${r.skore_oni??''}" /></label>
+    ${typ==='timeout'?`<label>Čí je<select id="v2-prerus-strana">
+      <option value="${STRANY.MY}"${oni?'':' selected'}>Náš</option>
+      <option value="${STRANY.ONI}"${oni?' selected':''}>Soupeře</option>
+    </select></label>`:''}
+  </div>`;
+
   const obsah=document.getElementById('v2-prerus-obsah');
   const footer=document.getElementById('v2-prerus-footer');
-  const smazat=`<button class="btn btn-red" onclick="smazPreruseni('${typ}',${id})">Smazat</button>`;
   const zavrit=`<button class="btn btn-secondary" onclick="closeModal('modal-v2-preruseni')">Zavřít</button>`;
+  const smazat=`<button class="btn btn-red" id="v2-prerus-smazat"
+    onclick="smazPreruseni('${typ}',${id})">Smazat</button>`;
+  const ulozit=`<button class="btn btn-primary" id="v2-prerus-ulozit"
+    onclick="ulozPreruseni('${typ}',${id})">Uložit</button>`;
+  let vratit='';
 
   if(typ==='stridani'&&oni){
-    // Soupeřovo střídání jsou dvě čísla — opravit je jde rovnou tady.
+    // Soupeřovo střídání jsou dvě čísla na dresech — opravit je jde rovnou tady.
     obsah.innerHTML=`<div class="souper-stridani">
       <label>Jde na hřiště
         <input type="number" id="v2-prerus-dovnitr" min="0" max="99" inputmode="numeric"
@@ -1889,25 +1910,65 @@ function v2OtevriPreruseni(typ,id){
       <label>Jde z hřiště
         <input type="number" id="v2-prerus-ven" min="0" max="99" inputmode="numeric"
                placeholder="#" value="${r.cislo_ven??''}" /></label>
-    </div>
-    <div class="info-proc">Stav, ve kterém se střídalo, zůstane — mění se jen čísla.</div>`;
-    footer.innerHTML=zavrit+smazat+
-      `<button class="btn btn-primary" onclick="ulozPreruseniCisla(${id})">Uložit čísla</button>`;
+    </div>${stav}`;
   }else if(typ==='stridani'){
     const jmeno=hid=>{const h=state.hraci.find(x=>x.id===hid);
                       return h?esc(h.jmeno)+(h.cislo?` #${h.cislo}`:''):'—';};
     const zona=zonaHracky(r.zapas_id,r.set_cislo||1,r.hrac_dovnitr);
     obsah.innerHTML=`<div class="prerus-popis">${jmeno(r.hrac_dovnitr)} za ${jmeno(r.hrac_ven)}</div>
+      ${stav}
       <div class="info-proc">${zona
         ?'„Vrátit zpět" smaže zápis a postaví hráčku, co šla z place, zase do své zóny. Samotné „Smazat" nechá šestku, jak je — na opravu, komu se střídání připsalo, stačí ho smazat a naklikat znovu z hřiště.'
         :'Hráčka, co šla na hřiště, tam už nestojí, takže se šestka vracet nedá — smazat jde jen zápis.'}</div>`;
-    footer.innerHTML=zavrit+smazat+(zona
-      ?`<button class="btn btn-primary" onclick="smazPreruseni('stridani',${id},true)">Vrátit zpět</button>`:'');
+    if(zona)vratit=`<button class="btn btn-secondary" id="v2-prerus-vratit"
+      onclick="smazPreruseni('stridani',${id},true)">Vrátit zpět</button>`;
   }else{
-    obsah.innerHTML=`<div class="prerus-popis">Vzatý za stavu ${r.skore_my}:${r.skore_oni}</div>`;
-    footer.innerHTML=zavrit+smazat;
+    obsah.innerHTML=stav+
+      `<div class="info-proc">Stav i strana se dají přepsat — time-out zapsaný o výměnu
+       později se tím posune tam, kde opravdu padl.</div>`;
   }
+  footer.innerHTML=zavrit+smazat+vratit+ulozit;
   openModal('modal-v2-preruseni');
+}
+
+/* Uloží, co je v okně k opravě: stav u obojího, čí je u time-outu, čísla
+   u soupeřova střídání. Posílá se jen to, co se opravdu změnilo — PATCH
+   s nezměněnými hodnotami by přepsal i to, co mezitím přišlo odjinud. */
+async function ulozPreruseni(typ,id){
+  const r=preruseniPodleId(typ,id);
+  if(!r)return;
+  const cislo=(el,vychozi)=>{
+    const pole=document.getElementById(el);
+    if(!pole)return vychozi;
+    const v=(pole.value||'').trim();
+    return v===''?null:Math.max(0,Math.min(99,parseInt(v)||0));
+  };
+  const nove={skore_my:cislo('v2-prerus-my',r.skore_my)??0,
+              skore_oni:cislo('v2-prerus-oni',r.skore_oni)??0};
+  const strana=document.getElementById('v2-prerus-strana');
+  if(strana)nove.strana=strana.value;
+  if(document.getElementById('v2-prerus-dovnitr')){
+    nove.cislo_dovnitr=cislo('v2-prerus-dovnitr',r.cislo_dovnitr);
+    nove.cislo_ven=cislo('v2-prerus-ven',r.cislo_ven);
+  }
+  const zmeny={},zaloha={};
+  Object.entries(nove).forEach(([k,v])=>{
+    if((r[k]??null)!==v){zmeny[k]=v;zaloha[k]=r[k];}
+  });
+  closeModal('modal-v2-preruseni');
+  if(!Object.keys(zmeny).length)return;
+  Object.assign(r,zmeny);
+  prekresliLive(r.zapas_id);
+  obnovPrubeh(r.zapas_id);
+  try{
+    await apiPatch(typ==='timeout'?'vb_oddechove_casy':'vb_stridani',id,zmeny);
+    toast('Opraveno','success');
+  }catch(e){
+    Object.assign(r,zaloha);
+    prekresliLive(r.zapas_id);
+    obnovPrubeh(r.zapas_id);
+    toast('Chyba: '+e.message,'error');
+  }
 }
 
 function zonaHracky(zapasId,set,hracId){
@@ -1944,27 +2005,6 @@ async function smazPreruseni(typ,id,vratit){
     state[pole]=zaloha;
     prekresliLive(zapasId);
     obnovPrubeh(zapasId);
-    toast('Chyba: '+e.message,'error');
-  }
-}
-
-async function ulozPreruseniCisla(id){
-  const r=preruseniPodleId('stridani',id);
-  if(!r)return;
-  const cislo=el=>{const v=(document.getElementById(el).value||'').trim();
-                   return v===''?null:Math.max(0,Math.min(99,parseInt(v)||0));};
-  const telo={cislo_dovnitr:cislo('v2-prerus-dovnitr'),cislo_ven:cislo('v2-prerus-ven')};
-  const zaloha={cislo_dovnitr:r.cislo_dovnitr,cislo_ven:r.cislo_ven};
-  closeModal('modal-v2-preruseni');
-  Object.assign(r,telo);
-  prekresliLive(r.zapas_id);
-  obnovPrubeh(r.zapas_id);
-  try{
-    await apiPatch('vb_stridani',id,telo);
-  }catch(e){
-    Object.assign(r,zaloha);
-    prekresliLive(r.zapas_id);
-    obnovPrubeh(r.zapas_id);
     toast('Chyba: '+e.message,'error');
   }
 }

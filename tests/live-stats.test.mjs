@@ -4837,13 +4837,51 @@ await page.evaluate(id => v2OtevriPreruseni('timeout', id), prvniTimeout);
 await page.waitForSelector('#modal-v2-preruseni:not(.hidden)');
 pass &= ok('T61e otevřený time-out řekne, o který jde (#107)',
   /Time-out/.test(await page.textContent('#v2-prerus-title')));
-await page.click('#v2-prerus-footer .btn-red');
+await page.click('#v2-prerus-smazat');
 await page.waitForTimeout(600);
 pass &= ok('T61f smaže se ten otevřený, ne poslední (#107)',
   await page.evaluate(() => oddechoveSetu(100, 4).length) === 1 &&
   await page.evaluate(id => oddechoveSetu(100, 4).every(o => o.id !== id), prvniTimeout) &&
   otherWrites.some(w => w.table === 'vb_oddechove_casy' && w.method === 'DELETE' &&
     w.url.includes(`id=eq.${prvniTimeout}`)));
+
+// time-out se dá i opravit, nejen smazat: stav i to, čí byl
+otherWrites = [];
+const naseTO = await page.evaluate(() => oddechoveSetu(100, 4)[0].id);
+await page.evaluate(id => v2OtevriPreruseni('timeout', id), naseTO);
+await page.waitForSelector('#modal-v2-preruseni:not(.hidden)');
+pass &= ok('T61m time-out nabídne opravit stav i stranu (#107)',
+  await page.$('#v2-prerus-my') !== null && await page.$('#v2-prerus-strana') !== null);
+await page.fill('#v2-prerus-my', '9');
+await page.fill('#v2-prerus-oni', '6');
+await page.click('#v2-prerus-ulozit');
+await page.waitForTimeout(600);
+pass &= ok('T61n opraví se stav a pošle se jen to, co se změnilo (#107)',
+  await page.evaluate(id => {
+    const o = state.oddechove.find(x => x.id === id);
+    return o.skore_my === 9 && o.skore_oni === 6;
+  }, naseTO) &&
+  otherWrites.some(w => w.table === 'vb_oddechove_casy' && w.method === 'PATCH' &&
+    w.body && w.body.skore_my === 9 && w.body.skore_oni === 6 && !('strana' in w.body)));
+
+const nasichPred = await page.evaluate(() => oddechovePocet(100, 4));
+const jejichPred = await page.evaluate(() => oddechovePocet(100, 4, STRANY.ONI));
+await page.evaluate(id => v2OtevriPreruseni('timeout', id), naseTO);
+await page.waitForSelector('#modal-v2-preruseni:not(.hidden)');
+await page.selectOption('#v2-prerus-strana', 'oni');
+await page.click('#v2-prerus-ulozit');
+await page.waitForTimeout(600);
+pass &= ok('T61o přepsání strany ho přesune soupeři i v počítadle (#107)',
+  await page.evaluate(() => oddechovePocet(100, 4)) === nasichPred - 1 &&
+  await page.evaluate(() => oddechovePocet(100, 4, STRANY.ONI)) === jejichPred + 1);
+
+otherWrites = [];
+await page.evaluate(id => v2OtevriPreruseni('timeout', id), naseTO);
+await page.waitForSelector('#modal-v2-preruseni:not(.hidden)');
+await page.click('#v2-prerus-ulozit');
+await page.waitForTimeout(400);
+pass &= ok('T61p uložení beze změny nic neposílá (#107)',
+  !otherWrites.some(w => w.table === 'vb_oddechove_casy'));
 
 // soupeřovo střídání: čísla se opraví rovnou v okně
 otherWrites = [];
@@ -4855,7 +4893,7 @@ pass &= ok('T61g soupeřovo střídání nabídne opravu čísel (#107)',
   await page.inputValue('#v2-prerus-ven') === '4');
 await page.fill('#v2-prerus-dovnitr', '7');
 await page.fill('#v2-prerus-ven', '9');
-await page.click('#v2-prerus-footer .btn-primary');
+await page.click('#v2-prerus-ulozit');
 await page.waitForTimeout(600);
 pass &= ok('T61h oprava změní jen čísla, stav zůstane (#107)',
   await page.evaluate(id => {
@@ -4872,8 +4910,8 @@ const idNase = await page.evaluate(() => stridaniSetu(100, 4).at(-1).id);
 await page.evaluate(id => v2OtevriPreruseni('stridani', id), idNase);
 await page.waitForSelector('#modal-v2-preruseni:not(.hidden)');
 pass &= ok('T61i naše střídání nabídne vrátit hráčku na hřiště (#107)',
-  await page.$('#v2-prerus-footer .btn-primary') !== null);
-await page.click('#v2-prerus-footer .btn-primary');
+  await page.$('#v2-prerus-vratit') !== null);
+await page.click('#v2-prerus-vratit');
 await page.waitForTimeout(700);
 pass &= ok('T61j vrácení smaže zápis a šestka je zpátky (#107)',
   await page.evaluate(() => postaveniSetu(100, 4).get(2)) === 11 &&
@@ -4886,9 +4924,9 @@ const idSirota = await page.evaluate(() => stridaniSetu(100, 4).at(-1).id);
 await page.evaluate(id => v2OtevriPreruseni('stridani', id), idSirota);
 await page.waitForSelector('#modal-v2-preruseni:not(.hidden)');
 pass &= ok('T61k bez hráčky na hřišti se šestka vracet nenabízí (#107)',
-  await page.$('#v2-prerus-footer .btn-primary') === null &&
+  await page.$('#v2-prerus-vratit') === null &&
   /nedá/.test(await page.textContent('#v2-prerus-obsah')));
-await page.click('#v2-prerus-footer .btn-red');
+await page.click('#v2-prerus-smazat');
 await page.waitForTimeout(600);
 pass &= ok('T61l i tak se dá smazat (#107)',
   await page.evaluate(() => stridaniSetu(100, 4).length) === 0);
