@@ -25,6 +25,31 @@ Migrace `20260918190714_vb_zapisovatele_allowlist.sql` zapisuje do allowlistu
 účet `petrbocek@email.cz`. Na čerstvém projektu, kde takový uživatel v Auth
 není, neudělá nic — zapisovatele je pak potřeba přidat ručně (viz níže).
 
+## Granty k nové tabulce
+
+Supabase od 30. 10. 2026 nové tabulce v `public` sama přístup přes Data API
+nedá — bez grantu vrátí API „permission denied". Ke každé nové tabulce proto
+patří do téže migrace:
+
+```sql
+GRANT SELECT ON public.vb_neco TO anon, authenticated;
+GRANT INSERT, UPDATE, DELETE ON public.vb_neco TO authenticated;
+```
+
+A když má tabulka `id` ze sekvence, ještě `GRANT USAGE ON SEQUENCE
+public.vb_neco_id_seq TO authenticated;`, jinak neprojde INSERT.
+
+Rozsah je všude stejný: anon čte (divácká stránka umí jedinou metodu, GET),
+authenticated píše a kdo z přihlášených smí doopravdy zapisovat, hlídá RLS
+přes `je_zapisovatel()`. `service_role` se negrantuje — projekt žádný
+serverový klíč nepoužívá.
+
+Běžícího projektu se změna netýká, jeho tabulky si granty drží. Týká se
+každého nového sešlápnutí schématu: nový projekt, preview branch,
+`supabase db reset`. Proto migrace `20261020090000_granty_pro_stare_tabulky.sql`
+dorovnává tabulky ze čtyř nejstarších migrací, které se na automatický grant
+spoléhaly.
+
 ## Změna schématu
 
 Nikdy ne ručně v SQL editoru nebo v dashboardu — tak vznikl původní rozjezd.
