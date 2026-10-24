@@ -140,6 +140,12 @@ node tests/divak.test.mjs        # divácká stránka
 
 Volitelně `APP_URL` (jiná adresa) a `CHROMIUM_PATH` (jiné Chromium).
 
+Testy nečekají na hodiny, ale na stav: po každé akci se počká, až appka
+nemá nevyřízený zápis, doběhne poslední požadavek a dojede rotace (`klid()`
+v `tests/live-stats.test.mjs`). Pevné pauzy stály 145 ze 175 vteřin běhu;
+po přepsání je to 45. Novou kontrolu proto nepsat s `waitForTimeout` —
+jediná zbylá pauza je dlouhý stisk, který je opravdu o čase.
+
 V CI testy neběží; Vercel dělá jen nasazení, takže je před změnou v `app.js`,
 `divak.js` nebo `sdilene.js` potřeba pustit je ručně. Změna v `sdilene.js` se
 dotýká obou stránek, tam je nutné pustit oba soubory.

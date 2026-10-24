@@ -851,3 +851,6 @@ button.prubeh-radek:active{filter:brightness(1.2)}
   text-align:center;padding:8px;border:1px solid var(--border);border-radius:10px;
   background:var(--surface2);color:var(--text);min-height:44px}
 .prerus-pole input{width:72px}
+/* Legenda ke značkám v hlavičce statistik (#116). */
+.stats-legenda{font-size:11px;color:var(--muted);line-height:1.6;margin-top:8px}
+.stats-legenda strong{color:var(--text);font-family:'Oswald',sans-serif}
