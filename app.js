@@ -3370,14 +3370,18 @@ function renderStatistiky(){
 
   // Hlavička řadí. Aktivní sloupec nese šipku, ať je vidět nejen že se řadilo,
   // ale i podle čeho — bez toho se pořadí po filtru nedá přečíst.
-  const th=(sloupec,popisek,atributy='')=>{
+  /* Hlavička mluví značkami appky (+ výborné, − chyby, Σ pokusy): devatenáct
+     sloupců s popisky „ES / CHYBY / POK." se na šířku nevešlo. Co která
+     značka znamená, říká titulek a legenda pod tabulkou (#116). */
+  const th=(sloupec,popisek,atributy='',popis='')=>{
     const aktivni=statsSort.sloupec===sloupec;
     const sipka=aktivni?(statsSort.smer==='asc'?' ▲':' ▼'):'';
     const dalsi=aktivni?(statsSort.smer==='asc'?'sestupně':'vzestupně')
                        :(STATS_SLOUPCE[sloupec].vychozi==='asc'?'vzestupně':'sestupně');
     return `<th ${atributy} class="sortable${aktivni?' sort-aktivni':''}" role="button" tabindex="0"
       aria-sort="${aktivni?(statsSort.smer==='asc'?'ascending':'descending'):'none'}"
-      title="Seřadit ${dalsi}"
+      aria-label="${popis||popisek}"
+      title="${popis?popis+' — ':''}seřadit ${dalsi}"
       onclick="seradStatistiky('${sloupec}')"
       onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();seradStatistiky('${sloupec}')}"
       >${popisek}<span class="sort-sipka">${sipka}</span></th>`;
@@ -3388,19 +3392,19 @@ function renderStatistiky(){
       <tr>
         <th rowspan="2">#</th>
         ${th('jmeno','Hráčka','rowspan="2"')}
-        ${th('zapasy','Záp.','rowspan="2"')}
-        <th colspan="4">🎯 Servis</th>
-        <th colspan="4">🤲 Příjem</th>
-        <th colspan="4">💥 Útok</th>
-        ${th('bp','🛡️ Blok','rowspan="2"')}
-        ${th('po','🖐️ Pole','rowspan="2"')}
-        ${th('cm','❌ Chyba','rowspan="2"')}
-        ${th('total','Celkem','rowspan="2"')}
+        ${th('zapasy','Záp.','rowspan="2"','Odehraných zápasů')}
+        <th colspan="4" data-skupina="servis" title="Servis">🎯</th>
+        <th colspan="4" data-skupina="prijem" title="Příjem">🤲</th>
+        <th colspan="4" data-skupina="utok" title="Útok">💥</th>
+        ${th('bp','🛡️','rowspan="2"','Bloky')}
+        ${th('po','🖐️','rowspan="2"','Pole — vybrané balony')}
+        ${th('cm','❌','rowspan="2"','Chyby')}
+        ${th('total','±','rowspan="2"','Celkem — body mínus chyby')}
       </tr>
       <tr>
-        ${th('sp','Es')}${th('sm','Chyby')}${th('servis_pok','Pok.')}${th('servis_pct','%')}
-        ${th('pp','Výb.')}${th('pm','Chyby')}${th('prijem_pok','Pok.')}${th('prijem_pct','%')}
-        ${th('up','Výb.')}${th('um','Chyby')}${th('utok_pok','Pok.')}${th('utok_pct','%')}
+        ${th('sp','+','','Esa')}${th('sm','−','','Chyby podání')}${th('servis_pok','Σ','','Podání celkem')}${th('servis_pct','%','','Procento es ze všech podání')}
+        ${th('pp','+','','Výborné příjmy')}${th('pm','−','','Zkažené příjmy')}${th('prijem_pok','Σ','','Příjmů celkem')}${th('prijem_pct','%','','Procento výborných ze všech příjmů')}
+        ${th('up','+','','Výborné útoky')}${th('um','−','','Zkažené útoky')}${th('utok_pok','Σ','','Útoků celkem')}${th('utok_pct','%','','Procento výborných ze všech útoků')}
       </tr>
     </thead>
     <tbody>
@@ -3437,6 +3441,11 @@ function renderStatistiky(){
   const souper=pole=>d.zapasIds.reduce((n,zid)=>n+(selSet
     ?souperHodnota(zid,selSet,pole)
     :souperZapas(zid,pole)),0);
+  html+=`<div class="stats-legenda">🎯 servis · 🤲 příjem · 💥 útok · 🛡️ blok ·
+    🖐️ pole · ❌ chyby &nbsp;|&nbsp; <strong>+</strong> výborné ·
+    <strong>−</strong> chyby · <strong>Σ</strong> pokusy ·
+    <strong>%</strong> výborné ze všech pokusů · <strong>±</strong> celkem (body − chyby)</div>`;
+
   html+=`<div class="stats-chyby">Soupeř${selSet?` (${selSet}. set)`:''}:
     ${SOUPER_POLE.map(sp=>`${sp.label} <strong>${souper(sp.pole)}</strong>`).join(' · ')}</div>`;
   el.innerHTML=html;

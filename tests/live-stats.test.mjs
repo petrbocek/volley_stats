@@ -731,11 +731,20 @@ pass &= ok('T14i procento servisu se počítá ze všech podání (#107)',
 pass &= ok('T14j a servis má v tabulce i v exportu svůj sloupec (#107)',
   await csvIdx('Servis % es') > 0 &&
   await page.evaluate(() => {
-    const th = [...document.querySelectorAll('.stats-table thead tr:first-child th')]
-      .find(e => /Servis/.test(e.textContent));
+    const th = document.querySelector('.stats-table th[data-skupina="servis"]');
     // esa, chyby, pokusy, % — skupina drží tolik sloupců, kolik jich pod ní je
     return !!th && th.getAttribute('colspan') === '4';
   }));
+/* Značky v hlavičce šetří šířku, ale nesmí z tabulky udělat hádanku: každá
+   má titulek pro myš, aria-label pro čtečku a legendu pod tabulkou (#116). */
+pass &= ok('T14j2 značky v hlavičce mají titulek i popis pro čtečku (#116)',
+  await page.evaluate(() => {
+    const th = [...document.querySelectorAll('.stats-table thead tr:last-child th')];
+    const znacky = th.map(e => e.textContent.replace(/[▲▼\s]/g, ''));
+    return znacky.slice(0, 4).join('') === '+−Σ%' &&
+      th.every(e => (e.getAttribute('title') || '').length > 3 && e.getAttribute('aria-label'));
+  }) &&
+  /pokusy/.test(await page.textContent('.stats-legenda')));
 
 /* Z esa a chyb se počet podání dopočítat nedá, neutrální v tabulce nebyla
    vidět vůbec — a bez jmenovatele procento neřekne, jestli za ním jsou dva
@@ -4198,7 +4207,11 @@ pass &= ok('T53l zpět vezme pole taky (#84)',
 await page.click('.nav-tab:nth-child(7)');
 await klid();
 pass &= ok('T53m ve statistikách má Pole svůj sloupec (#84)',
-  /Pole/.test(await page.textContent('.stats-table thead')));
+  await page.evaluate(() => {
+    const th = [...document.querySelectorAll('.stats-table thead th')]
+      .find(e => /Pole/.test(e.getAttribute('aria-label') || ''));
+    return !!th && /🖐/.test(th.textContent);
+  }));
 await page.click('.nav-tab:nth-child(6)');
 await klid();
 await page.evaluate(() => { state.liveSet = 1; renderLive2(100); });
