@@ -68,6 +68,10 @@ První řádek tabulky je **souhrn týmu** — součet každého sloupce za celo
 sestavu. Čísla sedí pod svými sloupci, takže není co si splést. Tlačítko
 v prvním sloupci přepíná mezi právě zapisovaným setem a celým zápasem.
 
+Tabulka ve Statistikách má u servisu, příjmu i útoku vedle výborných a chyb
+i **počet pokusů** — jmenovatel toho procenta vedle. Bez něj se nepozná, že
+100 % jsou dvě podání a 60 % dvacet.
+
 Ve Statistikách se sety sčítají. Filtrem „set" se dají rozpadnout zpátky.
 Pozor: zápasy z doby před zavedením setů (#32) mají všechno pod 1. setem,
 takže u nich rozpad nic neřekne.

@@ -672,8 +672,28 @@ pass &= ok('T14j a servis má v tabulce i v exportu svůj sloupec (#107)',
   await page.evaluate(() => {
     const th = [...document.querySelectorAll('.stats-table thead tr:first-child th')]
       .find(e => /Servis/.test(e.textContent));
-    return !!th && th.getAttribute('colspan') === '3';
+    // esa, chyby, pokusy, % — skupina drží tolik sloupců, kolik jich pod ní je
+    return !!th && th.getAttribute('colspan') === '4';
   }));
+
+/* Z esa a chyb se počet podání dopočítat nedá, neutrální v tabulce nebyla
+   vidět vůbec — a bez jmenovatele procento neřekne, jestli za ním jsou dva
+   pokusy, nebo dvacet (#116). */
+const iServisPok = await csvIdx('Servis pokusy');
+const iPrijemPok = await csvIdx('Příjem pokusy');
+const iUtokPok = await csvIdx('Útok pokusy');
+pass &= ok('T14k pokusy mají svůj sloupec u servisu, příjmu i útoku (#116)',
+  iServisPok > 0 && iPrijemPok > 0 && iUtokPok > 0 &&
+  csvDelta[iServisPok] !== '' && csvDelta[iPrijemPok] !== '' && csvDelta[iUtokPok] !== '');
+pass &= ok('T14l pokusy jsou výborné + chyby + ostatní (#116)',
+  await page.evaluate(() => pokusy(3, 1, 6) === 10) &&
+  await page.evaluate(() => {
+    // z databáze stubu: součet všech tří variant útoku u jedné hráčky
+    const r = spocitejStatistiky().rows[0];
+    return pokusy(r.up, r.um, r.un) === r.up + r.um + r.un;
+  }));
+pass &= ok('T14m v tabulce sedí pokusy na export (#116)',
+  csvDelta[iUtokPok] === tabDelta[iUtokPok - 1]);
 
 const csvSoucet = csv[csv.length - 1];
 const tabSoucet = await page.$$eval('.stats-table tfoot td', tds => tds.map(td => td.textContent.trim()));
@@ -1289,16 +1309,25 @@ const cisla = a => a.map(v => parseInt(v)).filter(v => !Number.isNaN(v));
 const klesa = a => a.every((v, i) => i === 0 || a[i - 1] >= v);
 const roste = a => a.every((v, i) => i === 0 || a[i - 1] <= v);
 
+// Sloupec „Celkem" se hledá podle jména: napevno zapsané číslo by při každém
+// přidaném sloupci ukázalo na něco jiného, a test by pak měřil cizí čísla.
+const iCelkem = await csvIdx('Celkem');
 pass &= ok('T29a výchozí pořadí je pořád nejlepší nahoře (#72)',
-  klesa(cisla(await sloupec(14))) &&
+  klesa(cisla(await sloupec(iCelkem))) &&
   /▼/.test(await page.textContent('.stats-table th.sort-aktivni')));
 
 await klikHlavicku('total');
 await page.waitForTimeout(200);
 pass &= ok('T29b klik na aktivní sloupec otočí směr (#72)',
-  roste(cisla(await sloupec(14))));
+  roste(cisla(await sloupec(iCelkem))));
 pass &= ok('T29c otočený směr pozná i šipka (#72)',
   /▲/.test(await page.textContent('.stats-table th.sort-aktivni')));
+
+// pokusy se řadí jako každý jiný sloupec
+await klikHlavicku('utok_pok');
+await page.waitForTimeout(200);
+pass &= ok('T29b2 řadit jde i podle pokusů (#116)',
+  klesa(cisla(await sloupec(await csvIdx('Útok pokusy')))));
 
 await klikHlavicku('jmeno');
 await page.waitForTimeout(200);
