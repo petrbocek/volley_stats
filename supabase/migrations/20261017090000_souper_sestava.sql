@@ -32,9 +32,5 @@ COMMENT ON COLUMN public.vb_set_info.souper_sestava IS
 -- Prázdná tabulka z prvního pokusu. Napřed to byla vlastní tabulka
 -- (zapas_id, set_cislo, zona, cislo) s RPC, která celou šestku vyměňovala
 -- v jedné transakci; sloupec ve vb_set_info dělá totéž jedním upsertem, tak
--- je zbytečná. Nikdy do ní nic nepřišlo.
---
--- POZOR: tenhle řádek v produkci ještě neproběhl — nástroj, kterým se
--- migrace pouštěly, odmítá mazací příkazy. Pustit ručně (`supabase db push`
--- nebo SQL editor), než se schéma bude někam kopírovat.
+-- je zbytečná. Nikdy do ní nic nepřišlo a v produkci už je smazaná.
 DROP TABLE IF EXISTS public.vb_souper_postaveni;
