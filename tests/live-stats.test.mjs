@@ -231,6 +231,56 @@ await page.route('**/rest/v1/**', async route => {
   return route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
 });
 
+/* ─── ČEKÁNÍ NA STAV, NE NA HODINY ───
+   Sada měla 362 pevných pauz a prostála v nich 145 ze 175 vteřin. Čeká se
+   proto na to, co nás opravdu zajímá: aby appka neměla nevyřízený zápis,
+   doběhl poslední požadavek a dojela rotace. Debounce se nečeká — zápis se
+   rovnou splachuje, odesílá to touž cestou jako časovač.
+
+   Počítá se jen provoz do API; fonty a statické soubory by jinak čekání
+   držely i po tom, co má appka hotovo. */
+let inflight = 0, poslednizadost = 0;
+const jeApi = u => /\/rest\/v1\/|\/auth\/v1\//.test(u);
+page.on('request', r => { if (jeApi(r.url())) { inflight++; poslednizadost = Date.now(); } });
+page.on('requestfinished', r => { if (jeApi(r.url())) inflight--; });
+page.on('requestfailed', r => { if (jeApi(r.url())) inflight--; });
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+/* Klid se musí potvrdit dvakrát po sobě: požadavek se po kliknutí rozjede
+   až v mikroúkolu, takže první pohled by ho ještě neviděl a test by měřil
+   stav před zápisem. Strop je pojistka — radši pokračovat než shodit sadu. */
+const klid = async ({ flush = true, max = 4000 } = {}) => {
+  const konec = Date.now() + max;
+  let klidnych = 0, splachnout = flush;
+  for (;;) {
+    let ceka = false;
+    try {
+      ceka = await page.evaluate(([f, naFrontu]) => {
+        const zapisy = (typeof pendingKeys === 'function' && pendingKeys().length > 0) ||
+          (typeof souperPending === 'object' && Object.keys(souperPending).length > 0);
+        if (zapisy && f && typeof flushVse === 'function') { flushVse(); return true; }
+        // bez splachování se čeká, až frontu odešle appka sama (debounce)
+        if (zapisy && naFrontu) return true;
+        // dojíždějící rotace: karta je uprostřed animace jinde, než doopravdy stojí
+        return !!document.querySelector('.rotuje');
+      }, [splachnout, !flush]);
+    } catch { ceka = false; }        // stránka se zrovna překresluje
+    /* Splachuje se jen jednou za čekání. Opakovaný flush by sám zkoušel znovu
+       to, co právě selhalo, a test na „selhaný zápis se zopakuje" by pak
+       měřil tuhle smyčku místo appky. Co zůstalo ve frontě, splachuje až
+       další čekání — před každou kontrolou jedno je. */
+    splachnout = false;
+    const volno = !ceka && inflight === 0 && Date.now() - poslednizadost > 25;
+    klidnych = volno ? klidnych + 1 : 0;
+    if (klidnych >= 2) break;
+    if (Date.now() >= konec) break;
+    await sleep(15);
+  }
+  // jeden snímek navíc, ať se stihne přepočítat rozložení před měřením
+  try { await page.evaluate(() => new Promise(r => requestAnimationFrame(() => r()))); } catch {}
+};
+
 const errors = [];
 page.on('pageerror', e => errors.push(String(e)));
 
@@ -244,6 +294,8 @@ let pass = true;
 const cnt = sel => page.textContent(sel).then(t => parseInt(t.trim()));
 const JMENO = JMENO_S_HTML, TYM = TYM_S_XSS;
 const klikSet = n => page.click(`#live-table-wrap .set-prepinac button:nth-of-type(${n})`);
+// Jediná pauza, která je opravdu o čase: appka bere stisk delší než půl
+// vteřiny jako „vezmi zpět".
 const longPress = async sel => { await page.hover(sel); await page.mouse.down(); await page.waitForTimeout(700); await page.mouse.up(); };
 
 // ── #24: bez přihlášení se nic nezapíše ────────────────────────────────────
@@ -251,7 +303,7 @@ await page.click('.nav-tab:nth-child(5)');
 await page.waitForSelector('#cnt-10-servis_plus');
 rpcCalls = []; otherWrites = [];
 await page.click('#cnt-10-servis_plus');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T8a odhlášený klik neposílá zápis (#24)', rpcCalls.length === 0 && otherWrites.length === 0);
 pass &= ok('T8b odhlášenému se počítadlo nezvedne (#24)', await cnt('#cnt-10-servis_plus') === 0);
 pass &= ok('T8c odhlášený vidí lištu „jen pro čtení" (#24)', await page.isVisible('#readonly-bar'));
@@ -260,19 +312,19 @@ await page.click('#btn-auth');
 await page.fill('#in-login-email', 'test@example.com');
 await page.fill('#in-login-heslo', 'spatne');
 await page.click('#btn-do-login');
-await page.waitForTimeout(300);
+await klid();
 pass &= ok('T9 špatné heslo nepřihlásí (#24)', await page.evaluate(() => !isLoggedIn()));
 
 await page.fill('#in-login-heslo', 'spravne');
 await page.click('#btn-do-login');
-await page.waitForTimeout(300);
+await klid();
 pass &= ok('T10a přihlášení schová lištu a přepne tlačítko (#24)',
   !(await page.isVisible('#readonly-bar')) && (await page.textContent('#btn-auth')).includes('test@example.com'));
 
 // ── #27: posílá se delta, ne celý řádek ────────────────────────────────────
 rpcCalls = []; otherWrites = []; hlavicky.length = 0;
 await page.click('#cnt-10-servis_plus');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T1a klik pošle jednu deltu +1 (#27)',
   rpcCalls.length === 1 && rpcCalls[0].length === 1 &&
   rpcCalls[0][0].hrac_id === 10 && rpcCalls[0][0].pole === 'servis_plus' && rpcCalls[0][0].delta === 1);
@@ -289,32 +341,32 @@ pass &= ok('T1d hráčka bez kliku se neuloží (žádné nulové řádky)',
 rpcCalls = [];
 await page.click('#cnt-10-utok_plus');
 await page.click('#cnt-10-utok_plus');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T1e dva rychlé kliky se spojí do delty +2 (#27)',
   rpcCalls.length === 1 && rpcCalls[0][0].delta === 2 && await cnt('#cnt-10-utok_plus') === 2);
 
 // ── #29: vzetí zpět ────────────────────────────────────────────────────────
 rpcCalls = [];
 await longPress('#cnt-10-utok_plus');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T11a dlouhý stisk odečte (#29)',
   rpcCalls.length === 1 && rpcCalls[0][0].delta === -1 && await cnt('#cnt-10-utok_plus') === 1);
 
 rpcCalls = [];
 await page.click('#cnt-10-utok_plus', { button: 'right' });
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T11b pravé tlačítko odečte (#29)',
   rpcCalls.length === 1 && rpcCalls[0][0].delta === -1 && await cnt('#cnt-10-utok_plus') === 0);
 
 rpcCalls = [];
 await page.click('#cnt-10-utok_plus', { button: 'right' });
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T11c pod nulu to nejde a neposílá se nic (#29)',
   rpcCalls.length === 0 && await cnt('#cnt-10-utok_plus') === 0);
 
 rpcCalls = [];
 await page.click('#cnt-10-blok_plus');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T11d běžné klepnutí po dlouhém stisku zase přičítá (#29)',
   rpcCalls.length === 1 && rpcCalls[0][0].delta === 1);
 
@@ -322,7 +374,7 @@ pass &= ok('T11d běžné klepnutí po dlouhém stisku zase přičítá (#29)',
 radek(100, 10).servis_plus = 7;                       // druhé zařízení mezitím zapsalo
 rpcCalls = [];
 await page.click('#cnt-10-servis_plus');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T12a náš klik se přičte k cizímu zápisu, nepřebije ho (#27)',
   radek(100, 10).servis_plus === 8);
 pass &= ok('T12b počítadlo se dorovná na serverovou hodnotu (#27)',
@@ -330,9 +382,18 @@ pass &= ok('T12b počítadlo se dorovná na serverovou hodnotu (#27)',
 
 radek(100, 11).prijem_plus = 4;                       // cizí zápis u druhé hráčky
 await page.evaluate(() => refreshLiveStats());
-await page.waitForTimeout(300);
+await klid();
 pass &= ok('T12c dorovnání ukáže cizí zápis i bez našeho kliku (#27)',
   await cnt('#cnt-11-prijem_plus') === 4);
+
+/* Čekání na klid zápis rovnou splachuje, takže se jinde nikde neověří, že
+   appce odejde sám i bez pobídky. Tady se proto čeká doopravdy — jediné
+   místo v sadě, kde se měří, že debounce opravdu tiká. */
+rpcCalls = [];
+await page.click('#cnt-11-chyba_minus');
+await klid({ flush: false, max: 3000 });
+pass &= ok('T12d zápis odejde sám po debounce, i když ho nikdo nesplachuje (#26)',
+  rpcCalls.length === 1 && rpcCalls[0].some(z => z.pole === 'chyba_minus' && z.delta === 1));
 
 // ── #26: flush při skrytí a zavření ────────────────────────────────────────
 rpcCalls = [];
@@ -341,37 +402,37 @@ await page.evaluate(() => {
   Object.defineProperty(document, 'hidden', { value: true, configurable: true });
   document.dispatchEvent(new Event('visibilitychange'));
 });
-await page.waitForTimeout(150);
+await klid();
 pass &= ok('T2 skrytí záložky uloží hned (#26)', rpcCalls.length === 1);
 await page.evaluate(() => Object.defineProperty(document, 'hidden', { value: false, configurable: true }));
 
 rpcCalls = [];
 await page.click('#cnt-11-blok_plus');
 await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
-await page.waitForTimeout(150);
+await klid();
 pass &= ok('T3 pagehide uloží hned (#26)', rpcCalls.length === 1);
 
 rpcCalls = [];
 await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
-await page.waitForTimeout(150);
+await klid();
 pass &= ok('T4 nic rozepsaného = žádný request', rpcCalls.length === 0);
 
 // ── selhaný zápis se neztratí ──────────────────────────────────────────────
 failNextRpc = true;
 rpcCalls = [];
 await page.click('#cnt-10-prijem_plus');
-await page.waitForTimeout(600);
+await klid();
 const poSelhani = rpcCalls.length;
 rpcCalls = [];
 await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
-await page.waitForTimeout(300);
+await klid();
 pass &= ok('T5 selhaný zápis se zopakuje, ne že se ztratí',
   poSelhani === 0 && rpcCalls.length === 1 && rpcCalls[0][0].delta === 1);
 
 // ── #31: změna sezóny ──────────────────────────────────────────────────────
 const pred = await page.evaluate(() => state.liveZapasId);
 await page.selectOption('#season-select', '2');
-await page.waitForTimeout(300);
+await klid();
 const a = await page.evaluate(() => ({
   sezona: state.activeSeason?.id,
   zapasSezona: state.zapasy.find(z => z.id === state.liveZapasId)?.sezona_id,
@@ -380,7 +441,7 @@ pass &= ok('T6a přepnutí na sezónu se zápasy vybere zápas z ní (#31)',
   pred === 100 && a.sezona === 2 && a.zapasSezona === 2);
 
 await page.selectOption('#season-select', '3');
-await page.waitForTimeout(300);
+await klid();
 const b3 = await page.evaluate(() => ({
   live: state.liveZapasId,
   tabulka: document.querySelectorAll('#live-table-wrap .live-table').length,
@@ -392,24 +453,24 @@ pass &= ok('T6c sezóna bez zápasů nenechá na obrazovce starou tabulku (#31)'
 pass &= ok('T6d sezóna bez zápasů skryje Zahájit/Ukončit (#31)', !b3.startVidno && !b3.koncVidno);
 
 await page.selectOption('#season-select', '1');
-await page.waitForTimeout(300);
+await klid();
 await page.waitForSelector('#cnt-10-chyba_minus');
 rpcCalls = [];
 await page.click('#cnt-10-chyba_minus');
 await page.selectOption('#season-select', '2');
-await page.waitForTimeout(300);
+await klid();
 pass &= ok('T7 změna sezóny nejdřív uloží rozepsané', rpcCalls.length === 1);
 
 // ── #35: text z databáze se nesmí vyhodnotit jako HTML ─────────────────────
 await page.selectOption('#season-select', '1');
-await page.waitForTimeout(300);
+await klid();
 for (const tab of [1, 2, 3, 5]) {          // Přehled, Zápasy, Tým, Statistiky
   await page.click(`.nav-tab:nth-child(${tab})`);
-  await page.waitForTimeout(150);
+  await klid();
 }
 await page.click('.nav-tab:nth-child(5)');
 await page.waitForSelector('.live-player-name');
-await page.waitForTimeout(200);
+await klid();
 
 const xss = await page.evaluate(() => ({
   tym: typeof window.__xss_tym !== 'undefined',
@@ -424,20 +485,20 @@ const tucneVJmene = await page.$('.live-player-name b');
 pass &= ok('T13c jméno s HTML se v Live vypíše doslova (#35)',
   jmena.includes(JMENO) && tucneVJmene === null);
 await page.click('.nav-tab:nth-child(4)');                  // Týmy
-await page.waitForTimeout(200);
+await klid();
 const tymTitul = await page.textContent('.tym-card-title');
 pass &= ok('T13d název týmu se v kartě vypíše doslova (#35)', tymTitul === TYM);
 const clen = await page.textContent('.tym-member');
 pass &= ok('T13e jméno člena týmu se vypíše doslova (#35)', clen === JMENO);
 
 await page.click('.nav-tab:nth-child(7)');
-await page.waitForTimeout(200);
+await klid();
 const volby = await page.$$eval('#stats-hrac-sel option', els => els.map(e => e.textContent));
 pass &= ok('T13f jméno ve filtru statistik se vypíše doslova (#35)', volby.includes(JMENO));
 
 // ── #30: odebrání ze sestavy se ptá a nemlčí o statistikách ────────────────
 await page.selectOption('#season-select', '1');
-await page.waitForTimeout(200);
+await klid();
 await page.click('.nav-tab:nth-child(5)');
 await page.waitForSelector('#cnt-11-servis_plus');
 
@@ -451,26 +512,26 @@ await page.evaluate(() => {
   state.statistiky = state.statistiky.filter(s => !(s.zapas_id === 100 && s.hrac_id === 11));
   renderLiveTable(100);
 });
-await page.waitForTimeout(150);
+await klid();
 otherWrites = [];
 await page.click('tr:has(#cnt-11-servis_plus) .live-card-remove');
-await page.waitForTimeout(150);
+await klid();
 pass &= ok('T16a odebrání se nejdřív zeptá, nemaže rovnou (#30)',
   await page.isVisible('#modal-odebrat') && otherWrites.length === 0);
 pass &= ok('T16b bez akcí se nenabízí mazání statistik (#30)',
   !(await page.isVisible('#btn-odebrat-i-statistiky')));
 
 await page.click('#modal-odebrat .btn-secondary');       // Zrušit
-await page.waitForTimeout(150);
+await klid();
 pass &= ok('T16c zrušení dialogu nic nesmaže (#30)',
   otherWrites.length === 0 && await page.isVisible('#cnt-11-servis_plus'));
 
 // hráčka SE zaznamenanými akcemi — dialog to musí říct naplno
 Object.assign(radek(100, 11), { servis_plus: 5, utok_plus: 2 });
 await page.evaluate(() => { delete dirtyStats['100_11_1']; refreshLiveStats(); });
-await page.waitForTimeout(300);
+await klid();
 await page.click('tr:has(#cnt-11-servis_plus) .live-card-remove');
-await page.waitForTimeout(150);
+await klid();
 const text = await page.textContent('#odebrat-text');
 pass &= ok('T16d dialog řekne kolik akcí hráčka má (#30)', /7 akcí/.test(text));
 pass &= ok('T16e dialog upozorní, že akce zůstanou ve statistikách (#30)',
@@ -481,7 +542,7 @@ pass &= ok('T16f s akcemi se nabídne i smazání statistik (#30)',
 // „jen odebrat" nechá statistiky být
 otherWrites = [];
 await page.click('#modal-odebrat .btn-primary');
-await page.waitForTimeout(300);
+await klid();
 pass &= ok('T16g „jen odebrat" smaže sestavu, ne statistiky (#30)',
   otherWrites.some(w => w.table === 'vb_zapas_hraci' && w.method === 'DELETE') &&
   !otherWrites.some(w => w.table === 'vb_statistiky') &&
@@ -489,12 +550,12 @@ pass &= ok('T16g „jen odebrat" smaže sestavu, ne statistiky (#30)',
 
 // a teď varianta i se statistikami
 await page.evaluate(() => addDoSestava(100, 11));
-await page.waitForTimeout(300);
+await klid();
 await page.click('tr:has(#cnt-11-servis_plus) .live-card-remove');
-await page.waitForTimeout(150);
+await klid();
 otherWrites = [];
 await page.click('#btn-odebrat-i-statistiky');
-await page.waitForTimeout(300);
+await klid();
 pass &= ok('T16h „i se statistikami" smaže obojí (#30)',
   otherWrites.some(w => w.table === 'vb_statistiky' && w.method === 'DELETE') &&
   otherWrites.some(w => w.table === 'vb_zapas_hraci' && w.method === 'DELETE') &&
@@ -518,7 +579,7 @@ pass &= ok('T17a soupiska: blokař má svou barvu pozice (#39)',
   sBeta && sBeta.trida.includes('pos-blokar') && sBeta.pozice === 'blokař' && sBeta.maCislo);
 
 await page.evaluate(() => openTymManage(5));                  // správa týmu
-await page.waitForTimeout(150);
+await klid();
 const sprava = await kartaPozice('#tym-manage-content .player-card');
 const spBeta = sprava.find(k => k.jmeno === 'Beta');
 pass &= ok('T17b správa týmu: stejná karta, stejná třída (#39)',
@@ -526,9 +587,9 @@ pass &= ok('T17b správa týmu: stejná karta, stejná třída (#39)',
 await page.click('#modal-tym-manage .btn-secondary');
 
 await page.click('.nav-tab:nth-child(5)');                    // Live → picker
-await page.waitForTimeout(150);
+await klid();
 await page.evaluate(() => openHracPicker(100));
-await page.waitForTimeout(150);
+await klid();
 const picker = await kartaPozice('#hrac-picker-list .player-card');
 const pBeta = picker.find(k => k.jmeno === 'Beta');
 pass &= ok('T17c výběr do sestavy: stejná karta, stejná třída (#39)',
@@ -552,7 +613,7 @@ const predVyberem = await vSestave();
 pass &= ok('T17e0 je z čeho vybírat, jinak by se měřilo prázdno (#107)', volneIds.length > 1);
 
 await page.click('#hrac-picker-list .picker-karta');
-await page.waitForTimeout(150);
+await klid();
 pass &= ok('T17e klepnutí hráčku označí, ale hned ji nepřidá (#107)',
   await page.$$eval('#hrac-picker-list .picker-karta.vybrana', els => els.length) === 1 &&
   await vSestave() === predVyberem && await page.isVisible('#modal-hrac-picker'));
@@ -560,19 +621,19 @@ pass &= ok('T17f tlačítko řekne, kolik jich přibude (#107)',
   /Přidat \(1\)/.test(await page.textContent('#picker-pridat')));
 
 await page.click('#picker-vse');
-await page.waitForTimeout(150);
+await klid();
 pass &= ok('T17g „Vybrat všechny" označí celou nabídku (#107)',
   await page.$$eval('#hrac-picker-list .picker-karta.vybrana', els => els.length) === volneIds.length &&
   /Zrušit výběr/.test(await page.textContent('#picker-vse')));
 await page.click('#picker-vse');
-await page.waitForTimeout(150);
+await klid();
 pass &= ok('T17h druhé klepnutí výběr zruší a přidávat není co (#107)',
   await page.$$eval('#hrac-picker-list .picker-karta.vybrana', els => els.length) === 0 &&
   await page.evaluate(() => document.getElementById('picker-pridat').disabled));
 
 await page.click('#picker-vse');
 await page.click('#picker-pridat');
-await page.waitForTimeout(700);
+await klid();
 pass &= ok('T17i přidá se celý výběr najednou a dialog se zavře (#107)',
   await vSestave() === predVyberem + volneIds.length &&
   await page.isVisible('#modal-hrac-picker') === false);
@@ -590,7 +651,7 @@ await page.evaluate(ids => {
   state.zapasHraci = state.zapasHraci.filter(z => !(z.zapas_id === 100 && ids.includes(z.hrac_id)));
   renderLiveTable(100);
 }, volneIds);
-await page.waitForTimeout(200);
+await klid();
 
 // ── #34: export CSV ────────────────────────────────────────────────────────
 // minimální CSV parser, ať se ověřuje význam a ne konkrétní tvar uvozovek
@@ -614,13 +675,13 @@ function parseCsv(text) {
 
 Object.assign(radek(100, 13), { utok_plus: 6, utok_minus: 2, utok_neutral: 2, prijem_plus: 3, chyba_minus: 1 });
 await page.selectOption('#season-select', '1');
-await page.waitForTimeout(300);
+await klid();
 await page.click('.nav-tab:nth-child(5)');               // Live drží zápas 100
-await page.waitForTimeout(200);
+await klid();
 await page.evaluate(() => refreshLiveStats());           // dotáhnout nová data
-await page.waitForTimeout(300);
+await klid();
 await page.click('.nav-tab:nth-child(7)');
-await page.waitForTimeout(300);
+await klid();
 
 pass &= ok('T14a tlačítko exportu je ve Statistikách (#34)', await page.isVisible('#btn-export-csv'));
 
@@ -702,7 +763,7 @@ pass &= ok('T14h poslední řádek je součet a sedí na patičku tabulky (#34)'
 
 // ── #32: statistiky po setech ──────────────────────────────────────────────
 await page.selectOption('#season-select', '1');
-await page.waitForTimeout(200);
+await klid();
 await page.click('.nav-tab:nth-child(5)');
 await page.waitForSelector('#cnt-10-servis_plus');
 
@@ -714,13 +775,13 @@ pass &= ok('T20b ve výchozím stavu je aktivní první set (#32)',
 // zápis do 1. setu
 rpcCalls = [];
 await page.click('#cnt-10-utok_plus');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T20c zápis nese číslo setu (#32)', rpcCalls[0][0].set_cislo === 1);
 const poPrvnim = await cnt('#cnt-10-utok_plus');
 
 // přepnutí na 2. set
 await klikSet(2);
-await page.waitForTimeout(300);
+await klid();
 pass &= ok('T20d přepnutí setu přepne aktivní tlačítko (#32)',
   (await page.textContent('.set-btn.aktivni')).trim() === '2');
 pass &= ok('T20e druhý set začíná od nuly, nemíchá se s prvním (#32)',
@@ -729,7 +790,7 @@ pass &= ok('T20e druhý set začíná od nuly, nemíchá se s prvním (#32)',
 rpcCalls = [];
 await page.click('#cnt-10-utok_plus');
 await page.click('#cnt-10-utok_plus');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T20f zápis ve 2. setu jde do 2. setu (#32)',
   rpcCalls[0][0].set_cislo === 2 && rpcCalls[0][0].delta === 2);
 pass &= ok('T20g sety jsou v databázi samostatné řádky (#32)',
@@ -737,7 +798,7 @@ pass &= ok('T20g sety jsou v databázi samostatné řádky (#32)',
 
 // návrat do 1. setu ukáže původní čísla
 await klikSet(1);
-await page.waitForTimeout(300);
+await klid();
 pass &= ok('T20h návrat do 1. setu ukáže jeho čísla (#32)',
   await cnt('#cnt-10-utok_plus') === poPrvnim);
 
@@ -745,13 +806,13 @@ pass &= ok('T20h návrat do 1. setu ukáže jeho čísla (#32)',
 rpcCalls = [];
 await page.click('#cnt-10-blok_plus');
 await klikSet(3);                                 // hned přepnout na 3. set
-await page.waitForTimeout(400);
+await klid();
 pass &= ok('T20i přepnutí setu nejdřív uloží rozepsané do starého setu (#32)',
   rpcCalls.length === 1 && rpcCalls[0][0].set_cislo === 1 && rpcCalls[0][0].pole === 'blok_plus');
 
 // statistiky sčítají přes sety a počítají zápasy, ne řádky
 await page.click('.nav-tab:nth-child(7)');
-await page.waitForTimeout(300);
+await klid();
 const radekAlfa = await page.$$eval('.stats-table tbody tr', trs => {
   const tr = trs.find(t => t.textContent.includes('Alfa'));
   return tr ? [...tr.children].map(td => td.textContent.trim()) : null;
@@ -764,7 +825,7 @@ pass &= ok('T20k hráčka se třemi sety má pořád jeden zápas, ne tři (#32)
 // rozpad po setech
 pass &= ok('T20l Statistiky mají filtr na set (#32)', await page.isVisible('#stats-set-sel'));
 await page.selectOption('#stats-set-sel', '2');
-await page.waitForTimeout(300);
+await klid();
 const jenSet2 = await page.$$eval('.stats-table tbody tr', trs => {
   const tr = trs.find(t => t.textContent.includes('Alfa'));
   return tr ? [...tr.children].map(td => td.textContent.trim()) : null;
@@ -772,13 +833,13 @@ const jenSet2 = await page.$$eval('.stats-table tbody tr', trs => {
 pass &= ok('T20m filtr na set ukáže jen ten set (#32)',
   jenSet2 && Number(jenSet2[iUtokVyb - 1]) === 2);
 await page.selectOption('#stats-set-sel', '');
-await page.waitForTimeout(200);
+await klid();
 
 // ── #56: souhrn týmu jako první řádek gridu ────────────────────────────────
 // Měří se relativně (o kolik se číslo změnilo), ne proti čistému stavu —
 // mazání stubu by shodilo fixtures, na kterých stojí pozdější testy.
 await page.selectOption('#season-select', '1');
-await page.waitForTimeout(200);
+await klid();
 await page.click('.nav-tab:nth-child(5)');
 await page.waitForSelector('.live-tym-row');
 
@@ -808,7 +869,7 @@ pass &= ok('T22c ve výchozím stavu ukazuje zapisovaný set (#56)',
 // součet za tým musí sedět na součet sloupce u hráček
 const predUtok = await tymCislo('utok_plus');
 await page.click('#cnt-10-utok_plus');
-await page.waitForTimeout(100);
+await klid();
 pass &= ok('T22d řádek naskočí hned po kliknutí, ne až po uložení (#56)',
   await tymCislo('utok_plus') === predUtok + 1);
 
@@ -827,13 +888,13 @@ pass &= ok('T22e součet týmu sedí na součet sloupce u hráček (#56)',
 // jiný set má vlastní čísla, přepnutí na zápas je sečte
 const jinySet = aktivniSet === 5 ? 4 : aktivniSet + 1;
 await klikSet(jinySet);
-await page.waitForTimeout(300);
+await klid();
 const vJinemSetu = await tymCislo('utok_plus');
 pass &= ok('T22f řádek ukazuje čísla zvoleného setu, ne cizího (#56)',
   (await tymPopis()).trim().startsWith(`${jinySet}. set`) && vJinemSetu !== predUtok + 1);
 
 await page.click('.live-tym-prepinac');
-await page.waitForTimeout(300);
+await klid();
 const ocekavano = await page.evaluate(() => {
   const lineup = state.zapasHraci.filter(z => z.zapas_id === 100).map(z => z.hrac_id);
   let n = 0;
@@ -847,7 +908,7 @@ pass &= ok('T22h součet za zápas je víc než jeden set (#56)',
   await tymCislo('utok_plus') > vJinemSetu);
 
 await page.click('.live-tym-prepinac');   // zpět na set, ať další testy vidí výchozí stav
-await page.waitForTimeout(200);
+await klid();
 
 // ── #36: profil hráčky ─────────────────────────────────────────────────────
 // druhý zápas hráčce 13, ať je z čeho kreslit vývoj
@@ -857,10 +918,10 @@ Object.assign(radek(101, 13), { utok_plus: 2, utok_minus: 6, utok_neutral: 2, pr
 await page.reload();
 await nactenoOK();
 await page.click('.nav-tab:nth-child(7)');
-await page.waitForTimeout(300);
+await klid();
 
 await page.click(`.stats-table tbody tr:has-text("Delta") a`);
-await page.waitForTimeout(300);
+await klid();
 pass &= ok('T18a klik na jméno otevře profil (#36)', await page.isVisible('#modal-profil'));
 pass &= ok('T18b hlavička nese jméno, číslo a pozici (#36)',
   /Delta.*#4.*smečař/s.test(await page.textContent('#profil-title')));
@@ -928,14 +989,14 @@ pass &= ok('T19e pod tabulkou je vysvětleno, co to druhé číslo je (#37)',
 // profil respektuje filtr na zápas
 await page.click('#modal-profil .btn-secondary');
 await page.selectOption('#stats-zapas-sel', '101');
-await page.waitForTimeout(300);
+await klid();
 await page.click(`.stats-table tbody tr:has-text("Delta") a`);
-await page.waitForTimeout(300);
+await klid();
 const poFiltru = await page.$$eval('.profil-tabulka tbody tr', trs => trs.length);
 pass &= ok('T18i profil kreslí jen zápasy podle aktivního filtru (#36)', poFiltru === 1);
 await page.click('#modal-profil .btn-secondary');
 await page.selectOption('#stats-zapas-sel', '');
-await page.waitForTimeout(200);
+await klid();
 
 // ── #41: mazání a archivace hráček ─────────────────────────────────────────
 // hráčka bez jediné akce — tu jde smazat úplně
@@ -947,14 +1008,14 @@ await page.click('.nav-tab:nth-child(3)');                  // Hráčky
 await page.waitForSelector('#hraci-list .player-card');
 
 await page.evaluate(() => editHrac(20));
-await page.waitForTimeout(150);
+await klid();
 pass &= ok('T21a hráčka bez akcí jde smazat (#41)',
   await page.isVisible('#btn-smazat-hrac') && !(await page.isVisible('#btn-archiv-hrac')));
 
 page.once('dialog', d => d.accept());
 otherWrites = [];
 await page.click('#btn-smazat-hrac');
-await page.waitForTimeout(400);
+await klid();
 pass &= ok('T21b smazání se ptá a pak pošle DELETE (#41)',
   otherWrites.some(w => w.table === 'vb_hraci' && w.method === 'DELETE'));
 pass &= ok('T21c smazaná hráčka zmizí ze soupisky (#41)',
@@ -962,7 +1023,7 @@ pass &= ok('T21c smazaná hráčka zmizí ze soupisky (#41)',
 
 // hráčka SE statistikami — mazání se nenabízí, protože by vzalo i její čísla
 await page.evaluate(() => editHrac(10));
-await page.waitForTimeout(150);
+await klid();
 pass &= ok('T21d hráčka se statistikami jde jen archivovat (#41)',
   !(await page.isVisible('#btn-smazat-hrac')) && await page.isVisible('#btn-archiv-hrac'));
 pass &= ok('T21e vysvětlí proč, ne jen zakáže (#41)',
@@ -971,7 +1032,7 @@ pass &= ok('T21e vysvětlí proč, ne jen zakáže (#41)',
 page.once('dialog', d => d.accept());
 otherWrites = [];
 await page.click('#btn-archiv-hrac');
-await page.waitForTimeout(400);
+await klid();
 const patch = otherWrites.find(w => w.table === 'vb_hraci' && w.method === 'PATCH');
 pass &= ok('T21f archivace nastaví aktivni=false (#41)', !!patch);
 pass &= ok('T21g archivovaná je v sekci Archiv, ne v soupisce (#41)',
@@ -979,20 +1040,20 @@ pass &= ok('T21g archivovaná je v sekci Archiv, ne v soupisce (#41)',
 
 // archivovaná se nesmí nabízet do sestavy
 await page.click('.nav-tab:nth-child(5)');
-await page.waitForTimeout(200);
+await klid();
 await page.evaluate(() => { state.zapasHraci = state.zapasHraci.filter(z => !(z.zapas_id === 100 && z.hrac_id === 10)); renderLiveTable(100); });
 await page.evaluate(() => openHracPicker(100));
-await page.waitForTimeout(200);
+await klid();
 pass &= ok('T21h archivovaná se nenabízí do sestavy (#41)',
   !(await page.textContent('#hrac-picker-list')).includes('Alfa'));
 await page.click('#modal-hrac-picker .btn-secondary');
 
 // obnovení
 await page.click('.nav-tab:nth-child(3)');                  // Hráčky
-await page.waitForTimeout(200);
+await klid();
 otherWrites = [];
 await page.click('#hraci-list .btn-green');
-await page.waitForTimeout(400);
+await klid();
 pass &= ok('T21i obnovení vrátí hráčku zpět (#41)',
   otherWrites.some(w => w.table === 'vb_hraci' && w.method === 'PATCH') &&
   !(await page.textContent('#hraci-list')).includes('Archiv'));
@@ -1013,23 +1074,23 @@ const tlacitkoUseknuto = () => page.evaluate(() => {
 await page.setViewportSize({ width: 390, height: 844 });    // telefon
 await page.click('.nav-tab:nth-child(5)');
 await page.waitForSelector('.live-tym-row');
-await page.waitForTimeout(200);
+await klid();
 pass &= ok('T23a tlačítko „Přidat hráčku" se na telefonu nesekne (regrese)',
   (await tlacitkoUseknuto()) <= 0);
 
 await page.setViewportSize({ width: 390, height: 600 });    // nízká obrazovka
-await page.waitForTimeout(300);
+await klid();
 pass &= ok('T23b ani na nízké obrazovce (regrese)', (await tlacitkoUseknuto()) <= 0);
 
 await page.setViewportSize({ width: 1100, height: 800 });
-await page.waitForTimeout(300);
+await klid();
 pass &= ok('T23c ani na desktopu (regrese)', (await tlacitkoUseknuto()) <= 0);
 
 // ── #62: tým platí jen ve své sezóně ───────────────────────────────────────
 await page.selectOption('#season-select', '1');
-await page.waitForTimeout(200);
+await klid();
 await page.click('.nav-tab:nth-child(4)');                  // Týmy
-await page.waitForTimeout(300);
+await klid();
 
 const tymyVSeznamu = () => page.$$eval('#tymy-list .tym-card-title', els => els.map(e => e.textContent));
 pass &= ok('T25a v sezóně vidím jen její týmy (#62)', await page.evaluate(() => {
@@ -1038,7 +1099,7 @@ pass &= ok('T25a v sezóně vidím jen její týmy (#62)', await page.evaluate((
 }));
 
 await page.selectOption('#season-select', '2');
-await page.waitForTimeout(300);
+await klid();
 pass &= ok('T25b po přepnutí sezóny vidím tým té druhé (#62)',
   (await tymyVSeznamu()).includes('Loňský tým'));
 
@@ -1047,16 +1108,16 @@ otherWrites = [];
 await page.click('#tab-tymy button:has-text("Nový tým")');
 await page.fill('#in-tym-nazev', 'Nováček');
 await page.click('#modal-tym .btn-primary');
-await page.waitForTimeout(400);
+await klid();
 const post = otherWrites.find(w => w.table === 'vb_tymy' && w.method === 'POST');
 pass &= ok('T25c nový tým dostane sezónu, ve které vznikl (#62)',
   post && post.body.sezona_id === 2 && post.body.nazev === 'Nováček');
 
 // výběr týmu u zápasu nabízí jen týmy sezóny
 await page.click('.nav-tab:nth-child(2)');
-await page.waitForTimeout(200);
+await klid();
 await page.click('#tab-zapasy button:has-text("Nový zápas")');
-await page.waitForTimeout(300);
+await klid();
 const volbyTymu = await page.$$eval('#in-zapas-tym option', els => els.map(e => e.textContent));
 pass &= ok('T25d výběr týmu u zápasu nabízí jen týmy té sezóny (#62)',
   volbyTymu.includes('Loňský tým') && !volbyTymu.some(v => v.includes('<img')));
@@ -1064,11 +1125,11 @@ await page.click('#modal-zapas .modal-footer .btn-secondary');
 
 // správa týmu nabízí jen hráčky ze soupisky jeho sezóny
 await page.selectOption('#season-select', '1');
-await page.waitForTimeout(200);
+await klid();
 await page.click('.nav-tab:nth-child(4)');                  // Týmy
-await page.waitForTimeout(300);
+await klid();
 await page.evaluate(() => openTymManage(5));
-await page.waitForTimeout(300);
+await klid();
 pass &= ok('T25e hlavička správy týmu nese sezónu (#62)',
   /2025\/26|2023|—/.test(await page.textContent('#tym-manage-title')) ||
   (await page.textContent('#tym-manage-title')).includes('·'));
@@ -1082,7 +1143,7 @@ await page.click('#modal-tym-manage .btn-secondary');
 // ── proklik z Přehledu do Live ─────────────────────────────────────────────
 await page.setViewportSize({ width: 1100, height: 900 });
 await page.selectOption('#season-select', '1');
-await page.waitForTimeout(200);
+await klid();
 await page.click('.nav-tab:nth-child(1)');                 // Přehled
 await page.waitForSelector('#prehled-content .match-item');
 
@@ -1100,7 +1161,7 @@ pass &= ok('T24c a nejbližší plánovaný',
 // proklik otevře Live s tím správným zápasem
 const probihajici = await page.$('#prehled-content .match-item:has-text("Probíhá")');
 await probihajici.click();
-await page.waitForTimeout(400);
+await klid();
 pass &= ok('T24d klik přepne na Live a vybere ten zápas',
   await page.evaluate(() => state.liveZapasId) === 100 &&
   await page.isVisible('#tab-live.active'));
@@ -1114,7 +1175,7 @@ await page.evaluate(() => {
   el.focus();
   el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
 });
-await page.waitForTimeout(400);
+await klid();
 pass &= ok('T24e jde otevřít i klávesou Enter',
   await page.evaluate(() => state.liveZapasId) === 102);
 
@@ -1136,7 +1197,7 @@ const dialogPri = async (zapasId) => {
   let text = '';
   page.once('dialog', d => { text = d.message(); d.dismiss(); });
   await page.evaluate(id => deleteZapas(id), zapasId);
-  await page.waitForTimeout(250);
+  await klid();
   return text;
 };
 otherWrites = [];
@@ -1172,7 +1233,7 @@ pass &= ok('T26i u prázdného zápasu dialog řekne, že není co ztratit (#64)
 otherWrites = [];
 page.once('dialog', d => d.accept());
 await page.evaluate(() => deleteZapas(102));
-await page.waitForTimeout(400);
+await klid();
 pass &= ok('T26j potvrzení pošle jediný DELETE na vb_zapasy (#64)',
   otherWrites.filter(w => w.method === 'DELETE').length === 1 &&
   otherWrites.some(w => w.table === 'vb_zapasy' && w.method === 'DELETE' &&
@@ -1196,7 +1257,7 @@ pass &= ok('T27a každý zápas má tlačítko na úpravu detailu (#66)', await 
 }));
 
 await page.evaluate(() => editZapas(100));
-await page.waitForTimeout(250);
+await klid();
 pass &= ok('T27b modal se otevře v režimu úpravy, ne zakládání (#66)',
   /Upravit/.test(await page.textContent('#zapas-modal-title')) &&
   /Uložit/.test(await page.textContent('#btn-save-zapas')));
@@ -1213,7 +1274,7 @@ otherWrites = [];
 await page.selectOption('#in-zapas-soutez', '');
 await page.fill('#in-zapas-soupet', 'Soupeř A (opraveno)');
 await page.click('#btn-save-zapas');
-await page.waitForTimeout(400);
+await klid();
 const patchZapas = otherWrites.find(w => w.table === 'vb_zapasy' && w.method === 'PATCH');
 pass &= ok('T27d uložení pošle PATCH, ne nový zápas (#66)',
   !!patchZapas && /id=eq\.100/.test(patchZapas.url) &&
@@ -1228,7 +1289,7 @@ pass &= ok('T27g změna je hned vidět v seznamu (#66)',
 
 // a založení nového zápasu režim úpravy nezdědí
 await page.click('#tab-zapasy button:has-text("Nový zápas")');
-await page.waitForTimeout(250);
+await klid();
 pass &= ok('T27h „Nový zápas\" se neotevře s daty toho upravovaného (#66)', await page.evaluate(() => {
   const v = id => document.getElementById(id).value;
   return v('in-zapas-id') === '' && v('in-zapas-soupet') === '' &&
@@ -1247,7 +1308,7 @@ await page.evaluate(() => {
     { id: 303, sezona_id: 1, datum: '2026-11-20', cas: '18:00:00', soupet: 'Až za měsíc', misto: 'doma', stav: 'planovany' });
   renderPrehled();
 });
-await page.waitForTimeout(250);
+await klid();
 const prehled = () => page.$$eval('#prehled-content .match-item', els =>
   els.map(e => e.textContent.replace(/\s+/g, ' ').trim()));
 
@@ -1268,7 +1329,7 @@ await page.evaluate(() => {
   }
   renderPrehled();
 });
-await page.waitForTimeout(250);
+await klid();
 radky = await prehled();
 pass &= ok('T28e desetizápasový turnaj se vejde celý (#68)',
   [...Array(8).keys()].every(i => radky.some(t => new RegExp(`Turnajový ${i}\\b`).test(t))));
@@ -1279,7 +1340,7 @@ await page.evaluate(() => {
   state.zapasy = state.zapasy.filter(z => z.id < 300);
   renderPrehled();
 });
-await page.waitForTimeout(200);
+await klid();
 radky = await prehled();
 pass &= ok('T28g bez turnaje zůstává Přehled krátký (#68)', radky.length <= 6);
 
@@ -1291,7 +1352,7 @@ await page.evaluate(() => {
     .forEach(id => { const e = document.getElementById(id); if (e) e.value = ''; });
   renderStatistiky();
 });
-await page.waitForTimeout(250);
+await klid();
 
 const sloupec = n => page.$$eval(`.stats-table tbody tr td:nth-child(${n})`,
   els => els.map(e => e.textContent.trim()));
@@ -1317,7 +1378,7 @@ pass &= ok('T29a výchozí pořadí je pořád nejlepší nahoře (#72)',
   /▼/.test(await page.textContent('.stats-table th.sort-aktivni')));
 
 await klikHlavicku('total');
-await page.waitForTimeout(200);
+await klid();
 pass &= ok('T29b klik na aktivní sloupec otočí směr (#72)',
   roste(cisla(await sloupec(iCelkem))));
 pass &= ok('T29c otočený směr pozná i šipka (#72)',
@@ -1325,12 +1386,12 @@ pass &= ok('T29c otočený směr pozná i šipka (#72)',
 
 // pokusy se řadí jako každý jiný sloupec
 await klikHlavicku('utok_pok');
-await page.waitForTimeout(200);
+await klid();
 pass &= ok('T29b2 řadit jde i podle pokusů (#116)',
   klesa(cisla(await sloupec(await csvIdx('Útok pokusy')))));
 
 await klikHlavicku('jmeno');
-await page.waitForTimeout(200);
+await klid();
 const jmenaRazeni = (await sloupec(2)).map(t => t.replace(/#\d+$/, '').trim());
 pass &= ok('T29d jméno se řadí abecedně, a česky (#72)',
   jmenaRazeni.every((v, i) => i === 0 || jmenaRazeni[i - 1].localeCompare(v, 'cs') <= 0));
@@ -1346,15 +1407,15 @@ await page.evaluate(() => {
   });
   renderStatistiky();
 });
-await page.waitForTimeout(200);
+await klid();
 pass &= ok('T29f0 hráčka bez jediného pokusu má v procentech „—", ne 0 % (#72)',
   (await sloupec(iPrijemPct)).includes('—'));
 
 await klikHlavicku('prijem_pct');
-await page.waitForTimeout(200);
+await klid();
 const pctDesc = await sloupec(iPrijemPct);   // příjem %
 await klikHlavicku('prijem_pct');
-await page.waitForTimeout(200);
+await klid();
 const pctAsc = await sloupec(iPrijemPct);
 const pomlckyNaKonci = a => {
   const i = a.findIndex(v => v === '—');
@@ -1384,11 +1445,11 @@ pass &= ok('T29i export stahuje tabulku v tom pořadí, jaké je vidět (#72)',
 
 // řazení přežije změnu filtru
 await page.selectOption('#stats-set-sel', '1');
-await page.waitForTimeout(250);
+await klid();
 pass &= ok('T29j řazení se po změně filtru nezahodí (#72)',
   await page.evaluate(() => statsSort.sloupec === 'prijem_pct' && statsSort.smer === 'asc'));
 await page.selectOption('#stats-set-sel', '');
-await page.waitForTimeout(250);
+await klid();
 
 // klávesnicí taky
 await page.evaluate(() => {
@@ -1397,7 +1458,7 @@ await page.evaluate(() => {
   th.focus();
   th.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
 });
-await page.waitForTimeout(200);
+await klid();
 pass &= ok('T29k seřadit jde i klávesou Enter (#72)',
   await page.evaluate(() => statsSort.sloupec === 'zapasy'));
 
@@ -1423,7 +1484,7 @@ otherWrites = [];
 const predPridanim = (await vLive()).length;
 await page.evaluate(() => { state.zapasHraci = state.zapasHraci.filter(zh => !(zh.zapas_id === 100 && zh.hrac_id === 11)); renderLiveTable(100); });
 await page.evaluate(() => addDoSestava(100, 11));
-await page.waitForTimeout(400);
+await klid();
 const zapisSestavy = otherWrites.find(w => w.table === 'vb_zapas_hraci' && w.method === 'POST');
 pass &= ok('T30b přidání do sestavy pošle i pořadí (#75)',
   zapisSestavy && typeof zapisSestavy.body.poradi === 'number' && zapisSestavy.body.poradi > 0);
@@ -1436,7 +1497,7 @@ await page.evaluate(() => {
   state.zapasHraci.filter(zh => zh.zapas_id === 100).forEach(zh => { zh.poradi = opak[zh.hrac_id]; });
   renderLiveTable(100);
 });
-await page.waitForTimeout(200);
+await klid();
 pass &= ok('T30d se zapsaným pořadím se řadí podle něj, ne abecedně (#75)',
   await page.evaluate(() => {
     const v = [...document.querySelectorAll('.live-table .live-player-name')].map(e => e.textContent);
@@ -1453,7 +1514,7 @@ await page.evaluate(() => {
     .forEach(zh => { zh.poradi = null; });
   renderLiveTable(100);
 });
-await page.waitForTimeout(200);
+await klid();
 pass &= ok('T30e hráčky bez pořadí zůstávají nahoře a v pořadí soupisky (#75)',
   await page.evaluate(() => {
     const v = [...document.querySelectorAll('.live-table .live-player-name')].map(e => e.textContent);
@@ -1489,7 +1550,7 @@ const undoVypnuto = () => page.evaluate(() => document.getElementById('btn-undo'
 // předchozí sada nechala zapisovaný set jinde — blok se ukotví na první,
 // ať se tvrzení o setech nedrží na tom, co po sobě nechal někdo jiný
 await klikSet(1);
-await page.waitForTimeout(300);
+await klid();
 await page.evaluate(() => { undoStack.length = 0; prekresliUndo(); });
 
 pass &= ok('T31a bez zápisu lišta říká, že není co vracet (#76)',
@@ -1497,7 +1558,7 @@ pass &= ok('T31a bez zápisu lišta říká, že není co vracet (#76)',
 
 const predZapisem = await cnt('#cnt-11-servis_plus');
 await page.click('#cnt-11-servis_plus');
-await page.waitForTimeout(250);
+await klid();
 pass &= ok('T31b po zápisu lišta pojmenuje hráčku i akci (#76)',
   !(await undoVypnuto()) && /Beta/.test(await undoText()) && /Servis/.test(await undoText()));
 
@@ -1514,45 +1575,45 @@ pass &= ok('T31d po vyčerpání je lišta zase prázdná (#76)', await undoVypn
 
 // zásobník, ne jen poslední akce
 await page.click('#cnt-11-servis_plus');
-await page.waitForTimeout(150);
+await klid();
 await page.click('#cnt-11-servis_plus');
-await page.waitForTimeout(150);
+await klid();
 await page.click('#btn-undo');
-await page.waitForTimeout(150);
+await klid();
 pass &= ok('T31e vrací se i druhý zápis zpátky, ne jen poslední (#76)',
   await cnt('#cnt-11-servis_plus') === predZapisem + 1 && !(await undoVypnuto()));
 await page.click('#btn-undo');
-await page.waitForTimeout(200);
+await klid();
 pass &= ok('T31f po vrácení všeho lišta zhasne (#76)',
   await cnt('#cnt-11-servis_plus') === predZapisem && (await undoVypnuto()));
 
 // ruční odečet je sám o sobě „zpět" — lišta nesmí nabízet vrátit ho podruhé
 await page.click('#cnt-11-servis_plus');
-await page.waitForTimeout(150);
+await klid();
 await longPress('.live-act-cnt#cnt-11-servis_plus');
-await page.waitForTimeout(250);
+await klid();
 pass &= ok('T31g po ručním odečtu nezůstane v liště, co už je vráceno (#76)',
   await cnt('#cnt-11-servis_plus') === predZapisem && (await undoVypnuto()));
 
 // „zpět" musí trefit set, ve kterém akce vznikla
 await page.click('#cnt-11-servis_plus');
-await page.waitForTimeout(150);
+await klid();
 await klikSet(2);
-await page.waitForTimeout(300);
+await klid();
 pass &= ok('T31h po přepnutí setu lišta připomene, kterého setu se zpět týká (#76)',
   /1\. set/.test(await undoText()));
 const vSetu2 = await cnt('#cnt-11-servis_plus');
 await page.click('#btn-undo');
-await page.waitForTimeout(400);
+await klid();
 pass &= ok('T31i zpět odečte v setu, kde akce vznikla, ne v tom zobrazeném (#76)',
   await page.evaluate(() => getStatVal(100, 11, 'servis_plus', 1)) === predZapisem &&
   await cnt('#cnt-11-servis_plus') === vSetu2);
 await klikSet(1);
-await page.waitForTimeout(300);
+await klid();
 
 // lišta nesmí ukousnout „+ Přidat hráčku" jako u #59
 await page.setViewportSize({ width: 390, height: 844 });
-await page.waitForTimeout(300);
+await klid();
 const undoGeometrie = () => page.evaluate(() => {
   const wrap = document.getElementById('live-table-wrap');
   const scroll = wrap.querySelector('.live-table-scroll');
@@ -1572,11 +1633,11 @@ pass &= ok('T31k lišta se vejde do obalu Live (#76)', g.listaMimo <= 0);
 pass &= ok('T31l tlačítko zpět má aspoň 44px, jak se na palec sluší (#76)', g.vyskaTlacitka >= 44);
 
 await page.setViewportSize({ width: 390, height: 600 });
-await page.waitForTimeout(300);
+await klid();
 g = await undoGeometrie();
 pass &= ok('T31m ani na nízké obrazovce (#76)', g.useknuto <= 0 && g.listaMimo <= 0);
 await page.setViewportSize({ width: 1100, height: 900 });
-await page.waitForTimeout(300);
+await klid();
 
 // ── #76 část 2: záložka Live V2 ────────────────────────────────────────────
 await page.click('.nav-tab:nth-child(6)');                 // Live V2
@@ -1593,7 +1654,7 @@ pass &= ok('T32b obě záložky drží týž zápas (#76)', await page.evaluate(
 
 // hráčka je cíl přes celou šířku, ne 24px sloupec — to je celý smysl V2
 await page.setViewportSize({ width: 390, height: 844 });
-await page.waitForTimeout(300);
+await klid();
 const rozmery = await page.evaluate(() => {
   const h = document.querySelector('#live2-wrap .v2-hrac').getBoundingClientRect();
   return { sirka: Math.round(h.width), vyska: Math.round(h.height) };
@@ -1622,7 +1683,7 @@ pass &= ok('T32f dlaždice je násobně větší cíl než buňka v mřížce (#
   dlazdice.sirka >= 44 && dlazdice.vyska >= 44);
 // na nízké obrazovce se panel musí dát doscrollovat, ne uříznout
 await page.setViewportSize({ width: 390, height: 600 });
-await page.waitForTimeout(300);
+await klid();
 pass &= ok('T32f2 panel akcí je na nízké obrazovce celý dosažitelný (#76)',
   await page.evaluate(() => {
     const m = document.querySelector('#modal-v2-akce .modal');
@@ -1634,13 +1695,13 @@ pass &= ok('T32f2 panel akcí je na nízké obrazovce celý dosažitelný (#76)'
             posledni.offsetTop + posledni.offsetHeight <= m.scrollHeight);
   }));
 await page.setViewportSize({ width: 390, height: 844 });
-await page.waitForTimeout(300);
+await klid();
 
 // zápis z V2 jde stejnou cestou a je vidět i ve staré mřížce
 rpcCalls = [];
 const predV2 = await page.evaluate(() => getStatVal(100, 11, 'utok_plus', state.liveSet));
 await page.click('#modal-v2-akce .v2-dlazdice[onclick*="utok_plus"]');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T32g klepnutí na dlaždici zapíše a panel zavře (#76)',
   await page.isHidden('#modal-v2-akce') &&
   await page.evaluate(() => getStatVal(100, 11, 'utok_plus', state.liveSet)) === predV2 + 1);
@@ -1651,11 +1712,11 @@ pass &= ok('T32i zápis z V2 je hned vidět i ve staré mřížce (#76)',
 
 // a obráceně
 await page.click('.nav-tab:nth-child(5)');
-await page.waitForTimeout(200);
+await klid();
 await page.click('#cnt-11-utok_plus');
-await page.waitForTimeout(400);
+await klid();
 await page.click('.nav-tab:nth-child(6)');
-await page.waitForTimeout(300);
+await klid();
 pass &= ok('T32j zápis ze staré mřížky je hned vidět ve V2 (#76)',
   await page.evaluate(() => {
     const el = document.getElementById('v2plus-11');
@@ -1669,7 +1730,7 @@ pass &= ok('T32k V2 má vlastní lištu zpět, ne duplicitní id (#76)',
     document.querySelectorAll('#btn-undo').length === 1));
 const predZpet = await page.evaluate(() => getStatVal(100, 11, 'utok_plus', state.liveSet));
 await page.click('#btn-undo-v2');
-await page.waitForTimeout(400);
+await klid();
 pass &= ok('T32l zpět ve V2 opravdu odečte (#76)',
   await page.evaluate(() => getStatVal(100, 11, 'utok_plus', state.liveSet)) === predZpet - 1);
 
@@ -1677,12 +1738,12 @@ pass &= ok('T32l zpět ve V2 opravdu odečte (#76)',
 pass &= ok('T32m V2 má vlastní přepínač setů (#76)',
   (await page.$$eval('#live2-wrap .set-btn', els => els.length)) === 5);
 await page.click('#live2-wrap .set-prepinac button:nth-of-type(3)');
-await page.waitForTimeout(300);
+await klid();
 pass &= ok('T32n přepnutí setu ve V2 přepne i starou mřížku (#76)',
   await page.evaluate(() => state.liveSet) === 3 &&
   (await page.textContent('#live-table-wrap .set-btn.aktivni')).trim() === '3');
 await page.click('#live2-wrap .set-prepinac button:nth-of-type(1)');
-await page.waitForTimeout(300);
+await klid();
 pass &= ok('T32o V2 ukazuje týmový souhrn (#76)',
   (await page.$$eval('#live2-wrap .v2-chip', els => els.length)) ===
   await page.evaluate(() => ACTIONS.length));
@@ -1723,7 +1784,7 @@ pass &= ok('T32q lišta se vejde do obalu V2 (#76)', vg.listaMimo <= 0);
 pass &= ok('T32r V2 nepřetéká stránku do šířky (#76)', vg.prescahuje === 0);
 
 await page.setViewportSize({ width: 390, height: 600 });
-await page.waitForTimeout(300);
+await klid();
 vg = await v2Geometrie();
 pass &= ok('T32s ani na nízké obrazovce (#76)',
   vg.pridatVObalu >= 0 && vg.listaMimo <= 0 && vg.chybyMimo <= 0);
@@ -1743,7 +1804,7 @@ pass &= ok('T32t záložky se na 390px vejdou bez přetečení (#76, #70)',
 
 // 360px je běžná šířka telefonu a sedmá záložka je přesně to, co ji přetáhne
 await page.setViewportSize({ width: 360, height: 780 });
-await page.waitForTimeout(300);
+await klid();
 nm = await navMiry();
 pass &= ok('T32u a vejdou se i na užší 360px telefon (#70)',
   nm.prescah <= 0 && nm.strankaPrescah <= 0);
@@ -1751,9 +1812,9 @@ pass &= ok('T32v záložka přitom zůstane rozumně velký cíl (#70)', nm.sirk
 
 // ── #70: Hráčky a Týmy jsou dvě záložky ────────────────────────────────────
 await page.setViewportSize({ width: 1100, height: 900 });
-await page.waitForTimeout(300);
+await klid();
 await page.selectOption('#season-select', '1');
-await page.waitForTimeout(300);
+await klid();
 
 await page.click('.nav-tab:nth-child(3)');                  // Hráčky
 await page.waitForSelector('#hraci-list .player-card');
@@ -1777,12 +1838,12 @@ pass &= ok('T34e záložka Týmy připomene, že tým patří do sezóny (#70)',
 
 // obě se musí překreslit i když je zrovna vidět ta druhá
 await page.click('.nav-tab:nth-child(3)');
-await page.waitForTimeout(200);
+await klid();
 const predZalozenim = await page.evaluate(() => state.tymy.length);
 await page.evaluate(() => { state.tymy.push({ id: 777, nazev: 'Přidaný jinde', sezona_id: 1 }); renderTym(); renderTymy(); });
-await page.waitForTimeout(200);
+await klid();
 await page.click('.nav-tab:nth-child(4)');
-await page.waitForTimeout(200);
+await klid();
 pass &= ok('T34f změna týmů se projeví, i když jsem byl zrovna na Hráčkách (#70)',
   (await page.textContent('#tymy-list')).includes('Přidaný jinde'));
 await page.evaluate(() => { state.tymy = state.tymy.filter(t => t.id !== 777); renderTymy(); });
@@ -1795,7 +1856,7 @@ pass &= ok('T34h po rozdělení nezůstala stará společná záložka (#70)',
 
 // přepnutí sezóny musí srovnat obě
 await page.selectOption('#season-select', '2');
-await page.waitForTimeout(300);
+await klid();
 pass &= ok('T34i přepnutí sezóny překreslí týmy i soupisku (#70)',
   await page.evaluate(() => {
     const vidim = [...document.querySelectorAll('#tymy-list .tym-card-title')].map(e => e.textContent);
@@ -1803,7 +1864,7 @@ pass &= ok('T34i přepnutí sezóny překreslí týmy i soupisku (#70)',
     return vidim.length === ocekavam.length && vidim.every(v => ocekavam.includes(v));
   }));
 await page.selectOption('#season-select', '1');
-await page.waitForTimeout(300);
+await klid();
 
 // ── #71 část 1: profil hráčky ──────────────────────────────────────────────
 await page.click('.nav-tab:nth-child(3)');                  // Hráčky
@@ -1819,9 +1880,9 @@ pass &= ok('T35a z karty v soupisce vede proklik do profilu (#71)',
 await page.click('.nav-tab:nth-child(7)');                  // Statistiky
 await page.waitForSelector('.stats-table');
 await page.selectOption('#stats-set-sel', '1');
-await page.waitForTimeout(300);
+await klid();
 await page.click('.nav-tab:nth-child(3)');
-await page.waitForTimeout(300);
+await klid();
 await page.evaluate(() => otevriProfil(13, true));
 await page.waitForSelector('#modal-profil:not(.hidden)');
 
@@ -1837,7 +1898,7 @@ await page.click('#modal-profil .btn-secondary');
 await page.click('.nav-tab:nth-child(7)');          // až tady jsou filtry vidět
 await page.waitForSelector('.stats-table');
 await page.selectOption('#stats-set-sel', '');
-await page.waitForTimeout(200);
+await klid();
 const jedenZapas = await page.evaluate(() => {
   // zápas, ve kterém hráčka 13 hrála, ale není jediný v sezóně
   const p = profilHracky(13, true);
@@ -1845,7 +1906,7 @@ const jedenZapas = await page.evaluate(() => {
 });
 pass &= ok('T35d0 fixture má na co filtrovat (#71)', jedenZapas !== null);
 await page.selectOption('#stats-zapas-sel', String(jedenZapas));
-await page.waitForTimeout(300);
+await klid();
 await page.evaluate(() => otevriProfil(13));
 await page.waitForSelector('#modal-profil:not(.hidden)');
 pass &= ok('T35d proklik ze Statistik filtr respektuje (#71)',
@@ -1864,7 +1925,7 @@ pass &= ok('T35e a ta dvě čísla se opravdu liší, ne jen popisek (#71)',
   }));
 await page.click('#modal-profil .btn-secondary');
 await page.selectOption('#stats-zapas-sel', '');
-await page.waitForTimeout(300);
+await klid();
 
 // souhrnné kostky musí sedět na tabulku pod nimi
 await page.evaluate(() => otevriProfil(13, true));
@@ -2019,13 +2080,13 @@ pass &= ok('T36m tým bez zápasů detail zvládne a řekne to (#71)', await pag
 
 
 await page.setViewportSize({ width: 1100, height: 900 });
-await page.waitForTimeout(300);
+await klid();
 
 // ── #74: chyby soupeře ─────────────────────────────────────────────────────
 await page.click('.nav-tab:nth-child(6)');                 // Live V2
 await page.waitForSelector('#v2-souper-pocet');
 await page.click('#live2-wrap .set-prepinac button:nth-of-type(1)');
-await page.waitForTimeout(300);
+await klid();
 
 const chybyCislo = () => page.textContent('#v2-souper-pocet').then(t => parseInt(t.trim()));
 // stub drží data v Node, ne ve stránce — tohle je most pro „zapsal někdo druhý"
@@ -2049,7 +2110,7 @@ pass &= ok('T33b hodnota se načte z databáze (#74)', await chybyCislo() === 2)
 chybyRpc = [];
 const predChyby = await chybyCislo();
 await page.click('.v2-souper-btn.plus');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T33c klepnutí přičte a rovnou je to vidět (#74)',
   await chybyCislo() === predChyby + 1);
 pass &= ok('T33d zapisuje se přírůstkem přes vlastní RPC, ne přepisem řádku (#74)',
@@ -2061,18 +2122,18 @@ pass &= ok('T33e nejde to přes vb_zapis_akce ani přímým zápisem do tabulky 
 pass &= ok('T33f lišta zpět nabídne vrátit chybu soupeře (#74)',
   /[Cc]hyba soupeře/.test(await page.textContent('#live2-wrap .undo-text')));
 await page.click('#btn-undo-v2');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T33g zpět chybu soupeře odečte (#74)', await chybyCislo() === predChyby);
 pass &= ok('T33h odečet jde taky přírůstkem (#74)',
   chybyRpc.length === 2 && chybyRpc[1].p_delta === -1);
 
 // počítá se po setech
 await page.click('#live2-wrap .set-prepinac button:nth-of-type(2)');
-await page.waitForTimeout(400);
+await klid();
 pass &= ok('T33i druhý set má vlastní počítadlo (#74)', await chybyCislo() === 0);
 chybyRpc = [];
 await page.click('.v2-souper-btn.plus');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T33j zápis jde do zobrazeného setu (#74)',
   chybyRpc.length === 1 && chybyRpc[0].p_set === 2);
 pass &= ok('T33k první set tím zůstal nedotčený (#74)',
@@ -2080,20 +2141,20 @@ pass &= ok('T33k první set tím zůstal nedotčený (#74)',
 
 // přepnutí souhrnu na celý zápas sečte sety
 await page.click('#live2-wrap .v2-tym-prepinac');
-await page.waitForTimeout(300);
+await klid();
 // druhé zařízení: dorovnání musí chyby soupeře dotáhnout taky
 await page.evaluate(() => {
   FIX_SET_CHYBY(100, 1, 'pocet', 42);          // „někdo druhý" zapsal
 });
 await page.evaluate(() => refreshLiveStats());
-await page.waitForTimeout(400);
+await klid();
 pass &= ok('T33l2 dorovnání dotáhne i zápis chyb z druhého zařízení (#74)',
   await page.evaluate(() => souperHodnota(100, 1, 'pocet')) === 42);
 
 pass &= ok('T33l souhrn za celý zápas sečte sety (#74)',
   await chybyCislo() === await page.evaluate(() => souperZapas(100, 'pocet')));
 await page.click('#live2-wrap .v2-tym-prepinac');
-await page.waitForTimeout(300);
+await klid();
 
 // číslo, které jde jen zapsat, by bylo k ničemu — musí být vidět i ve Statistikách
 await page.click('.nav-tab:nth-child(7)');
@@ -2106,7 +2167,7 @@ pass &= ok('T33n číslo ve Statistikách sedí na data (#74)', await page.evalu
   return parseInt(document.querySelector('.stats-chyby strong').textContent) === ocekavano;
 }));
 await page.selectOption('#stats-set-sel', '1');
-await page.waitForTimeout(300);
+await klid();
 pass &= ok('T33o filtr na set platí i pro ně (#74)', await page.evaluate(() => {
   const d = spocitejStatistiky();
   const ocekavano = d.zapasIds.reduce((n, z) => n + souperHodnota(z, 1, 'pocet'), 0);
@@ -2114,7 +2175,7 @@ pass &= ok('T33o filtr na set platí i pro ně (#74)', await page.evaluate(() =>
          /1\. set/.test(document.querySelector('.stats-chyby').textContent);
 }));
 await page.selectOption('#stats-set-sel', '');
-await page.waitForTimeout(300);
+await klid();
 
 // a mazání zápasu o nich musí říct
 await page.click('.nav-tab:nth-child(2)');
@@ -2122,12 +2183,12 @@ await page.waitForSelector('#zapasy-list .match-item');
 let textMazani = '';
 page.once('dialog', d => { textMazani = d.message(); d.dismiss(); });
 await page.evaluate(() => deleteZapas(100));
-await page.waitForTimeout(300);
+await klid();
 pass &= ok('T33p dialog mazání zápasu přizná i chyby soupeře (#74)',
   /akcí soupeře/.test(textMazani));
 
 await page.click('.nav-tab:nth-child(5)');
-await page.waitForTimeout(200);
+await klid();
 
 // ── přihlášení přežije reload ──────────────────────────────────────────────
 await page.reload();
@@ -2162,7 +2223,7 @@ if (errors.length) console.log(errors);
 await page.click('.nav-tab:nth-child(6)');                  // Live V2
 await page.waitForSelector('#v2-souper-body');
 await page.click('#live2-wrap .set-prepinac button:nth-of-type(1)');
-await page.waitForTimeout(300);
+await klid();
 
 const souperCislo = pole => page.textContent('#v2-souper-' + pole).then(t => parseInt(t.trim()));
 
@@ -2179,7 +2240,7 @@ chybyRpc = [];
 const predBoduSoupere = await souperCislo('body');
 const predChybSoupere = await souperCislo('pocet');
 await page.click('#live2-wrap .v2-souper-btn.minus');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T37c klepnutí na „bod soupeře" přičte jeho, ne chyby (#84)',
   await souperCislo('body') === predBoduSoupere + 1 && await souperCislo('pocet') === predChybSoupere);
 pass &= ok('T37d zapisuje se do vlastního pole přes vb_zapis_souper (#84)',
@@ -2188,7 +2249,7 @@ pass &= ok('T37d zapisuje se do vlastního pole přes vb_zapis_souper (#84)',
 pass &= ok('T37e lišta zpět pozná, které z těch dvou vrací (#84)',
   /Bod soupeře/.test(await page.textContent('#live2-wrap .undo-text')));
 await page.click('#btn-undo-v2');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T37f zpět odečte bod soupeře a chyb se nedotkne (#84)',
   await souperCislo('body') === predBoduSoupere && await souperCislo('pocet') === predChybSoupere);
 
@@ -2196,7 +2257,7 @@ pass &= ok('T37f zpět odečte bod soupeře a chyb se nedotkne (#84)',
 await page.evaluate(() => FIX_SET_CHYBY(100, 1, 'body', 7));
 await page.evaluate(() => FIX_SET_CHYBY(100, 1, 'pocet', 5));
 await page.evaluate(() => refreshLiveStats());
-await page.waitForTimeout(500);
+await klid();
 pass &= ok('T37g dorovnání dotáhne obě pole, ne jen jedno (#84)',
   await page.evaluate(() => souperHodnota(100, 1, 'body')) === 7 &&
   await page.evaluate(() => souperHodnota(100, 1, 'pocet')) === 5);
@@ -2229,7 +2290,7 @@ pass &= ok('T37i z dat jde poskládat skóre setu (#84)', await page.evaluate(()
 await page.click('.nav-tab:nth-child(6)');                  // Live V2
 await page.waitForSelector('#live2-wrap');
 await page.click('#live2-wrap .set-prepinac button:nth-of-type(1)');
-await page.waitForTimeout(300);
+await klid();
 // hráčky do sestavy, ať je koho stavět
 await page.evaluate(() => {
   [10, 11, 12, 13, 14].forEach((id, i) => {
@@ -2241,7 +2302,7 @@ await page.evaluate(() => {
   state.postaveni = state.postaveni.filter(p => p.zapas_id !== 100);
   renderLive2(100);
 });
-await page.waitForTimeout(200);
+await klid();
 
 pass &= ok('T38a V2 má přepínač seznam ⇄ hřiště, ne osmou záložku (#84)',
   (await page.$$eval('#live2-wrap .v2-zobrazeni-btn', els => els.length)) === 2 &&
@@ -2277,7 +2338,7 @@ pass &= ok('T38e2 hráčka s pozicí libero, která nominovaná není, se nabíz
     return !!h && document.getElementById('v2-zona-obsah').textContent.includes(h.jmeno);
   }));
 await page.click('#v2-zona-obsah .player-card');
-await page.waitForTimeout(500);
+await klid();
 pass &= ok('T38f obsazení zóny se uloží celé a v jedné transakci (#84)',
   postaveniRpc.length === 1 && postaveniRpc[0].p_zapas === 100 &&
   postaveniRpc[0].p_set === 1 && postaveniRpc[0].pocet === 1 &&
@@ -2333,7 +2394,7 @@ pass &= ok('T38l střídání nabízí jen ty z lavičky, ne už stojící (#84)
       naHristi.every(id => !nabidnute.includes(state.hraci.find(h => h.id === id).jmeno));
   }));
 await page.click('#v2-zona-obsah .player-card');
-await page.waitForTimeout(500);
+await klid();
 pass &= ok('T38m střídání zónu opravdu přeobsadí (#84)',
   await page.evaluate(z => postaveniSetu(100, 1).get(z), zonaStridani) !== predStridanim);
 
@@ -2349,7 +2410,7 @@ const dvojice = await page.evaluate(() => {
   postavDoZony(100, 1, 2, b);
   return { a, b };
 });
-await page.waitForTimeout(500);
+await klid();
 pass &= ok('T38m2a je co prohazovat, jinak by se měřilo prázdno (#107)',
   !!dvojice.a && !!dvojice.b && dvojice.a !== dvojice.b);
 
@@ -2389,7 +2450,7 @@ pass &= ok('T38m4 oprava nabídne i šestku na place, ne jen lavičku (#107)',
   /nepočítá jako střídání/i.test(await page.textContent('#v2-zona-obsah')));
 
 await page.click('#v2-zona-obsah .player-card.z-place');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T38m5 hráčka z place se s cílovou zónou prohodí, nepřesune (#107)',
   await page.evaluate(d => {
     const m = postaveniSetu(100, 1);
@@ -2406,13 +2467,13 @@ await page.click('#btn-v2-opravit');
 await page.waitForSelector('#modal-v2-zona:not(.hidden)');
 page.off('dialog', naDialog);
 await page.click('#v2-zona-obsah .btn-secondary');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T38m7 zónu jde nechat prázdnou a pořád to není střídání (#107)',
   await page.evaluate(() => !postaveniSetu(100, 1).has(1)) &&
   await stridaniPoctu() === predOpravou);
 // vrátit, ať další testy počítají s obsazenou zónou
 await page.evaluate(d => postavDoZony(100, 1, 1, d.b), dvojice);
-await page.waitForTimeout(400);
+await klid();
 
 // ── #107: míč u podávající a animace rotace ──────────────────────────────
 /* Měří se na setu bez výměn: tam podání drží ten, kdo ho měl na začátku.
@@ -2504,14 +2565,14 @@ pass &= ok('T38n přesun hráčky uvolní její původní zónu (#84)', await pa
 
 // postavení je per set
 await page.click('#live2-wrap .set-prepinac button:nth-of-type(2)');
-await page.waitForTimeout(400);
+await klid();
 pass &= ok('T38o druhý set začíná s vlastním postavením (#84)',
   await page.evaluate(() => postaveniSetu(100, 2).size) === 0 &&
   (await page.$$eval('.hriste .hriste-zona.prazdna', els => els.length)) === 6);
 pass &= ok('T38p nabídne převzít postavení z předchozího setu (#84)',
   /Převzít z 1\. setu/.test(await page.textContent('.hriste-napoveda')));
 await page.click('.hriste-napoveda button');
-await page.waitForTimeout(900);
+await klid();
 pass &= ok('T38q převzetí naklikané postavení zkopíruje (#84)',
   await page.evaluate(() => {
     const a = postaveniSetu(100, 1), b = postaveniSetu(100, 2);
@@ -2521,18 +2582,18 @@ pass &= ok('T38q převzetí naklikané postavení zkopíruje (#84)',
 
 // zápis akce z hřiště jde stejnou cestou jako odjinud
 await page.click('#live2-wrap .set-prepinac button:nth-of-type(1)');
-await page.waitForTimeout(400);
+await klid();
 rpcCalls = [];
 await page.click('.hriste .hriste-zona:not(.prazdna)');
 await page.waitForSelector('#modal-v2-akce:not(.hidden)');
 await page.click('#modal-v2-akce .v2-dlazdice[onclick*="utok_plus"]');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T38r zápis z hřiště jde stejným RPC jako ze seznamu (#84)',
   rpcCalls.length === 1 && rpcCalls[0].some(z => z.pole === 'utok_plus' && z.delta === 1));
 
 // geometrie na telefonu
 await page.setViewportSize({ width: 390, height: 844 });
-await page.waitForTimeout(300);
+await klid();
 pass &= ok('T38s hřiště se vejde na telefon bez přetečení (#84)', await page.evaluate(() => {
   const wrap = document.getElementById('live2-wrap');
   const seznam = wrap.querySelector('.v2-seznam');
@@ -2542,14 +2603,14 @@ pass &= ok('T38s hřiště se vejde na telefon bez přetečení (#84)', await pa
          zona.width >= 44 && zona.height >= 44;
 }));
 await page.setViewportSize({ width: 1100, height: 900 });
-await page.waitForTimeout(300);
+await klid();
 
 
 // ── #84 část 3: rotace z podání ────────────────────────────────────────────
 await page.click('.nav-tab:nth-child(6)');                  // Live V2
 await page.waitForSelector('#live2-wrap');
 await page.click('#live2-wrap .set-prepinac button:nth-of-type(1)');
-await page.waitForTimeout(300);
+await klid();
 
 // čistá šestka: zóna → hráčka
 await page.evaluate(async () => {
@@ -2580,7 +2641,7 @@ const zonaA = await obsazenaZona(1);
 await page.evaluate(z => v2OtevriAkce(100, postaveniSetu(100, 1).get(z), z), zonaA);
 await page.waitForSelector('#modal-v2-akce:not(.hidden)');
 await page.click('#modal-v2-akce .v2-dlazdice[onclick*="servis_plus"]');
-await page.waitForTimeout(700);
+await klid();
 const po = await kdoKde();
 pass &= ok('T39b zapsaný servis postaví podávající do zóny 1 (#84)',
   po[1] === predRotaci[zonaA]);
@@ -2600,7 +2661,7 @@ const predOpak = await kdoKde();
 await page.evaluate(() => v2OtevriAkce(100, postaveniSetu(100, 1).get(1), 1));
 await page.waitForSelector('#modal-v2-akce:not(.hidden)');
 await page.click('#modal-v2-akce .v2-dlazdice[onclick*="servis_neutral"]');
-await page.waitForTimeout(700);
+await klid();
 pass &= ok('T39e servis z jedničky postavením nehne (#84)',
   JSON.stringify(await kdoKde()) === JSON.stringify(predOpak));
 
@@ -2610,11 +2671,11 @@ await page.evaluate(z => v2OtevriAkce(100, postaveniSetu(100, 1).get(z), z), zon
 await page.waitForSelector('#modal-v2-akce:not(.hidden)');
 const postaveniPredZpet = await kdoKde();
 await page.click('#modal-v2-akce .v2-dlazdice[onclick*="servis_plus"]');
-await page.waitForTimeout(700);
+await klid();
 pass &= ok('T39f servis otočil šestku (#84)',
   JSON.stringify(await kdoKde()) !== JSON.stringify(postaveniPredZpet));
 await page.click('#btn-undo-v2');
-await page.waitForTimeout(700);
+await klid();
 pass &= ok('T39g zpět vrátí i rotaci, nejen počítadlo (#84)',
   JSON.stringify(await kdoKde()) === JSON.stringify(postaveniPredZpet));
 
@@ -2624,7 +2685,7 @@ const zonaC = await obsazenaZona(0);
 await page.evaluate(z => v2OtevriAkce(100, postaveniSetu(100, 1).get(z), z), zonaC);
 await page.waitForSelector('#modal-v2-akce:not(.hidden)');
 await page.click('#modal-v2-akce .v2-dlazdice[onclick*="utok_plus"]');
-await page.waitForTimeout(700);
+await klid();
 pass &= ok('T39h útok ani blok postavením nehýbou (#84)',
   JSON.stringify(await kdoKde()) === JSON.stringify(predUtokem));
 
@@ -2637,7 +2698,7 @@ pass &= ok('T39i u hráčky mimo jedničku je ruční srovnání (#84)',
 const ctyrka = await page.evaluate(z => postaveniSetu(100, 1).get(z), zonaD);
 rpcCalls = [];
 await page.click('#btn-v2-podava');
-await page.waitForTimeout(700);
+await klid();
 pass &= ok('T39j ruční srovnání postaví hráčku do jedničky (#84)',
   await page.evaluate(() => postaveniSetu(100, 1).get(1)) === ctyrka);
 pass &= ok('T39k a nezapíše přitom žádnou akci (#84)', rpcCalls.length === 0);
@@ -2660,7 +2721,7 @@ pass &= ok('T39m0 je koho zkusit mimo šestku (#84)', mimoHriste !== null);
 await page.evaluate(id => v2OtevriAkce(100, id), mimoHriste);
 await page.waitForSelector('#modal-v2-akce:not(.hidden)');
 await page.click('#modal-v2-akce .v2-dlazdice[onclick*="servis_plus"]');
-await page.waitForTimeout(700);
+await klid();
 pass &= ok('T39m servis hráčky mimo šestku postavením nehne (#84)',
   JSON.stringify(await kdoKde()) === JSON.stringify(predLiberem));
 
@@ -2671,7 +2732,7 @@ await page.waitForSelector('#live2-wrap');
 await page.evaluate(() => { if (v2Hriste) v2PrepniHriste(); });
 await page.waitForSelector('.skore');
 await page.click('#live2-wrap .set-prepinac button:nth-of-type(1)');
-await page.waitForTimeout(300);
+await klid();
 
 const skore = () => page.evaluate(() => ({
   nase: parseInt(document.getElementById('skore-nase').textContent),
@@ -2700,7 +2761,7 @@ await page.evaluate(() => {
 });
 await page.waitForSelector('#modal-v2-akce:not(.hidden)');
 await page.click('#modal-v2-akce .v2-dlazdice[onclick*="utok_plus"]');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T40c smeč přidá bod nám (#84)', await page.evaluate(p =>
   skoreSetu(100, 1).nase === p.nase + 1 && skoreSetu(100, 1).jejich === p.jejich, predSkore));
 
@@ -2710,7 +2771,7 @@ await page.evaluate(() => {
 });
 await page.waitForSelector('#modal-v2-akce:not(.hidden)');
 await page.click('#modal-v2-akce .v2-dlazdice[onclick*="prijem_minus"]');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T40d zkažený příjem je bod jim, i když je příjem jinak kvalita (#84)',
   await page.evaluate(p => skoreSetu(100, 1).jejich === p.jejich + 1, predSkore));
 
@@ -2722,7 +2783,7 @@ await page.evaluate(() => {
 });
 await page.waitForSelector('#modal-v2-akce:not(.hidden)');
 await page.click('#modal-v2-akce .v2-dlazdice[onclick*="prijem_plus"]');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T40e dobrý příjem skóre nemění, je to kvalita (#84)',
   await page.evaluate(p => JSON.stringify(skoreSetu(100, 1)) === JSON.stringify(p), predKvalitou));
 
@@ -2732,18 +2793,18 @@ await page.evaluate(() => {
 });
 await page.waitForSelector('#modal-v2-akce:not(.hidden)');
 await page.click('#modal-v2-akce .v2-dlazdice[onclick*="utok_neutral"]');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T40f útok, po kterém se pokračuje, skóre nemění (#84)',
   await page.evaluate(p => JSON.stringify(skoreSetu(100, 1)) === JSON.stringify(p), predKvalitou));
 
 // soupeřova strana
 const predSouperem = await page.evaluate(() => skoreSetu(100, 1));
 await page.click('#live2-wrap .v2-souper-btn.plus');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T40g chyba soupeře je bod nám (#84)',
   await page.evaluate(p => skoreSetu(100, 1).nase === p.nase + 1, predSouperem));
 await page.click('#live2-wrap .v2-souper-btn.minus');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T40h bod soupeře je bod jim (#84)',
   await page.evaluate(p => skoreSetu(100, 1).jejich === p.jejich + 1, predSouperem));
 
@@ -2814,7 +2875,7 @@ await page.evaluate(() => {
 await page.click('.nav-tab:nth-child(6)');                  // Live V2
 await page.waitForSelector('.skore');
 await page.click('#live2-wrap .set-prepinac button:nth-of-type(1)');
-await page.waitForTimeout(300);
+await klid();
 await page.evaluate(() => {
   state.postaveni = state.postaveni.filter(p => p.zapas_id !== 100);
   [10, 11, 12, 13].forEach((id, i) => state.postaveni.push(
@@ -2833,7 +2894,7 @@ await page.evaluate(() => {
 });
 await page.waitForSelector('#modal-v2-akce:not(.hidden)');
 await page.click('#modal-v2-akce .v2-dlazdice[onclick*="servis_plus"]');
-await page.waitForTimeout(700);
+await klid();
 pass &= ok('T41a rotace se uloží a nejde po řádcích (#84)',
   postaveniRpc.length === 1 && !otherWrites.some(w => w.table === 'vb_postaveni'));
 pass &= ok('T41b posílá se celé postavení, ne jen změněné zóny (#84)',
@@ -2923,7 +2984,7 @@ await page.waitForSelector('#modal-v2-akce:not(.hidden)');
 pass &= ok('T41m panel akcí nabízí nominaci libera (#84)',
   /Libero/.test(await page.textContent('#btn-v2-libero')));
 await page.click('#btn-v2-libero');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T41n nominace se uloží do sestavy zápasu (#84)',
   otherWrites.some(w => w.table === 'vb_zapas_hraci' && w.body && w.body.libero === true) &&
   await page.evaluate(id => jeLibero(100, id), kdoNaNominaci));
@@ -2937,7 +2998,7 @@ await page.waitForSelector('#modal-v2-akce:not(.hidden)');
 pass &= ok('T41p u nominované nabídne zrušení (#84)',
   /Zrušit libero/.test(await page.textContent('#btn-v2-libero')));
 await page.click('#btn-v2-libero');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T41q zrušení nominace se taky uloží (#84)',
   await page.evaluate(id => !jeLibero(100, id), kdoNaNominaci));
 
@@ -2948,7 +3009,7 @@ await page.waitForSelector('#live2-wrap');
 await page.evaluate(() => { if (!v2Hriste) v2PrepniHriste(); });
 await page.waitForSelector('.hriste-mimo');
 await page.setViewportSize({ width: 390, height: 844 });
-await page.waitForTimeout(400);
+await klid();
 
 const vyskyBloku = () => page.evaluate(() => {
   const w = document.getElementById('live2-wrap');
@@ -2998,7 +3059,7 @@ await page.evaluate(() => {
   state.zapasHraci.filter(zh => zh.zapas_id === 100).forEach(zh => { zh.libero = false; });
   renderLive2(100);
 });
-await page.waitForTimeout(200);
+await klid();
 pass &= ok('T42f bez nominace jsou oba sloty prázdné (#84)',
   (await page.$$eval('.hriste-mimo .hriste-zona.libero.prazdna', els => els.length)) === 2);
 otherWrites = [];
@@ -3007,7 +3068,7 @@ await page.waitForSelector('#modal-v2-zona:not(.hidden)');
 pass &= ok('T42g klik na prázdný slot nabídne nominaci, ne postavení do zóny (#84)',
   /libero/i.test(await page.textContent('#v2-zona-title')));
 await page.click('#v2-zona-obsah .player-card');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T42h nominace ze slotu se uloží do sestavy (#84)',
   otherWrites.some(w => w.table === 'vb_zapas_hraci' && w.body && w.body.libero === true) &&
   (await page.$$eval('.hriste-mimo .hriste-zona.libero:not(.prazdna)', els => els.length)) === 1);
@@ -3027,7 +3088,7 @@ pass &= ok('T42j dlaždice skóre otevře úpravu s pojmenovanými akcemi (#84)'
   }));
 chybyRpc = [];
 await page.click('#v2-skore-obsah .skore-uprava-radek:first-child .btn-primary');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T42k přidání bodu jde přes chybu soupeře, ne mimo statistiku (#84)',
   chybyRpc.length === 1 && chybyRpc[0].p_pole === 'pocet' && chybyRpc[0].p_delta === 1 &&
   await page.evaluate(p => skoreSetu(100, state.liveSet).nase === p.nase + 1, predUpravou));
@@ -3036,11 +3097,11 @@ pass &= ok('T42l hodnota v panelu se rovnou srovná (#84)',
     parseInt(document.getElementById('skore-uprava-pocet').textContent) ===
     souperHodnota(100, state.liveSet, 'pocet')));
 await page.click('#v2-skore-obsah .skore-uprava-radek:first-child .btn-secondary');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T42m a jde to zase ubrat (#84)',
   await page.evaluate(p => skoreSetu(100, state.liveSet).nase === p.nase, predUpravou));
 await page.click('#modal-v2-skore .modal-footer .btn-secondary');
-await page.waitForTimeout(300);
+await klid();
 pass &= ok('T42n dlaždice po zavření ukazuje srovnané skóre (#84)',
   await page.evaluate(() => {
     const s = skoreSetu(100, state.liveSet);
@@ -3071,7 +3132,7 @@ pass &= ok('T42o všechno se pořád vejde na telefon (#84)', await page.evaluat
          document.querySelector('.hriste-dlazdice.dl-skore').getBoundingClientRect().height >= 44;
 }));
 await page.setViewportSize({ width: 1100, height: 900 });
-await page.waitForTimeout(300);
+await klid();
 
 
 // ── #84 část 7: menší hřiště, víc informací o zápase ───────────────────────
@@ -3080,7 +3141,7 @@ await page.waitForSelector('#live2-wrap');
 await page.evaluate(() => { if (!v2Hriste) v2PrepniHriste(); });
 await page.waitForSelector('.hriste-info');
 await page.setViewportSize({ width: 390, height: 844 });
-await page.waitForTimeout(400);
+await klid();
 
 pass &= ok('T43a dlaždice se sety je nižší než ta se skóre (#84)',
   await page.evaluate(() => {
@@ -3151,7 +3212,7 @@ pass &= ok('T43g nic z toho stránku nepřetéká (#84)', await page.evaluate(()
          seznam.scrollWidth - seznam.clientWidth <= 0;
 }));
 await page.setViewportSize({ width: 1100, height: 900 });
-await page.waitForTimeout(300);
+await klid();
 
 
 // ── #84 část 8: informace o zápase pod hřištěm ─────────────────────────────
@@ -3166,7 +3227,7 @@ await page.evaluate(() => {
     { zapas_id: 100, set_cislo: state.liveSet, zona: i + 1, hrac_id: id }));
   renderLive2(100);
 });
-await page.waitForTimeout(300);
+await klid();
 
 // kdo podává teď a kdo po ní
 pass &= ok('T44a je vidět, kdo podává a kdo je na řadě (#84)', await page.evaluate(() => {
@@ -3197,7 +3258,7 @@ pass &= ok('T44c2 tlačítko se jmenuje Time-out, ne hantýrkou (#84)',
 otherWrites = []; oddechoveRpc = [];
 const stavPriTO = await page.evaluate(() => skoreSetu(100, state.liveSet));
 await page.click('.info-oddechovy');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T44d klepnutí vyčerpá jeden (#84)',
   await page.evaluate(() => oddechovePocet(100, state.liveSet)) === 1 &&
   (await page.$$eval('.info-oddechovy .tecka.cerpana', els => els.length)) === 1);
@@ -3208,21 +3269,21 @@ pass &= ok('T44d2 zapíše se i stav, ve kterém se bral (#84)',
 pass &= ok('T44e zapisuje se vlastní RPC, ne upsertem řádku (#84)',
   !otherWrites.some(w => w.table === 'vb_set_info' || w.table === 'vb_oddechove_casy'));
 await page.click('.info-oddechovy');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T44f druhý taky, a víc už se nenabízí samo (#84)',
   await page.evaluate(() => oddechovePocet(100, state.liveSet)) === 2);
 page.once('dialog', d => d.dismiss());
 await page.click('.info-oddechovy');
-await page.waitForTimeout(500);
+await klid();
 pass &= ok('T44g přes limit se appka zeptá a zamítnutí nic nepřidá (#84)',
   await page.evaluate(() => oddechovePocet(100, state.liveSet)) === 2);
 // pravé tlačítko vrátí poslední i se stavem
 await page.click('.info-oddechovy', { button: 'right' });
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T44g2 pravým tlačítkem se poslední time-out vrátí (#84)',
   await page.evaluate(() => oddechovePocet(100, state.liveSet)) === 1);
 await page.click('.info-oddechovy');
-await page.waitForTimeout(600);
+await klid();
 
 // střídání se počítá samo a vede se i s tím, kdo šel z place a kdo na něj
 const setNaHristi = await page.evaluate(() => state.liveSet);
@@ -3236,7 +3297,7 @@ await page.waitForSelector('#modal-v2-akce:not(.hidden)');
 await page.click('#btn-v2-stridat');
 await page.waitForSelector('#modal-v2-zona:not(.hidden)');
 await page.click('#v2-zona-obsah .player-card');
-await page.waitForTimeout(800);
+await klid();
 pass &= ok('T44h střídání se přičte samo, neklika se zvlášť (#84)',
   await page.evaluate(() => stridaniPocet(100, state.liveSet)) === predStrid + 1);
 pass &= ok('T44h2 zapíše se kdo za koho a za jakého stavu (#84, #102)',
@@ -3258,13 +3319,13 @@ pass &= ok('T44j0 je koho postavit, jinak by se měřilo prázdno (#84)',
     vyndejZeZony(100, state.liveSet, zona);
     return lavicka(100, state.liveSet).length > 0;
   }));
-await page.waitForTimeout(400);
+await klid();
 const predObsazenim = await page.evaluate(() => stridaniPocet(100, state.liveSet));
 stridaniRpc = [];
 await page.click('.hriste .hriste-zona.prazdna');
 await page.waitForSelector('#modal-v2-zona:not(.hidden)');
 await page.click('#v2-zona-obsah .player-card');
-await page.waitForTimeout(800);
+await klid();
 pass &= ok('T44j obsazení prázdné zóny se jako střídání nepočítá (#84)',
   await page.evaluate(() => stridaniPocet(100, state.liveSet)) === predObsazenim &&
   stridaniRpc.length === 0);
@@ -3288,14 +3349,14 @@ pass &= ok('T44m hráčka bez bodů se jako nejlepší neukáže (#84)', await p
 }));
 
 await page.setViewportSize({ width: 390, height: 844 });
-await page.waitForTimeout(400);
+await klid();
 pass &= ok('T44n všechno se pořád vejde na telefon (#84)', await page.evaluate(() => {
   const seznam = document.querySelector('.v2-seznam');
   return document.documentElement.scrollWidth - document.documentElement.clientWidth <= 0 &&
          seznam.scrollWidth - seznam.clientWidth <= 0;
 }));
 await page.setViewportSize({ width: 1100, height: 900 });
-await page.waitForTimeout(300);
+await klid();
 
 
 // ── #84 část 9: side-out, série a rotace z logu výměn ──────────────────────
@@ -3314,7 +3375,7 @@ await page.evaluate(() => {
     { zapas_id: 100, set_cislo: 4, zona: i + 1, hrac_id: id }));
   renderLive2(100);
 });
-await page.waitForTimeout(300);
+await klid();
 
 pass &= ok('T45a bez prvního podání se side-out nepočítá a appka o něj požádá (#84)',
   await page.evaluate(() => sideOut(100, 4)) === null &&
@@ -3322,7 +3383,7 @@ pass &= ok('T45a bez prvního podání se side-out nepočítá a appka o něj po
 
 otherWrites = [];
 await page.click('.hriste-info button:has-text("Soupeře")');
-await page.waitForTimeout(500);
+await klid();
 pass &= ok('T45b zadané první podání se uloží (#84)',
   await page.evaluate(() => setInfo(100, 4).prvni_podani) === 'oni' &&
   otherWrites.some(w => w.table === 'vb_set_info' && w.body && w.body.prvni_podani === 'oni'));
@@ -3333,9 +3394,9 @@ const zapis = (hrac, pole) => page.evaluate(([h, p]) => {
   else bump(h, 100, p, 1);
 }, [hrac, pole]);
 
-await zapis(10, 'utok_plus');    await page.waitForTimeout(250);
-await zapis(11, 'utok_plus');    await page.waitForTimeout(250);
-await zapis(12, 'utok_minus');   await page.waitForTimeout(250);
+await zapis(10, 'utok_plus');    await klid();
+await zapis(11, 'utok_plus');    await klid();
+await zapis(12, 'utok_minus');   await klid();
 
 pass &= ok('T45c side-out počítá jen výměny při soupeřově podání (#84)',
   await page.evaluate(() => {
@@ -3359,12 +3420,12 @@ pass &= ok('T45e série počítá po sobě jdoucí body (#84)',
 
 // neutrální akce výměnu neuzavírá
 const predNeutralem = await page.evaluate(() => prubehSetu(100, 4).vymeny.length);
-await zapis(10, 'utok_neutral'); await page.waitForTimeout(300);
+await zapis(10, 'utok_neutral'); await klid();
 pass &= ok('T45f neutrální akce se do výměn nepočítá (#84)',
   await page.evaluate(() => prubehSetu(100, 4).vymeny.length) === predNeutralem);
 
 // soupeřova strana do logu taky
-await zapis(null, 'souper_chyba'); await page.waitForTimeout(300);
+await zapis(null, 'souper_chyba'); await klid();
 pass &= ok('T45g chyba soupeře je výměna jako každá jiná (#84)',
   await page.evaluate(n => {
     const p = prubehSetu(100, 4);
@@ -3392,7 +3453,7 @@ pass &= ok('T45j bilance rotací sedí na výměny (#84)', await page.evaluate((
 // zpět odebere i z logu
 const predZpetem = await page.evaluate(() => prubehSetu(100, 4).vymeny.length);
 await page.click('#btn-undo-v2');
-await page.waitForTimeout(500);
+await klid();
 pass &= ok('T45k zpět odebere výměnu i z logu (#84)',
   await page.evaluate(() => prubehSetu(100, 4).vymeny.length) === predZpetem - 1);
 
@@ -3410,7 +3471,7 @@ pass &= ok('T45m slabý side-out je odlišený (#84)', await page.evaluate(() =>
 }));
 
 await page.evaluate(() => { state.liveSet = 1; renderLive2(100); });
-await page.waitForTimeout(200);
+await klid();
 
 
 // ── #84 část 10: hřiště na tabletu ─────────────────────────────────────────
@@ -3430,7 +3491,7 @@ await page.evaluate(() => {
   renderLive2(100);
 });
 await page.setViewportSize({ width: 1390, height: 1800 });
-await page.waitForTimeout(500);
+await klid();
 
 pass &= ok('T46a0 na tabletu je libero v kartě, jinak by se měřilo prázdno (#84)',
   await page.evaluate(() =>
@@ -3483,7 +3544,7 @@ pass &= ok('T46g na široké obrazovce jsou informace vedle hřiště, ne pod n�
   }));
 
 await page.setViewportSize({ width: 390, height: 844 });
-await page.waitForTimeout(400);
+await klid();
 pass &= ok('T46f na telefonu zůstalo hřiště kompaktní (#84)', await page.evaluate(() => {
   const plocha = document.querySelector('.hriste-plocha').getBoundingClientRect();
   const zona = document.querySelector('.hriste .hriste-zona').getBoundingClientRect();
@@ -3491,12 +3552,12 @@ pass &= ok('T46f na telefonu zůstalo hřiště kompaktní (#84)', await page.ev
          zona.height >= 44 && plocha.height <= 320;
 }));
 await page.setViewportSize({ width: 1100, height: 900 });
-await page.waitForTimeout(300);
+await klid();
 
 
 // ── #84 část 11: barvy hřiště a zarovnání stavu ───────────────────────────
 await page.setViewportSize({ width: 1390, height: 1800 });
-await page.waitForTimeout(400);
+await klid();
 
 // rgb(a) → {r,g,b}; oranžová má r výrazně nad g nad b, modrá naopak
 const rozbor = 'x=>{const[r,g,b,a]=getComputedStyle(x).backgroundColor.match(/[\\d.]+/g).map(Number);' +
@@ -3551,7 +3612,7 @@ pass &= ok('T47d stav a sety jsou v dlaždici na střed (#84)', await page.evalu
   })));
 
 await page.setViewportSize({ width: 390, height: 844 });
-await page.waitForTimeout(300);
+await klid();
 pass &= ok('T47e na telefonu barvy drží a nic nepřeteklo (#84)', await page.evaluate(f => {
   const barva = eval(f);
   const z = document.querySelector('.hriste .hriste-zona'), p = barva(z);
@@ -3559,13 +3620,13 @@ pass &= ok('T47e na telefonu barvy drží a nic nepřeteklo (#84)', await page.e
          document.documentElement.scrollWidth - document.documentElement.clientWidth <= 0;
 }, rozbor));
 await page.setViewportSize({ width: 1100, height: 900 });
-await page.waitForTimeout(300);
+await klid();
 
 
 // ── #84 část 12: dohraný set se nabídne přepnout ──────────────────────────
 // Z turnaje: skóre přešlo 25 a zapisovalo se dál do stejného setu.
 await page.evaluate(() => { state.liveSet = 4; renderLive2(100); });
-await page.waitForTimeout(300);
+await klid();
 
 const skoreSetu4 = () => page.evaluate(() => skoreSetu(100, state.liveSet));
 const s0 = await skoreSetu4();
@@ -3578,7 +3639,7 @@ await page.evaluate(s => {
   bumpSouper(100, 'pocet', 24 - s.nase);
   bumpSouper(100, 'body', 22 - s.jejich);
 }, s0);
-await page.waitForTimeout(600);
+await klid();
 
 pass &= ok('T48a při 24:22 se nic nenabízí, hraje se dál (#84)',
   JSON.stringify(await skoreSetu4()) === JSON.stringify({ nase: 24, jejich: 22 }) &&
@@ -3588,7 +3649,7 @@ pass &= ok('T48a při 24:22 se nic nenabízí, hraje se dál (#84)',
 let dialog = null;
 page.once('dialog', d => { dialog = d.message(); d.dismiss(); });
 await page.evaluate(() => bump(10, 100, 'utok_plus', 1));
-await page.waitForTimeout(700);
+await klid();
 
 pass &= ok('T48b po 25. bodu se appka zeptá na další set (#84)',
   !!dialog && /4\. set končí 25:22/.test(dialog) && /5\. set/.test(dialog));
@@ -3598,7 +3659,7 @@ pass &= ok('T48c zamítnutí nechá nabídku u skóre, ať jde přepnout i pozd�
 
 otherWrites = [];
 await page.click('.konec-setu button');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T48d přepnutím začne další set od nuly (#84)',
   await page.evaluate(() => state.liveSet) === 5 &&
   JSON.stringify(await skoreSetu4()) === JSON.stringify({ nase: 0, jejich: 0 }));
@@ -3611,18 +3672,18 @@ pass &= ok('T48f výsledek setu si appka do zápasu nepíše sama (#84)',
 
 // zpět pod hranici nabídku sundá a po dalším bodu se appka zeptá znovu
 await page.evaluate(() => { state.liveSet = 4; renderLive2(100); });
-await page.waitForTimeout(300);
+await klid();
 await page.evaluate(() => bump(10, 100, 'utok_plus', -1));
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T48g vzetí bodu zpět nabídku sundá (#84)',
   await page.$('.konec-setu') === null &&
   await page.evaluate(() => setRozhodnuty(100, 4)) === null);
 
 // 25:24 není rozhodnuto — musí se hrát o dva
 await page.evaluate(() => { bumpSouper(100, 'body', 2); });
-await page.waitForTimeout(500);
+await klid();
 await page.evaluate(() => bump(10, 100, 'utok_plus', 1));
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T48h při 25:24 se pořád hraje, o dva body (#84)',
   JSON.stringify(await skoreSetu4()) === JSON.stringify({ nase: 25, jejich: 24 }) &&
   await page.$('.konec-setu') === null);
@@ -3630,7 +3691,7 @@ pass &= ok('T48h při 25:24 se pořád hraje, o dva body (#84)',
 dialog = null;
 page.once('dialog', d => { dialog = d.message(); d.dismiss(); });
 await page.evaluate(() => bump(11, 100, 'utok_plus', 1));
-await page.waitForTimeout(700);
+await klid();
 pass &= ok('T48i po 26:24 se appka zeptá znovu (#84)',
   !!dialog && /26:24/.test(dialog) && !!await page.$('.konec-setu'));
 
@@ -3640,16 +3701,16 @@ await page.evaluate(() => {
   z.set1_my = 25; z.set1_oni = 20; z.set2_my = 25; z.set2_oni = 18;
   renderLive2(100);
 });
-await page.waitForTimeout(400);
+await klid();
 pass &= ok('T48j třetí vyhraný set nabídne ukončení zápasu (#84)',
   await page.evaluate(() => stavUtkani(100).my) >= 3 &&
   /Ukončit/.test(await page.textContent('.konec-setu')));
 await page.click('.konec-setu button');
-await page.waitForTimeout(500);
+await klid();
 pass &= ok('T48k a otevře rovnou výsledek zápasu (#84)',
   await page.isVisible('#modal-vysledek'));
 await page.click('#modal-vysledek .modal-footer .btn-secondary');
-await page.waitForTimeout(300);
+await klid();
 
 // dopisování k odehranému zápasu nabídku nespouští
 await page.evaluate(() => {
@@ -3659,14 +3720,14 @@ await page.evaluate(() => {
 let dialog2 = null;
 page.once('dialog', d => { dialog2 = d.message(); d.dismiss(); });
 await page.evaluate(() => bump(11, 100, 'utok_plus', 1));
-await page.waitForTimeout(700);
+await klid();
 pass &= ok('T48l u dokončeného zápasu se appka neptá (#84)', dialog2 === null);
 await page.evaluate(() => {
   const z = state.zapasy.find(x => x.id === 100);
   z.stav = 'probiha'; delete z.set1_my; delete z.set1_oni; delete z.set2_my; delete z.set2_oni;
   state.liveSet = 1; renderLive2(100);
 });
-await page.waitForTimeout(300);
+await klid();
 
 
 // ── #84 část 13: formát zápasu na 2 nebo 3 vítězné sety ───────────────────
@@ -3699,7 +3760,7 @@ const vysledkySetu = o => page.evaluate(v => {
 }, o);
 
 await format(3);
-await page.waitForTimeout(300);
+await klid();
 pass &= ok('T50a0 bez volby se hraje na tři vítězné jako doteď (#84)',
   await page.evaluate(() => {
     const z = state.zapasy.find(x => x.id === 100);
@@ -3708,7 +3769,7 @@ pass &= ok('T50a0 bez volby se hraje na tři vítězné jako doteď (#84)',
   }));
 
 await format(2);
-await page.waitForTimeout(300);
+await klid();
 pass &= ok('T50a na dva vítězné se nabízejí tři sety, ne pět (#84)',
   await page.evaluate(() => viteznychSetu(100) === 2 && setuVZapase(100) === 3) &&
   await page.$$eval('#live2-wrap .set-btn', e => e.map(x => x.textContent.trim()))
@@ -3721,7 +3782,7 @@ pass &= ok('T50b zkrácený set je ten poslední — na dva vítězné třetí (
 })());
 
 await format(3);
-await page.waitForTimeout(300);
+await klid();
 pass &= ok('T50c na tři vítězné je zkrácený až pátý set (#84)', await (async () => {
   await vysledkySetu({ set3_my: 15, set3_oni: 13, set5_my: 15, set5_oni: 13 });
   return await page.evaluate(() => setRozhodnuty(100, 3)) === null &&
@@ -3731,7 +3792,7 @@ pass &= ok('T50c na tři vítězné je zkrácený až pátý set (#84)', await (
 // konec zápasu: dva vyhrané sety stačí jen v turnajovém formátu
 await format(2);
 await vysledkySetu({ set1_my: 25, set1_oni: 20, set2_my: 25, set2_oni: 18 });
-await page.waitForTimeout(400);
+await klid();
 pass &= ok('T50d na dva vítězné končí zápas po druhém setu (#84)',
   await page.evaluate(() => konecZapasu(100)) === true &&
   /Ukončit/.test(await page.textContent('.konec-setu')));
@@ -3739,16 +3800,16 @@ pass &= ok('T50d na dva vítězné končí zápas po druhém setu (#84)',
 await format(3);
 await vysledkySetu({ set1_my: 25, set1_oni: 20, set2_my: 25, set2_oni: 18 });
 await page.evaluate(() => { state.liveSet = 2; renderLive2(100); });
-await page.waitForTimeout(400);
+await klid();
 pass &= ok('T50e na tři vítězné se po druhém setu hraje dál (#84)',
   await page.evaluate(() => konecZapasu(100)) === false &&
   /3\. set/.test(await page.textContent('.konec-setu')));
 
 // výsledek zápasu nabídne políčka jen pro sety, které se hrají
 await format(2);
-await page.waitForTimeout(300);
+await klid();
 await page.evaluate(() => editVysledek(100));
-await page.waitForTimeout(300);
+await klid();
 pass &= ok('T50f výsledek nabídne tři sety, ne pět (#84)',
   await page.$$eval('#sets-detail-form .form-row', e => e.length) === 3 &&
   await page.$('#in-set4-my') === null);
@@ -3759,7 +3820,7 @@ otherWrites = [];
 await page.fill('#in-set1-my', '25');
 await page.fill('#in-set1-oni', '21');
 await page.click('#modal-vysledek .btn-green');
-await page.waitForTimeout(500);
+await klid();
 const ulozeny = otherWrites.find(w => w.table === 'vb_zapasy' && w.method === 'PATCH');
 pass &= ok('T50g uložení sáhne jen na hrané sety (#84)',
   !!ulozeny && ulozeny.body.set1_my === 25 && !('set4_my' in ulozeny.body) &&
@@ -3767,26 +3828,26 @@ pass &= ok('T50g uložení sáhne jen na hrané sety (#84)',
 
 // formulář zápasu formát posílá i předvyplňuje
 await page.click('.nav-tab:nth-child(2)');
-await page.waitForTimeout(300);
+await klid();
 await page.evaluate(() => editZapas(100));
-await page.waitForTimeout(300);
+await klid();
 pass &= ok('T50h úprava zápasu ukáže jeho formát (#84)',
   await page.inputValue('#in-zapas-format') === '2');
 otherWrites = [];
 await page.selectOption('#in-zapas-format', '3');
 await page.click('#btn-save-zapas');
-await page.waitForTimeout(500);
+await klid();
 pass &= ok('T50i změna formátu se uloží (#84)',
   otherWrites.some(w => w.table === 'vb_zapasy' && w.method === 'PATCH' &&
     w.body.vitezne_sety === 3) &&
   await page.evaluate(() => viteznychSetu(100)) === 3);
 
 await page.click('#tab-zapasy button:has-text("Nový zápas")');
-await page.waitForTimeout(300);
+await klid();
 pass &= ok('T50j nový zápas začíná na třech vítězných (#84)',
   await page.inputValue('#in-zapas-format') === '3');
 await page.click('#modal-zapas .modal-footer .btn-secondary');
-await page.waitForTimeout(200);
+await klid();
 await page.evaluate(() => {
   const z = state.zapasy.find(x => x.id === 100);
   [1, 2, 3, 4, 5].forEach(i => { delete z[`set${i}_my`]; delete z[`set${i}_oni`]; });
@@ -3813,7 +3874,7 @@ await page.evaluate(() => {
   state.udalosti = state.udalosti.filter(u => !(u.zapas_id === 100 && (u.set_cislo || 1) === 3));
   renderLive2(100);
 });
-await page.waitForTimeout(400);
+await klid();
 
 const dlazdiceSkore = () => page.evaluate(() => [
   document.getElementById('dl-skore-nase').textContent,
@@ -3824,7 +3885,7 @@ pass &= ok('T51a0 stav je na dlaždici vidět jako dvě čísla (#84)',
 
 chybyRpc = [];
 await page.click('.dl-skore .skore-pul.plus');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T51a klepnutí na naše číslo přidá bod z chyby soupeře (#84)',
   await page.evaluate(p => skoreSetu(100, 3).nase === p.nase + 1 &&
     skoreSetu(100, 3).jejich === p.jejich, pred51) &&
@@ -3835,7 +3896,7 @@ pass &= ok('T51b a číslo na dlaždici se hned srovná (#84)',
 
 chybyRpc = [];
 await page.click('.dl-skore .skore-pul.minus');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T51c klepnutí na jejich číslo zapíše bod soupeře (#84)',
   await page.evaluate(p => skoreSetu(100, 3).jejich === p.jejich + 1, pred51) &&
   chybyRpc.length === 1 && chybyRpc[0].p_pole === 'body' && chybyRpc[0].p_delta === 1 &&
@@ -3850,7 +3911,7 @@ pass &= ok('T51d obě klepnutí jsou výměna v logu, počítá se z nich side-o
 // pravé tlačítko (na mobilu dlouhý stisk) bod ubere
 chybyRpc = [];
 await page.click('.dl-skore .skore-pul.minus', { button: 'right' });
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T51e pravým tlačítkem se bod zase ubere (#84)',
   await page.evaluate(p => skoreSetu(100, 3).jejich === p.jejich, pred51) &&
   chybyRpc.some(r => r.p_pole === 'body' && r.p_delta === -1) &&
@@ -3859,17 +3920,17 @@ pass &= ok('T51e pravým tlačítkem se bod zase ubere (#84)',
 pass &= ok('T51f překlep jde vzít i lištou zpět (#84)', await (async () => {
   const popis = await page.textContent('#btn-undo-v2');
   await page.click('#btn-undo-v2');
-  await page.waitForTimeout(600);
+  await klid();
   return /Chyba soupeře/.test(popis) &&
     await page.evaluate(p => skoreSetu(100, 3).nase === p.nase, pred51);
 })());
 
 pass &= ok('T51g „upravit" pořád otevře ruční opravu obou stran (#84)', await (async () => {
   await page.click('.dl-skore .dlazdice-uprava');
-  await page.waitForTimeout(400);
+  await klid();
   const vidno = await page.isVisible('#modal-v2-skore');
   await page.click('#modal-v2-skore .modal-footer .btn-secondary');
-  await page.waitForTimeout(300);
+  await klid();
   return vidno;
 })());
 
@@ -3879,14 +3940,14 @@ await page.evaluate(() => {
   bumpSouper(100, 'pocet', 24 - s.nase);
   bumpSouper(100, 'body', 20 - s.jejich);
 });
-await page.waitForTimeout(700);
+await klid();
 let dialog51 = null;
 // klepnutí, ne evaluate: dialog vyskočí uprostřed akce, tak si text jen
 // přečteme a zavření necháme být, když ho Playwright stihl zavřít sám
 const chytDialog = d => { dialog51 = dialog51 || d.message(); d.dismiss().catch(() => {}); };
 page.on('dialog', chytDialog);
 await page.click('.dl-skore .skore-pul.plus');
-await page.waitForTimeout(700);
+await klid();
 page.off('dialog', chytDialog);
 pass &= ok('T51h i bod ze stavu ukončí set (#84)',
   !!dialog51 && /3\. set končí 25:20/.test(dialog51) &&
@@ -3898,7 +3959,7 @@ await page.evaluate(() => {
   state.liveSet = 1;
   renderLive2(100);
 });
-await page.waitForTimeout(200);
+await klid();
 
 
 // ── #84 část 15: rotace sama od sebe ──────────────────────────────────────
@@ -3927,7 +3988,7 @@ const pripravSet5 = podani => page.evaluate(p => {
 }, podani);
 
 await pripravSet5('oni');
-await page.waitForTimeout(400);
+await klid();
 const pred52 = await sestavaZon();
 pass &= ok('T52a0 šestka stojí a podává soupeř, jinak by se měřilo prázdno (#84)',
   Object.keys(pred52).length === 5 &&
@@ -3935,7 +3996,7 @@ pass &= ok('T52a0 šestka stojí a podává soupeř, jinak by se měřilo prázd
 
 postaveniRpc = [];
 await page.evaluate(() => bump(10, 100, 'utok_plus', 1));
-await page.waitForTimeout(700);
+await klid();
 pass &= ok('T52a vyhraná výměna při soupeřově podání otočí šestku o jednu (#84)',
   await page.evaluate(p => {
     const m = postaveniSetu(100, 5);
@@ -3952,19 +4013,19 @@ pass &= ok('T52c podává ta, co přišla do jedničky (#84)', await page.evalua
 // bod při vlastním podání nerotuje
 const poPrvni = await sestavaZon();
 await page.evaluate(() => bump(11, 100, 'utok_plus', 1));
-await page.waitForTimeout(700);
+await klid();
 pass &= ok('T52d bod při vlastním podání šestkou nehýbe (#84)',
   JSON.stringify(await sestavaZon()) === JSON.stringify(poPrvni));
 
 // bod soupeře taky ne — rotují oni, ne my
 await page.evaluate(() => bump(12, 100, 'utok_minus', 1));
-await page.waitForTimeout(700);
+await klid();
 pass &= ok('T52e bod soupeře naší šestkou nehýbe (#84)',
   JSON.stringify(await sestavaZon()) === JSON.stringify(poPrvni));
 
 // a další side-out zase otočí
 await page.evaluate(() => bump(13, 100, 'utok_plus', 1));
-await page.waitForTimeout(700);
+await klid();
 pass &= ok('T52f další zisk podání otočí znovu (#84)',
   await page.evaluate(p => {
     const m = postaveniSetu(100, 5);
@@ -3973,26 +4034,26 @@ pass &= ok('T52f další zisk podání otočí znovu (#84)',
 
 // lišta zpět vrátí bod i rotaci
 await page.click('#btn-undo-v2');
-await page.waitForTimeout(700);
+await klid();
 pass &= ok('T52g zpět vrátí bod i rotaci (#84)',
   JSON.stringify(await sestavaZon()) === JSON.stringify(poPrvni));
 
 // ruční odečet taky
 await page.evaluate(() => bump(10, 100, 'utok_plus', 1));
-await page.waitForTimeout(700);
+await klid();
 const poSideOutu = await sestavaZon();
 await page.evaluate(() => bump(10, 100, 'utok_plus', -1));
-await page.waitForTimeout(700);
+await klid();
 pass &= ok('T52h ruční odečet bodu rotaci vrátí (#84)',
   JSON.stringify(await sestavaZon()) === JSON.stringify(poPrvni) &&
   JSON.stringify(poSideOutu) !== JSON.stringify(poPrvni));
 
 // bod naklepaný ze stavu rotuje stejně
 await pripravSet5('oni');
-await page.waitForTimeout(400);
+await klid();
 const predKlikem = await sestavaZon();
 await page.click('.dl-skore .skore-pul.plus');
-await page.waitForTimeout(700);
+await klid();
 pass &= ok('T52i bod ze stavu (chyba soupeře) rotuje taky (#84)',
   await page.evaluate(p => {
     const m = postaveniSetu(100, 5);
@@ -4001,10 +4062,10 @@ pass &= ok('T52i bod ze stavu (chyba soupeře) rotuje taky (#84)',
 
 // bez známého prvního podání se nehádá
 await pripravSet5(null);
-await page.waitForTimeout(400);
+await klid();
 const bezPodani = await sestavaZon();
 await page.evaluate(() => bump(10, 100, 'utok_plus', 1));
-await page.waitForTimeout(700);
+await klid();
 pass &= ok('T52j bez zadaného prvního podání se nerotuje (#84)',
   JSON.stringify(await sestavaZon()) === JSON.stringify(bezPodani));
 
@@ -4014,7 +4075,7 @@ await page.evaluate(() => {
   state.liveSet = 1;
   renderLive2(100);
 });
-await page.waitForTimeout(200);
+await klid();
 
 
 // ── #84 část 16: dlaždice za sítí a nová akce Pole ────────────────────────
@@ -4043,7 +4104,7 @@ await page.evaluate(() => {
                        nahravacka_hrac_id: 10 });
   renderLive2(100);
 });
-await page.waitForTimeout(400);
+await klid();
 
 const vNabidce = () => page.$$eval('#v2-kdo-obsah .player-name', els => els.map(e => e.textContent.trim()));
 const jmenoHracky = id => page.evaluate(i => state.hraci.find(h => h.id === i).jmeno, id);
@@ -4071,7 +4132,7 @@ pass &= ok('T53c na příjem se nabídnou jen smečařky a libera (#84)',
   proPrijem.includes(sm) && proPrijem.includes(lib) &&
   !proPrijem.includes(bl) && !proPrijem.includes(nah) && !proPrijem.includes(uni));
 await page.click('#modal-v2-kdo .modal-footer .btn-secondary');
-await page.waitForTimeout(300);
+await klid();
 
 await page.click('.hriste-akce .hriste-akce-dlazdice:nth-of-type(2)');
 await page.waitForSelector('#modal-v2-kdo:not(.hidden)');
@@ -4090,7 +4151,7 @@ pass &= ok('T53e2 u tlačítka je dosavadní počet, ať se nemusí nikam odboč
   (await page.textContent(`${radekSm} .v2-dlazdice.plus .v2-dlazdice-cnt`)).trim()
     === String(predUtokem53));
 await page.click(`${radekSm} .v2-dlazdice.plus`);
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T53f zápis z dlaždice jde do statistiky té hráčky (#84)',
   await page.evaluate(() => getStatVal(100, 11, 'utok_plus', 2)) === predUtokem53 + 1);
 pass &= ok('T53f2 druhé okno se po cestě neotevře (#107)',
@@ -4113,7 +4174,7 @@ pass &= ok('T53g2 pole má jedinou variantu, tak je u hráčky jedno tlačítko 
   await page.$$eval(`#v2-kdo-obsah .player-card:has-text("${nah}") .v2-dlazdice`,
     els => els.length) === 1);
 await page.click(`#v2-kdo-obsah .player-card:has-text("${nah}") .v2-dlazdice`);
-await page.waitForTimeout(700);
+await klid();
 pass &= ok('T53h pole se zapíše rovnou, bez ptaní na variantu (#84)',
   await page.isVisible('#modal-v2-akce') === false &&
   await page.evaluate(() => getStatVal(100, 10, 'pole_neutral', 2)) === predPolem.pole + 1);
@@ -4129,19 +4190,19 @@ pass &= ok('T53k a nepočítá se ani mezi výborné, ani mezi chyby (#84)',
 
 // zpět ho vezme jako každou jinou akci
 await page.click('#btn-undo-v2');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T53l zpět vezme pole taky (#84)',
   await page.evaluate(() => getStatVal(100, 10, 'pole_neutral', 2)) === predPolem.pole);
 
 // a je vidět ve statistikách
 await page.click('.nav-tab:nth-child(7)');
-await page.waitForTimeout(500);
+await klid();
 pass &= ok('T53m ve statistikách má Pole svůj sloupec (#84)',
   /Pole/.test(await page.textContent('.stats-table thead')));
 await page.click('.nav-tab:nth-child(6)');
-await page.waitForTimeout(300);
+await klid();
 await page.evaluate(() => { state.liveSet = 1; renderLive2(100); });
-await page.waitForTimeout(200);
+await klid();
 
 
 // ── #84 část 17: posty ze šestky, ne z profilu hráčky ─────────────────────
@@ -4156,7 +4217,7 @@ await page.evaluate(() => {
     { zapas_id: 100, set_cislo: 3, zona: i + 1, hrac_id: id }));
   renderLive2(100);
 });
-await page.waitForTimeout(400);
+await klid();
 
 pass &= ok('T54a bez označené nahrávačky se posty nehádají (#84)',
   await page.evaluate(() => [1, 2, 3, 4, 5, 6].every(z => postVZone(100, 3, z) === null)));
@@ -4166,7 +4227,7 @@ pass &= ok('T54b a nabídne se celá šestka i s vysvětlením proč (#84)',
   await page.$$eval('#v2-kdo-obsah .player-card', els => els.length) === 5 &&
   /Posty se odvozují od nahrávačky/.test(await page.textContent('#v2-kdo-obsah')));
 await page.click('#modal-v2-kdo .modal-footer .btn-secondary');
-await page.waitForTimeout(300);
+await klid();
 
 // označení jde z panelu hráčky
 otherWrites = [];
@@ -4175,7 +4236,7 @@ await page.waitForSelector('#modal-v2-akce:not(.hidden)');
 pass &= ok('T54c panel hráčky na hřišti nabízí označit nahrávačku (#84)',
   await page.isVisible('#btn-v2-nahravacka'));
 await page.click('#btn-v2-nahravacka');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T54d označení se uloží k setu, ne k hráčce (#84)',
   await page.evaluate(() => setInfo(100, 3).nahravacka_hrac_id) === 12 &&
   otherWrites.some(w => w.table === 'vb_set_info' && w.body &&
@@ -4198,7 +4259,7 @@ const postyPredRotaci = await page.evaluate(() =>
   [10, 11, 12, 13, 14].map(id => postHracky(100, 3, id)));
 await page.evaluate(() => rotujOKroku(100, 3, 1));
 await page.evaluate(() => renderLive2(100));
-await page.waitForTimeout(400);
+await klid();
 pass &= ok('T54g po rotaci si každá drží svůj post (#84)',
   JSON.stringify(await page.evaluate(() =>
     [10, 11, 12, 13, 14].map(id => postHracky(100, 3, id)))) ===
@@ -4209,7 +4270,7 @@ await page.evaluate(() => {
   state.hraci.forEach(h => { if ([10, 11, 12, 13, 14].includes(h.id)) h.pozice = 'nahrávač'; });
   renderLive2(100);
 });
-await page.waitForTimeout(300);
+await klid();
 await page.click('.hriste-akce .hriste-akce-dlazdice:nth-of-type(2)');
 await page.waitForSelector('#modal-v2-kdo:not(.hidden)');
 pass &= ok('T54h profilová pozice do nabídky nemluví (#84)', await (async () => {
@@ -4220,7 +4281,7 @@ pass &= ok('T54h profilová pozice do nabídky nemluví (#84)', await (async () 
   return jmena.length === 4 && !jmena.includes(nahravacka);
 })());
 await page.click('#modal-v2-kdo .modal-footer .btn-secondary');
-await page.waitForTimeout(300);
+await klid();
 
 // druhé klepnutí označení zruší
 await page.evaluate(() => v2OtevriAkce(100, setInfo(100, 3).nahravacka_hrac_id,
@@ -4229,7 +4290,7 @@ await page.waitForSelector('#modal-v2-akce:not(.hidden)');
 pass &= ok('T54i u označené hráčky tlačítko nabízí zrušení (#84)',
   /Není nahrávačka/.test(await page.textContent('#btn-v2-nahravacka')));
 await page.click('#btn-v2-nahravacka');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T54j a zrušit to jde stejnou cestou (#84)',
   await page.evaluate(() => setInfo(100, 3).nahravacka_hrac_id) === null &&
   await page.evaluate(() => postHracky(100, 3, 10)) === null);
@@ -4250,7 +4311,7 @@ await page.evaluate(() => {
   state.liveSet = 1;
   renderLive2(100);
 });
-await page.waitForTimeout(200);
+await klid();
 
 
 // ── #84 část 18: time-out nesmí shodit nastavení setu ─────────────────────
@@ -4270,14 +4331,14 @@ await page.evaluate(() => {
   renderLive2(100);
 });
 FIX.vb_oddechove_casy.length = 0;
-await page.waitForTimeout(400);
+await klid();
 
 pass &= ok('T55a0 set má zadané první podání i nahrávačku (#84)',
   await page.evaluate(() => setInfo(100, 4).prvni_podani) === 'oni' &&
   await page.evaluate(() => nahravackaSetu(100, 4)) === 11);
 
 await page.click('.info-oddechovy');
-await page.waitForTimeout(700);
+await klid();
 pass &= ok('T55a po time-outu zůstává zadané první podání (#84)',
   await page.evaluate(() => setInfo(100, 4).prvni_podani) === 'oni' &&
   !/Podání na začátku/.test(await page.textContent('.hriste-info')));
@@ -4287,16 +4348,16 @@ pass &= ok('T55b a nahrávačka taky, posty se nerozpadnou (#84)',
 
 // totéž při střídání, jde stejnou cestou
 await page.evaluate(() => bumpSetInfo(100, 'stridani', 1));
-await page.waitForTimeout(700);
+await klid();
 pass &= ok('T55c stejně tak po střídání (#84)',
   await page.evaluate(() => setInfo(100, 4).prvni_podani) === 'oni' &&
   await page.evaluate(() => nahravackaSetu(100, 4)) === 11);
 
 // stav se drží u každého time-outu zvlášť
 await page.evaluate(() => { bumpSouper(100, 'pocet', 7); bumpSouper(100, 'body', 5); });
-await page.waitForTimeout(700);
+await klid();
 await page.click('.info-oddechovy');
-await page.waitForTimeout(700);
+await klid();
 pass &= ok('T55d druhý time-out si nese svůj stav, ne ten první (#84)',
   JSON.stringify(await page.evaluate(() =>
     oddechoveSetu(100, 4).map(o => `${o.skore_my}:${o.skore_oni}`))) ===
@@ -4312,7 +4373,7 @@ await page.evaluate(() => {
   state.setInfo[i] = { ...state.setInfo[i], oddechove_casy: 2 };
   renderLive2(100);
 });
-await page.waitForTimeout(400);
+await klid();
 pass &= ok('T55f starý zápis bez stavů se o time-outy nepřipraví (#84)',
   await page.evaluate(() => oddechovePocet(100, 4)) === 2 &&
   (await page.$$eval('.tecka.cerpana', els => els.length)) === 2);
@@ -4324,7 +4385,7 @@ await page.evaluate(() => {
   state.liveSet = 1;
   renderLive2(100);
 });
-await page.waitForTimeout(200);
+await klid();
 
 
 // ── #84 část 19: neutrální akce rotaci nespouští ──────────────────────────
@@ -4345,25 +4406,25 @@ await page.evaluate(() => {
                        prvni_podani: 'oni' });
   renderLive2(100);
 });
-await page.waitForTimeout(400);
+await klid();
 
 const sestava56 = () => page.evaluate(() =>
   Object.fromEntries([...postaveniSetu(100, 5).entries()]));
 
 // side-out: podával soupeř, my bod → rotace patří
 await page.evaluate(() => bump(10, 100, 'utok_plus', 1));
-await page.waitForTimeout(700);
+await klid();
 const poSideOutu56 = await sestava56();
 
 // a teď kvalitní příjem — s tím se hýbat nesmí
 await page.evaluate(() => bump(11, 100, 'prijem_plus', 1));
-await page.waitForTimeout(700);
+await klid();
 pass &= ok('T56a kvalitní příjem šestkou nehýbe (#84)',
   JSON.stringify(await sestava56()) === JSON.stringify(poSideOutu56));
 
 // ani opakovaně
 await page.evaluate(() => { bump(12, 100, 'prijem_plus', 1); bump(13, 100, 'prijem_neutral', 1); });
-await page.waitForTimeout(800);
+await klid();
 pass &= ok('T56b ani po několika za sebou (#84)',
   JSON.stringify(await sestava56()) === JSON.stringify(poSideOutu56));
 
@@ -4372,10 +4433,10 @@ pass &= ok('T56c a do výměn se nezapočítaly (#84)',
 
 // útok zakončený bodem při soupeřově podání rotovat musí dál
 await page.evaluate(() => bumpSouper(100, 'body', 1));      // ztratíme podání
-await page.waitForTimeout(700);
+await klid();
 const predDalsim = await sestava56();
 await page.evaluate(() => bump(11, 100, 'utok_plus', 1));   // znovu side-out
-await page.waitForTimeout(700);
+await klid();
 pass &= ok('T56d zisk podání pořád rotuje (#84)',
   await page.evaluate(p => {
     const m = postaveniSetu(100, 5);
@@ -4385,7 +4446,7 @@ pass &= ok('T56d zisk podání pořád rotuje (#84)',
 // neutrální akce nesmí rotaci ani vracet
 const predUbranim = await sestava56();
 await page.evaluate(() => bump(11, 100, 'prijem_plus', -1));
-await page.waitForTimeout(700);
+await klid();
 pass &= ok('T56e ubrání neutrální akce rotaci nevrací (#84)',
   JSON.stringify(await sestava56()) === JSON.stringify(predUbranim));
 
@@ -4396,7 +4457,7 @@ await page.evaluate(() => {
   state.liveSet = 1;
   renderLive2(100);
 });
-await page.waitForTimeout(200);
+await klid();
 
 
 // ── #84 část 20: průběh stavu podle side-outu ─────────────────────────────
@@ -4416,18 +4477,18 @@ await page.evaluate(() => {
                        prvni_podani: 'oni' });
   renderLive2(100);
 });
-await page.waitForTimeout(400);
+await klid();
 
 pass &= ok('T57a0 prázdný set žádný pruh neukazuje (#84)',
   await page.$('.prubeh-pas') === null);
 
 // soupeř podává: náš bod (break) → náš bod z vlastního podání → jejich break
 await page.evaluate(() => bump(10, 100, 'utok_plus', 1));
-await page.waitForTimeout(500);
+await klid();
 await page.evaluate(() => bump(11, 100, 'utok_plus', 1));
-await page.waitForTimeout(500);
+await klid();
 await page.evaluate(() => bump(12, 100, 'utok_minus', 1));
-await page.waitForTimeout(600);
+await klid();
 
 pass &= ok('T57a průběh drží stav po každé výměně (#84)',
   JSON.stringify(await page.evaluate(() =>
@@ -4449,7 +4510,7 @@ pass &= ok('T57e vedle je rozpad našich bodů na side-out a vlastní podání (
 
 // další výměna průběh prodlouží a čísla sedí na side-out
 await page.evaluate(() => bumpSouper(100, 'pocet', 1));
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T57f chyba soupeře je ve stavu taky (#84)',
   await page.evaluate(() => prubehStavu(100, 5).length) === 4 &&
   await page.evaluate(() => prubehStavu(100, 5).at(-1).my) === 3);
@@ -4463,7 +4524,7 @@ await page.evaluate(() => {
   state.setInfo[i] = { ...state.setInfo[i], prvni_podani: null };
   renderLive2(100);
 });
-await page.waitForTimeout(400);
+await klid();
 pass &= ok('T57h bez prvního podání se první výměna za break nevydává (#84)',
   await page.evaluate(() => prubehStavu(100, 5)[0].break) === false &&
   await page.evaluate(() => prubehStavu(100, 5).map(k => `${k.my}:${k.oni}`).join('|')) ===
@@ -4476,7 +4537,7 @@ await page.evaluate(() => {
   state.liveSet = 1;
   renderLive2(100);
 });
-await page.waitForTimeout(200);
+await klid();
 
 
 // ── #84 část 21: průběh rozbalený po výměnách ─────────────────────────────
@@ -4496,14 +4557,14 @@ await page.evaluate(() => {
                        prvni_podani: 'oni' });
   renderLive2(100);
 });
-await page.waitForTimeout(400);
+await klid();
 
 await page.evaluate(() => bump(10, 100, 'utok_plus', 1));     // náš break
-await page.waitForTimeout(500);
+await klid();
 await page.evaluate(() => bump(11, 100, 'servis_plus', 1));   // eso z vlastního podání
-await page.waitForTimeout(500);
+await klid();
 await page.evaluate(() => bumpSouper(100, 'body', 1));        // bod soupeře
-await page.waitForTimeout(600);
+await klid();
 
 const jmeno10 = await page.evaluate(() => state.hraci.find(h => h.id === 10).jmeno);
 await page.click('.prubeh-pas');
@@ -4539,7 +4600,7 @@ pass &= ok('T58f2 rozchod logu a počítadel se ohlásí, ne zamlčí (#84)',
     return (k.my !== s.nase || k.oni !== s.jejich) === hlasi;
   }));
 await page.click('#modal-v2-prubeh .modal-footer .btn-secondary');
-await page.waitForTimeout(300);
+await klid();
 
 // ── #107 část A: time-outy a střídání soupeře ─────────────────────────────
 // Druhá strana sítě byla v datech prázdná, i když se tam taky střídá a bere
@@ -4551,7 +4612,7 @@ const nasichStrid = await page.evaluate(() => stridaniPocet(100, 5));
 oddechoveRpc = [];
 stridaniRpc = [];
 await (await preruseni(0)).click();
-await page.waitForTimeout(700);
+await klid();
 pass &= ok('T59a time-out soupeře se zapíše na jeho stranu i se stavem (#107)',
   oddechoveRpc.length === 1 && oddechoveRpc[0].p_strana === 'oni' &&
   oddechoveRpc[0].p_my === stavPrerus.nase && oddechoveRpc[0].p_oni === stavPrerus.jejich);
@@ -4564,7 +4625,7 @@ await page.waitForSelector('#modal-v2-souper-stridani:not(.hidden)');
 await page.fill('#v2-souper-dovnitr', '12');
 await page.fill('#v2-souper-ven', '4');
 await page.click('#modal-v2-souper-stridani .btn-primary');
-await page.waitForTimeout(700);
+await klid();
 pass &= ok('T59c střídání soupeře se vede čísly, ne cizími jmény (#107)',
   stridaniRpc.length === 1 && stridaniRpc[0].p_strana === 'oni' &&
   stridaniRpc[0].p_cislo_dovnitr === 12 && stridaniRpc[0].p_cislo_ven === 4 &&
@@ -4575,7 +4636,7 @@ pass &= ok('T59d do našeho limitu osmi střídání se nepočítá (#107)',
 
 // náš time-out k tomu, ať je v průběhu vidět obojí vedle sebe
 await page.click('.hriste-info .info-oddechovy');
-await page.waitForTimeout(700);
+await klid();
 
 await page.click('.prubeh-pas');
 await page.waitForSelector('#modal-v2-prubeh:not(.hidden)');
@@ -4604,20 +4665,20 @@ pass &= ok('T59g přerušení sedí za výměnou, po které padlo (#107)',
       r.skore === `${stav.nase}:${stav.jejich}`);
   }, stavPrerus));
 await page.click('#modal-v2-prubeh .modal-footer .btn-secondary');
-await page.waitForTimeout(300);
+await klid();
 
 // zpět bere poslední ze své strany: náš klik nesmí sebrat soupeřovo
 await (await preruseni(0)).click({ button: 'right' });
-await page.waitForTimeout(700);
+await klid();
 pass &= ok('T59h zpět u soupeře vrátí jeho time-out a našeho se nedotkne (#107)',
   await page.evaluate(() => oddechovePocet(100, 5, 'oni')) === 0 &&
   await page.evaluate(() => oddechovePocet(100, 5)) === nasichTO + 1);
 await (await preruseni(1)).click({ button: 'right' });
-await page.waitForTimeout(700);
+await klid();
 pass &= ok('T59i a stejně tak jeho střídání (#107)',
   await page.evaluate(() => stridaniPocet(100, 5, 'oni')) === 0);
 await page.click('.hriste-info .info-oddechovy', { button: 'right' });
-await page.waitForTimeout(700);
+await klid();
 
 // prázdný set nemá co rozbalovat — pás tam vůbec není
 await page.evaluate(() => {
@@ -4632,7 +4693,7 @@ await page.evaluate(() => {
   });
   renderLive2(100);
 });
-await page.waitForTimeout(400);
+await klid();
 pass &= ok('T58g prázdný set pás ani nenabídne (#84)',
   await page.$('.prubeh-pas') === null);
 
@@ -4670,7 +4731,7 @@ await page.evaluate(() => {
   state.liveSet = set;
   renderLive2(100);
 });
-await page.waitForTimeout(400);
+await klid();
 
 const DLAZDICE_SESTAVA = '.hriste-info .info-preruseni[onclick*="v2SouperSestava"]';
 pass &= ok('T60c bez zadané šestky panel jen nabídne ji zadat (#107)',
@@ -4702,7 +4763,7 @@ await page.evaluate(() => {
   Object.entries(ted).forEach(([z, c]) => { document.getElementById(`v2-sestava-z${z}`).value = c; });
 });
 await page.click('#modal-v2-souper-sestava .btn-primary');
-await page.waitForTimeout(600);
+await klid();
 // zadává se aktuální postavení, ukládá se zahajovací: po jedné jejich rotaci
 // je ta ze zóny 1 v šestce, takže se celé pole pootočí zpátky
 pass &= ok('T60f ukládá se zahajovací šestka, i když se zadává to aktuální (#107)',
@@ -4725,7 +4786,7 @@ await page.evaluate(() => {
   state.udalosti.push({ id: 90002, zapas_id: 100, set_cislo: 4, hrac_id: 10, pole: 'utok_plus' });
   renderLive2(100);
 });
-await page.waitForTimeout(300);
+await klid();
 pass &= ok('T60i náš break jejich šestkou nehýbe a míč u nich zmizí (#107)',
   await page.evaluate(sel => {
     const b = document.querySelector(sel);
@@ -4741,12 +4802,12 @@ await page.evaluate(() => {
   document.getElementById('v2-sestava-z2').value = document.getElementById('v2-sestava-z1').value;
 });
 await page.click('#modal-v2-souper-sestava .btn-primary');
-await page.waitForTimeout(400);
+await klid();
 pass &= ok('T60j dvě stejná čísla na hřišti se nepustí (#107)',
   await page.isVisible('#modal-v2-souper-sestava') &&
   !otherWrites.some(w => w.table === 'vb_set_info'));
 await page.click('#modal-v2-souper-sestava .modal-footer .btn-secondary');
-await page.waitForTimeout(300);
+await klid();
 
 // převzetí z předchozího setu: čísla soupeře se mezi sety skoro nemění
 await page.evaluate(() => {
@@ -4768,7 +4829,7 @@ pass &= ok('T60l převzetí čísla naplní (#107)',
 // vymazání: zadání se dá vzít zpět a druhá strana sítě zmizí
 otherWrites = [];
 await page.click('#modal-v2-souper-sestava .modal-footer button[onclick*="v2SestavaVymazat"]');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T60m šestka se dá vymazat (#107)',
   await page.evaluate(() => setInfo(100, 4).souper_sestava) === null &&
   otherWrites.some(w => w.table === 'vb_set_info' && w.body && w.body.souper_sestava === null) &&
@@ -4780,7 +4841,7 @@ await page.evaluate(() => {
   r.prvni_podani = null;
   renderLive2(100);
 });
-await page.waitForTimeout(300);
+await klid();
 await page.click(DLAZDICE_SESTAVA);
 await page.waitForSelector('#modal-v2-souper-sestava:not(.hidden)');
 pass &= ok('T60n bez prvního podání se rotace nehádá a modal to přizná (#107)',
@@ -4790,7 +4851,7 @@ await page.evaluate(() => {
   [8, 2, 5, 11, 6, 4].forEach((c, i) => { document.getElementById(`v2-sestava-z${i + 1}`).value = c; });
 });
 await page.click('#modal-v2-souper-sestava .btn-primary');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T60o bez rotace se uloží přesně to, co se naklikalo (#107)',
   JSON.stringify(await page.evaluate(() => setInfo(100, 4).souper_sestava)) ===
     JSON.stringify([8, 2, 5, 11, 6, 4]) &&
@@ -4806,7 +4867,7 @@ await page.evaluate(() => {
   state.liveSet = 1;
   renderLive2(100);
 });
-await page.waitForTimeout(300)
+await klid()
 
 
 // ── #107: přerušení jde vrátit dlouhým stiskem i opravit z průběhu ─────────
@@ -4827,21 +4888,21 @@ await page.evaluate(() => {
   state.liveSet = set;
   renderLive2(100);
 });
-await page.waitForTimeout(400);
+await klid();
 
 await page.click('.hriste-info .info-oddechovy');
-await page.waitForTimeout(500);
+await klid();
 pass &= ok('T61a klepnutí na dlaždici vezme time-out (#107)',
   await page.evaluate(() => oddechoveSetu(100, 4).length) === 1);
 pass &= ok('T61a2 a rovnou řekne, jak ho vzít zpět (#107)',
   /dlouhým stiskem/.test(await page.textContent('#toast')));
 await longPress('.hriste-info .info-oddechovy');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T61b dlouhý stisk ho vrátí a klepnutí po něm nic nepřidá (#107)',
   await page.evaluate(() => oddechoveSetu(100, 4).length) === 0);
 // po dlouhém stisku musí další klepnutí zase normálně zapsat
 await page.click('.hriste-info .info-oddechovy');
-await page.waitForTimeout(500);
+await klid();
 pass &= ok('T61c příznak dlouhého stisku nezůstane viset (#107)',
   await page.evaluate(() => oddechoveSetu(100, 4).length) === 1);
 
@@ -4851,7 +4912,7 @@ await page.evaluate(async () => {
   await v2Oddechovy(STRANY.ONI);
   await zapisStridani(100, 4, null, null, STRANY.ONI, 4, 12);
 });
-await page.waitForTimeout(600);
+await klid();
 
 await page.click('.hriste-info .prubeh-pas');
 await page.waitForSelector('#modal-v2-prubeh:not(.hidden)');
@@ -4867,7 +4928,7 @@ await page.waitForSelector('#modal-v2-preruseni:not(.hidden)');
 pass &= ok('T61e otevřený time-out řekne, o který jde (#107)',
   /Time-out/.test(await page.textContent('#v2-prerus-title')));
 await page.click('#v2-prerus-smazat');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T61f smaže se ten otevřený, ne poslední (#107)',
   await page.evaluate(() => oddechoveSetu(100, 4).length) === 1 &&
   await page.evaluate(id => oddechoveSetu(100, 4).every(o => o.id !== id), prvniTimeout) &&
@@ -4884,7 +4945,7 @@ pass &= ok('T61m time-out nabídne opravit stav i stranu (#107)',
 await page.fill('#v2-prerus-my', '9');
 await page.fill('#v2-prerus-oni', '6');
 await page.click('#v2-prerus-ulozit');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T61n opraví se stav a pošle se jen to, co se změnilo (#107)',
   await page.evaluate(id => {
     const o = state.oddechove.find(x => x.id === id);
@@ -4899,7 +4960,7 @@ await page.evaluate(id => v2OtevriPreruseni('timeout', id), naseTO);
 await page.waitForSelector('#modal-v2-preruseni:not(.hidden)');
 await page.selectOption('#v2-prerus-strana', 'oni');
 await page.click('#v2-prerus-ulozit');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T61o přepsání strany ho přesune soupeři i v počítadle (#107)',
   await page.evaluate(() => oddechovePocet(100, 4)) === nasichPred - 1 &&
   await page.evaluate(() => oddechovePocet(100, 4, STRANY.ONI)) === jejichPred + 1);
@@ -4908,7 +4969,7 @@ otherWrites = [];
 await page.evaluate(id => v2OtevriPreruseni('timeout', id), naseTO);
 await page.waitForSelector('#modal-v2-preruseni:not(.hidden)');
 await page.click('#v2-prerus-ulozit');
-await page.waitForTimeout(400);
+await klid();
 pass &= ok('T61p uložení beze změny nic neposílá (#107)',
   !otherWrites.some(w => w.table === 'vb_oddechove_casy'));
 
@@ -4923,7 +4984,7 @@ pass &= ok('T61g soupeřovo střídání nabídne opravu čísel (#107)',
 await page.fill('#v2-prerus-dovnitr', '7');
 await page.fill('#v2-prerus-ven', '9');
 await page.click('#v2-prerus-ulozit');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T61h oprava změní jen čísla, stav zůstane (#107)',
   await page.evaluate(id => {
     const r = state.stridani.find(x => x.id === id);
@@ -4934,21 +4995,21 @@ pass &= ok('T61h oprava změní jen čísla, stav zůstane (#107)',
 
 // naše střídání: vrácení zpět smaže zápis a postaví hráčku do její zóny
 await page.evaluate(() => { postavDoZony(100, 4, 2, 14); zapisStridani(100, 4, 11, 14); });
-await page.waitForTimeout(600);
+await klid();
 const idNase = await page.evaluate(() => stridaniSetu(100, 4).at(-1).id);
 await page.evaluate(id => v2OtevriPreruseni('stridani', id), idNase);
 await page.waitForSelector('#modal-v2-preruseni:not(.hidden)');
 pass &= ok('T61i naše střídání nabídne vrátit hráčku na hřiště (#107)',
   await page.$('#v2-prerus-vratit') !== null);
 await page.click('#v2-prerus-vratit');
-await page.waitForTimeout(700);
+await klid();
 pass &= ok('T61j vrácení smaže zápis a šestka je zpátky (#107)',
   await page.evaluate(() => postaveniSetu(100, 4).get(2)) === 11 &&
   await page.evaluate(() => stridaniSetu(100, 4).length) === 0);
 
 // když ta, co šla na hřiště, už nestojí, není co vracet — jen smazat
 await page.evaluate(() => zapisStridani(100, 4, 11, 999));
-await page.waitForTimeout(500);
+await klid();
 const idSirota = await page.evaluate(() => stridaniSetu(100, 4).at(-1).id);
 await page.evaluate(id => v2OtevriPreruseni('stridani', id), idSirota);
 await page.waitForSelector('#modal-v2-preruseni:not(.hidden)');
@@ -4956,11 +5017,11 @@ pass &= ok('T61k bez hráčky na hřišti se šestka vracet nenabízí (#107)',
   await page.$('#v2-prerus-vratit') === null &&
   /nedá/.test(await page.textContent('#v2-prerus-obsah')));
 await page.click('#v2-prerus-smazat');
-await page.waitForTimeout(600);
+await klid();
 pass &= ok('T61l i tak se dá smazat (#107)',
   await page.evaluate(() => stridaniSetu(100, 4).length) === 0);
 await page.click('#modal-v2-prubeh .modal-footer .btn-secondary');
-await page.waitForTimeout(300);
+await klid();
 
 await page.evaluate(() => {
   const set = 4;
@@ -4973,7 +5034,7 @@ await page.evaluate(() => {
   state.liveSet = 1;
   renderLive2(100);
 });
-await page.waitForTimeout(300);
+await klid();
 
 await page.evaluate(() => {
   state.postaveni = state.postaveni.filter(p => !(p.zapas_id === 100 && (p.set_cislo || 1) === 5));
@@ -4981,7 +5042,7 @@ await page.evaluate(() => {
   state.liveSet = 1;
   renderLive2(100);
 });
-await page.waitForTimeout(200);
+await klid();
 
 await b.close();
 console.log(pass ? '\nVŠE PROŠLO' : '\nNĚCO SELHALO');
