@@ -3134,12 +3134,15 @@ const STATS_SLOUPCE={
   zapasy:{hodnota:r=>r.zapasy,vychozi:'desc'},
   sp:{hodnota:r=>r.sp,vychozi:'desc'},
   sm:{hodnota:r=>r.sm,vychozi:'desc'},
+  servis_pok:{hodnota:r=>pokusy(r.sp,r.sm,r.sn),vychozi:'desc'},
   servis_pct:{hodnota:r=>pctCislo(r.sp,r.sm,r.sn),vychozi:'desc'},
   pp:{hodnota:r=>r.pp,vychozi:'desc'},
   pm:{hodnota:r=>r.pm,vychozi:'desc'},
+  prijem_pok:{hodnota:r=>pokusy(r.pp,r.pm,r.pn),vychozi:'desc'},
   prijem_pct:{hodnota:r=>pctCislo(r.pp,r.pm,r.pn),vychozi:'desc'},
   up:{hodnota:r=>r.up,vychozi:'desc'},
   um:{hodnota:r=>r.um,vychozi:'desc'},
+  utok_pok:{hodnota:r=>pokusy(r.up,r.um,r.un),vychozi:'desc'},
   utok_pct:{hodnota:r=>pctCislo(r.up,r.um,r.un),vychozi:'desc'},
   bp:{hodnota:r=>r.bp,vychozi:'desc'},
   cm:{hodnota:r=>r.cm,vychozi:'desc'},
@@ -3233,6 +3236,12 @@ function spocitejStatistiky(prepis=null){
           selTym,selSoutez,selZapas,selHrac,selSet};
 }
 
+/* Kolik pokusů za tím procentem stojí. Samotné procento klame: 100 % ze dvou
+   podání není totéž co 60 % z dvaceti, a ze dvou čísel vedle sebe (esa,
+   chyby) se počet pokusů dopočítat nedá — neutrální podání v tabulce nebyla
+   vidět vůbec (#116). */
+function pokusy(plus,minus,neutral){return plus+minus+neutral;}
+
 // podíl výborných ze všech pokusů; null = nebyl žádný pokus
 function pctCislo(plus,minus,neutral){
   const t=plus+minus+neutral;
@@ -3252,8 +3261,10 @@ function sZnamenkem(v){
 }
 
 /* ─── EXPORT CSV ─── */
-const CSV_HLAVICKA=['Poř.','Hráčka','Číslo','Záp.','Servis Es','Servis chyby','Servis % es',
-  'Příjem výb.','Příjem chyby','Příjem % výb.','Útok výb.','Útok chyby','Útok % výb.',
+const CSV_HLAVICKA=['Poř.','Hráčka','Číslo','Záp.',
+  'Servis Es','Servis chyby','Servis pokusy','Servis % es',
+  'Příjem výb.','Příjem chyby','Příjem pokusy','Příjem % výb.',
+  'Útok výb.','Útok chyby','Útok pokusy','Útok % výb.',
   'Bloky','Pole','Chyby','Celkem'];
 
 function csvBunka(v){
@@ -3265,15 +3276,15 @@ function csvRadek(pole){return pole.map(csvBunka).join(';');}
 function statsCsv(d){
   const radky=[csvRadek(CSV_HLAVICKA)];
   d.rows.forEach((r,i)=>radky.push(csvRadek([
-    i+1,r.h.jmeno,r.h.cislo??'',r.zapasy,r.sp,r.sm,
-    pctCislo(r.sp,r.sm,r.sn),
-    r.pp,r.pm,pctCislo(r.pp,r.pm,r.pn),
-    r.up,r.um,pctCislo(r.up,r.um,r.un),
+    i+1,r.h.jmeno,r.h.cislo??'',r.zapasy,
+    r.sp,r.sm,pokusy(r.sp,r.sm,r.sn),pctCislo(r.sp,r.sm,r.sn),
+    r.pp,r.pm,pokusy(r.pp,r.pm,r.pn),pctCislo(r.pp,r.pm,r.pn),
+    r.up,r.um,pokusy(r.up,r.um,r.un),pctCislo(r.up,r.um,r.un),
     r.bp,r.po,r.cm,r.total])));
-  radky.push(csvRadek(['','Σ Celkem','',d.tot.zapasy,d.tot.sp,d.tot.sm,
-    pctCislo(d.tot.sp,d.tot.sm,d.tot.sn),
-    d.tot.pp,d.tot.pm,pctCislo(d.tot.pp,d.tot.pm,d.tot.pn),
-    d.tot.up,d.tot.um,pctCislo(d.tot.up,d.tot.um,d.tot.un),
+  radky.push(csvRadek(['','Σ Celkem','',d.tot.zapasy,
+    d.tot.sp,d.tot.sm,pokusy(d.tot.sp,d.tot.sm,d.tot.sn),pctCislo(d.tot.sp,d.tot.sm,d.tot.sn),
+    d.tot.pp,d.tot.pm,pokusy(d.tot.pp,d.tot.pm,d.tot.pn),pctCislo(d.tot.pp,d.tot.pm,d.tot.pn),
+    d.tot.up,d.tot.um,pokusy(d.tot.up,d.tot.um,d.tot.un),pctCislo(d.tot.up,d.tot.um,d.tot.un),
     d.tot.bp,d.tot.po,d.tot.cm,d.tot.total]));
   return radky.join('\r\n');                 // CRLF kvůli Excelu
 }
@@ -3378,18 +3389,18 @@ function renderStatistiky(){
         <th rowspan="2">#</th>
         ${th('jmeno','Hráčka','rowspan="2"')}
         ${th('zapasy','Záp.','rowspan="2"')}
-        <th colspan="3">🎯 Servis</th>
-        <th colspan="3">🤲 Příjem</th>
-        <th colspan="3">💥 Útok</th>
+        <th colspan="4">🎯 Servis</th>
+        <th colspan="4">🤲 Příjem</th>
+        <th colspan="4">💥 Útok</th>
         ${th('bp','🛡️ Blok','rowspan="2"')}
         ${th('po','🖐️ Pole','rowspan="2"')}
         ${th('cm','❌ Chyba','rowspan="2"')}
         ${th('total','Celkem','rowspan="2"')}
       </tr>
       <tr>
-        ${th('sp','Es')}${th('sm','Chyby')}${th('servis_pct','%')}
-        ${th('pp','Výb.')}${th('pm','Chyby')}${th('prijem_pct','%')}
-        ${th('up','Výb.')}${th('um','Chyby')}${th('utok_pct','%')}
+        ${th('sp','Es')}${th('sm','Chyby')}${th('servis_pok','Pok.')}${th('servis_pct','%')}
+        ${th('pp','Výb.')}${th('pm','Chyby')}${th('prijem_pok','Pok.')}${th('prijem_pct','%')}
+        ${th('up','Výb.')}${th('um','Chyby')}${th('utok_pok','Pok.')}${th('utok_pct','%')}
       </tr>
     </thead>
     <tbody>
@@ -3397,9 +3408,9 @@ function renderStatistiky(){
         <td style="color:var(--muted);font-weight:700">${i+1}</td>
         <td><a href="#" onclick="event.preventDefault();otevriProfil(${row.h.id})" style="color:var(--text);text-decoration:underline;text-decoration-color:var(--border);text-underline-offset:3px"><strong>${esc(row.h.jmeno)}</strong></a>${row.h.cislo?` <span style="color:var(--muted);font-size:11px">#${row.h.cislo}</span>`:''}</td>
         <td style="${muted}">${row.zapasy}</td>
-        <td style="${g}">${row.sp}</td><td style="${r}">${row.sm}</td><td style="${b}">${pct(row.sp,row.sm,row.sn)}</td>
-        <td style="${g}">${row.pp}</td><td style="${r}">${row.pm}</td><td style="${b}">${pct(row.pp,row.pm,row.pn)}</td>
-        <td style="${g}">${row.up}</td><td style="${r}">${row.um}</td><td style="${b}">${pct(row.up,row.um,row.un)}</td>
+        <td style="${g}">${row.sp}</td><td style="${r}">${row.sm}</td><td style="${muted}">${pokusy(row.sp,row.sm,row.sn)}</td><td style="${b}">${pct(row.sp,row.sm,row.sn)}</td>
+        <td style="${g}">${row.pp}</td><td style="${r}">${row.pm}</td><td style="${muted}">${pokusy(row.pp,row.pm,row.pn)}</td><td style="${b}">${pct(row.pp,row.pm,row.pn)}</td>
+        <td style="${g}">${row.up}</td><td style="${r}">${row.um}</td><td style="${muted}">${pokusy(row.up,row.um,row.un)}</td><td style="${b}">${pct(row.up,row.um,row.un)}</td>
         <td style="${g}">${row.bp}</td>
         <td style="${b}">${row.po}</td>
         <td style="${r}">${row.cm}</td>
@@ -3410,9 +3421,9 @@ function renderStatistiky(){
       <tr style="background:var(--surface2);border-top:2px solid var(--border)">
         <td colspan="2" style="padding:10px 12px;font-family:'Oswald',sans-serif;font-size:13px;font-weight:700;color:var(--text);letter-spacing:.3px">Σ Celkem</td>
         <td style="${muted}">${tot.zapasy}</td>
-        <td style="${g}">${tot.sp}</td><td style="${r}">${tot.sm}</td><td style="${b}">${pct(tot.sp,tot.sm,tot.sn)}</td>
-        <td style="${g}">${tot.pp}</td><td style="${r}">${tot.pm}</td><td style="${b}">${pct(tot.pp,tot.pm,tot.pn)}</td>
-        <td style="${g}">${tot.up}</td><td style="${r}">${tot.um}</td><td style="${b}">${pct(tot.up,tot.um,tot.un)}</td>
+        <td style="${g}">${tot.sp}</td><td style="${r}">${tot.sm}</td><td style="${muted}">${pokusy(tot.sp,tot.sm,tot.sn)}</td><td style="${b}">${pct(tot.sp,tot.sm,tot.sn)}</td>
+        <td style="${g}">${tot.pp}</td><td style="${r}">${tot.pm}</td><td style="${muted}">${pokusy(tot.pp,tot.pm,tot.pn)}</td><td style="${b}">${pct(tot.pp,tot.pm,tot.pn)}</td>
+        <td style="${g}">${tot.up}</td><td style="${r}">${tot.um}</td><td style="${muted}">${pokusy(tot.up,tot.um,tot.un)}</td><td style="${b}">${pct(tot.up,tot.um,tot.un)}</td>
         <td style="${g}">${tot.bp}</td>
         <td style="${b}">${tot.po}</td>
         <td style="${r}">${tot.cm}</td>
