@@ -5317,6 +5317,89 @@ pass &= ok('T64g chyba v poli ubírá z celkem, zvednutý volný míč ne (#124)
 await page.click('.nav-tab:nth-child(6)');                  // zpět na Live V2
 await klid();
 
+
+// ── #126: souhrn a vyhodnocení zápasu ──────────────────────────────────────
+// Statistiky po hráčkách říkají, kdo co udělal; tohle má říct, jak zápas
+// dopadl a proč.
+await page.click('.nav-tab:nth-child(2)');                  // Zápasy
+await klid();
+pass &= ok('T65a u odehraného i rozehraného zápasu je tlačítko vyhodnocení (#126)',
+  await page.evaluate(() => {
+    const html = document.getElementById('zapasy-list').innerHTML;
+    const planovany = state.zapasy.find(z => z.stav === STAV.PLANOVANY &&
+      z.sezona_id === currentSeasonId());
+    return html.includes('otevriVyhodnoceni(100)') &&
+      (!planovany || !html.includes(`otevriVyhodnoceni(${planovany.id})`));
+  }));
+
+pass &= ok('T65b vyhodnocení skládá sety, celek i hráčky z toho, co je zapsané (#126)',
+  await page.evaluate(() => {
+    const d = vyhodnoceniZapasu(100);
+    const soucet = d.sety.reduce((n, s) => n + s.skore.nase, 0);
+    const hracka = d.hracky[0];
+    return d.sety.length > 0 && d.celek.skore.nase === soucet &&
+      !!hracka && hracka.bilance === hracka.body - hracka.chyby &&
+      d.hracky.every((r, i, a) => i === 0 || a[i - 1].bilance >= r.bilance);
+  }));
+
+pass &= ok('T65c postřeh se neukáže, dokud na něj není vzorek (#126)',
+  await page.evaluate(() => {
+    const maly = postrehyZeZapasu({
+      celek: { skore: { nase: 3, jejich: 2 }, chybyNase: 1, sideOut: { pct: 100, uhrano: 1, celkem: 1 },
+        servis: { p: 1, m: 0, n: 0 }, prijem: { p: 0, m: 0, n: 0 },
+        utok: { p: 1, m: 0, n: 0, f: 0 }, pole: { p: 1, m: 0, f: 0 },
+        obrana: { pct: 100, nase: 1, celkem: 1 }, volny: null },
+      sety: [], hracky: [] });
+    return maly.length === 0;      // tři body a jedna výměna nic neříkají
+  }));
+
+pass &= ok('T65d postřehy jsou konstatování a nesou čísla, na kterých stojí (#126)',
+  await page.evaluate(() => {
+    const p = postrehyZeZapasu({
+      celek: { skore: { nase: 50, jejich: 45 }, chybyNase: 31,
+        sideOut: { pct: 44, uhrano: 20, celkem: 45 },
+        servis: { p: 2, m: 9, n: 20 }, prijem: { p: 20, m: 8, n: 12 },
+        utok: { p: 25, m: 12, n: 18, f: 4 }, pole: { p: 14, m: 9, f: 5 },
+        obrana: { pct: 40, nase: 8, celkem: 20 },
+        volny: { pct: 50, nase: 5, celkem: 10 }, breaky: 10 },
+      sety: [], hracky: [] });
+    const text = p.map(x => x.text).join(' ');
+    return p.length >= 4 &&
+      p.every(x => ['dobre', 'spatne', 'fakt'].includes(x.typ)) &&
+      /69 %/.test(text) &&                 // 31 ze 45 bodů soupeře z našich chyb
+      /Side-out 44 %/.test(text) &&
+      p.some(x => x.typ === 'spatne') &&
+      !/měli byste|zlepšit|doporuč/i.test(text);   // konstatování, ne rady
+  }));
+
+await page.evaluate(() => otevriVyhodnoceni(100));
+await page.waitForSelector('#modal-vyhodnoceni:not(.hidden)');
+pass &= ok('T65e okno ukáže kostky, sety i hráčky (#126)',
+  await page.evaluate(() => {
+    const obsah = document.getElementById('vyhodnoceni-obsah');
+    const kostky = obsah.querySelectorAll('.profil-kostka').length;
+    const tabulky = obsah.querySelectorAll('.profil-tabulka').length;
+    return kostky >= 6 && tabulky === 2 && /Po setech/.test(obsah.textContent) &&
+      /Hráčky/.test(obsah.textContent);
+  }));
+pass &= ok('T65f jména hráček se neberou jako HTML (#35, #126)',
+  await page.evaluate(() => !document.querySelector('#vyhodnoceni-obsah b')) &&
+  !await page.evaluate(() => window.__xss_tym === 1));
+await page.click('#modal-vyhodnoceni .modal-footer .btn-secondary');
+await klid();
+
+// zápas bez jediné akce nemá co vyhodnocovat a musí to říct, ne spadnout
+pass &= ok('T65g prázdný zápas okno nerozbije (#126)',
+  await page.evaluate(() => {
+    const prazdny = state.zapasy.find(z => !state.statistiky.some(s => s.zapas_id === z.id));
+    if (!prazdny) return true;
+    const d = vyhodnoceniZapasu(prazdny.id);
+    return !!d && d.sety.length === 0 && d.hracky.length === 0 && d.postrehy.length === 0;
+  }));
+
+await page.click('.nav-tab:nth-child(6)');                  // zpět na Live V2
+await klid();
+
 await page.evaluate(() => {
   state.postaveni = state.postaveni.filter(p => !(p.zapas_id === 100 && (p.set_cislo || 1) === 5));
   state.setInfo = state.setInfo.filter(x => !(x.zapas_id === 100 && (x.set_cislo || 1) === 5));

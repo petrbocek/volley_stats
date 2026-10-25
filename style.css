@@ -870,3 +870,16 @@ button.prubeh-radek:active{filter:brightness(1.2)}
 /* Spadlý balon u počtu vybraných — menší a červeně, ať je vidět poměr,
    ale nepřebije hlavní číslo (#124). */
 .profil-chyba{color:var(--red);font-size:11px}
+
+/* ─── VYHODNOCENÍ ZÁPASU (#126) ───
+   Postřeh je konstatování, ne rada — barva říká jen, jestli to bylo dobře
+   nebo špatně, a proužek vlevo drží odstavce od sebe. */
+.zapas-nadpis{font-family:'Oswald',sans-serif;font-size:14px;font-weight:700;
+  letter-spacing:.3px;margin:18px 0 8px;color:var(--accent2)}
+.zapas-postrehy{display:flex;flex-direction:column;gap:6px;margin-top:12px}
+.zapas-postreh{font-size:13px;line-height:1.5;padding:7px 10px;border-radius:8px;
+  background:var(--surface2);border-left:3px solid var(--border)}
+.zapas-postreh.dobre{border-left-color:var(--green)}
+.zapas-postreh.spatne{border-left-color:var(--red)}
+.zapas-plus{color:var(--green)}
+.zapas-minus{color:var(--red)}

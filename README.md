@@ -108,6 +108,17 @@ Zapisovat může víc lidí najednou; posílají se přírůstky, ne celé řád
 se zápisy nepřebíjejí. Čísla z druhého zařízení se dorovnají zhruba do deseti
 sekund.
 
+## Vyhodnocení zápasu
+
+Tlačítko **📊** u zápasu otevře souhrn: kostky s klíčovými čísly, tabulku
+po setech (skóre, side-out, breaky, útok, příjem, obrana, chyby), hráčky
+podle bilance a pár vět, co z čísel plyne.
+
+Postřehy jsou schválně jen **konstatování, ne rady** — appka vidí čísla,
+ne zápas. Každý má práh a minimální vzorek, takže se neukáže věta
+postavená na třech výměnách. „Soupeř uhrál 45 bodů, z toho 31 z našich
+chyb (69 %)" je fakt; co s tím, ví trenér líp než appka.
+
 ## Týmy
 
 Tým patří sezóně, ve které vznikl, a v jiné se nenabízí. Členství hráček je
