@@ -5441,6 +5441,42 @@ pass &= ok('T65e okno ukáže kostky, sety i hráčky (#126)',
 pass &= ok('T65f jména hráček se neberou jako HTML (#35, #126)',
   await page.evaluate(() => !document.querySelector('#vyhodnoceni-obsah b')) &&
   !await page.evaluate(() => window.__xss_tym === 1));
+// psaný rozbor: text od člověka vedle spočítaných postřehů (#129)
+otherWrites = [];
+await page.evaluate(() => otevriRozbor(100));
+await page.waitForSelector('#modal-rozbor:not(.hidden)');
+await page.fill('#rozbor-text', 'Vyhrálo to podání.\n\nDruhý set jsme ztratili na příjmu <b>a</b> chybách.');
+await page.fill('#rozbor-kdo', 'Claude');
+await page.click('#modal-rozbor .btn-primary');
+await klid();
+pass &= ok('T65m rozbor se uloží k zápasu i s podpisem (#129)',
+  await page.evaluate(() => {
+    const z = state.zapasy.find(x => x.id === 100);
+    return /Vyhrálo to podání/.test(z.rozbor) && z.rozbor_kdo === 'Claude' && !!z.rozbor_kdy;
+  }) &&
+  otherWrites.some(w => w.table === 'vb_zapasy' && w.method === 'PATCH' &&
+    w.body && typeof w.body.rozbor === 'string' && w.body.rozbor_kdo === 'Claude'));
+pass &= ok('T65n v okně je rozbor zvlášť od postřehů, s podpisem a bez HTML (#35, #129)',
+  await page.evaluate(() => {
+    const obsah = document.getElementById('vyhodnoceni-obsah');
+    const rozbor = obsah.querySelector('.zapas-rozbor');
+    return !!rozbor && rozbor.querySelectorAll('p').length === 2 &&
+      !rozbor.querySelector('b') && /<b>a<\/b>/.test(rozbor.textContent) &&
+      /Claude/.test(obsah.querySelector('.zapas-podpis').textContent) &&
+      !!obsah.querySelector('.zapas-postrehy');
+  }));
+await page.evaluate(() => otevriRozbor(100));
+await page.waitForSelector('#modal-rozbor:not(.hidden)');
+await page.fill('#rozbor-text', '');
+await page.click('#modal-rozbor .btn-primary');
+await klid();
+pass &= ok('T65o prázdný text rozbor smaže i s podpisem (#129)',
+  await page.evaluate(() => {
+    const z = state.zapasy.find(x => x.id === 100);
+    return z.rozbor === null && z.rozbor_kdo === null &&
+      !document.querySelector('#vyhodnoceni-obsah .zapas-rozbor');
+  }));
+
 await page.click('#modal-vyhodnoceni .modal-footer .btn-secondary');
 await klid();
 

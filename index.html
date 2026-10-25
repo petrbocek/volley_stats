@@ -307,6 +307,26 @@
   </div>
 </div>
 
+<!-- Psaný rozbor k zápasu (#129) -->
+<div class="modal-overlay hidden" id="modal-rozbor">
+  <div class="modal" style="max-width:640px">
+    <div class="modal-title">Rozbor zápasu</div>
+    <input type="hidden" id="rozbor-zapas" />
+    <div class="info-proc">Co čísla neřeknou: souvislosti, srovnání s jiným zápasem,
+      čemu přisoudit výsledek. Ukáže se u zápasu s podpisem, odděleně od spočítaných postřehů.</div>
+    <textarea id="rozbor-text" class="form-input" rows="12"
+      style="margin-top:10px;font-family:inherit;line-height:1.6"
+      placeholder="Prázdný text rozbor smaže."></textarea>
+    <label class="form-label" style="margin-top:10px">Podpis
+      <input type="text" id="rozbor-kdo" class="form-input" maxlength="60" placeholder="kdo to psal" />
+    </label>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('modal-rozbor')">Zrušit</button>
+      <button class="btn btn-primary" onclick="ulozRozbor()">Uložit</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay hidden" id="modal-profil">
   <div class="modal" style="max-width:640px">
     <div class="modal-title" id="profil-title">Profil hráčky</div>
