@@ -883,3 +883,7 @@ button.prubeh-radek:active{filter:brightness(1.2)}
 .zapas-postreh.spatne{border-left-color:var(--red)}
 .zapas-plus{color:var(--green)}
 .zapas-minus{color:var(--red)}
+/* „Čemu nevěřit" — co appka ví o svých vlastních číslech, že nesedí (#128). */
+.zapas-vyhrady{display:flex;flex-direction:column;gap:6px}
+.zapas-vyhrada{font-size:12px;line-height:1.5;color:var(--muted);padding:6px 10px;
+  border-radius:8px;background:rgba(255,193,7,.08);border-left:3px solid rgba(255,193,7,.45)}
