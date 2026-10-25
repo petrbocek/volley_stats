@@ -588,7 +588,7 @@ function renderLiveTable(zapasId){
   // header
   let thead=`<tr><th class="live-col-hrac"></th>`;
   ACTIONS.forEach(a=>{
-    const variants=a.varianty?VARIANTS.filter(v=>a.varianty.includes(v.suf)):VARIANTS;
+    const variants=variantyAkce(a);
     thead+=`<th colspan="${variants.length}" class="col-action" style="border-left:3px solid ${a.color};color:${a.color}">${a.icon} ${a.label}</th>`;
   });
   thead+=`</tr>`;
@@ -601,7 +601,7 @@ function renderLiveTable(zapasId){
       <span class="live-player-num">${h.cislo?'#'+h.cislo:''}</span>
     </td>`;
     ACTIONS.forEach(a=>{
-      const variants=a.varianty?VARIANTS.filter(v=>a.varianty.includes(v.suf)):VARIANTS;
+      const variants=variantyAkce(a);
       variants.forEach((v,vi)=>{
         const field=`${a.key}_${v.suf}`;
         const val=getStatVal(zapasId,h.id,field,set);
@@ -614,7 +614,7 @@ function renderLiveTable(zapasId){
 
   /* Řádek „Přidat hráčku" je nad soupiskou, ne pod ní: jak hráčky přibývaly,
      tlačítko klesalo pod viditelnou část a muselo se k němu scrollovat (#107). */
-  const totalCols=1+ACTIONS.reduce((s,a)=>s+(a.varianty?a.varianty.length:VARIANTS.length),0);
+  const totalCols=1+ACTIONS.reduce((s,a)=>s+(variantyAkce(a).length),0);
   const addRow=`<tr><td colspan="${totalCols}" style="padding:0;height:44px">
     <button onclick="openHracPicker(${zapasId})" style="width:100%;height:100%;background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;gap:6px;transition:color .15s" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--muted)'">
       <span style="font-size:20px;font-weight:700">+</span> Přidat hráčku
@@ -624,7 +624,7 @@ function renderLiveTable(zapasId){
   const prepinac=`<div class="set-prepinac">
     <span class="set-label" title="Formát zápasu">Set${viteznychSetu(zapasId)===2?' <span class="set-format">na 2</span>':''}</span>
     ${Array.from({length:setuVZapase(zapasId)},(_,i)=>i+1).map(n=>{
-      const zapsano=hraci.some(h=>ACTIONS.some(a=>VARIANTS.some(v=>getStatVal(zapasId,h.id,`${a.key}_${v.suf}`,n))));
+      const zapsano=hraci.some(h=>ACTIONS.some(a=>variantyAkce(a).some(v=>getStatVal(zapasId,h.id,`${a.key}_${v.suf}`,n))));
       return `<button class="set-btn${n===set?' aktivni':''}${zapsano?' zapsany':''}" onclick="prepniSet(${n})">${n}</button>`;
     }).join('')}
   </div>`;
@@ -637,7 +637,7 @@ function renderLiveTable(zapasId){
       <button class="live-tym-prepinac" onclick="prepniSouhrn()" title="Přepnout mezi zapisovaným setem a celým zápasem">${souhrnCelyZapas?'zápas':set+'. set'} ⇄</button>
     </td>
     ${ACTIONS.map(a=>{
-      const variants=a.varianty?VARIANTS.filter(v=>a.varianty.includes(v.suf)):VARIANTS;
+      const variants=variantyAkce(a);
       return variants.map((v,vi)=>{
         const field=`${a.key}_${v.suf}`;
         const border=vi===0?`border-left:3px solid ${a.color};`:'';
@@ -1255,7 +1255,7 @@ function v2OtevriDlazdici(zapasId,key){
   const a=ACTIONS.find(x=>x.key===key);if(!a)return;
   const set=state.liveSet;
   const hraci=hraciProAkci(zapasId,key);
-  const varianty=a.varianty?VARIANTS.filter(v=>a.varianty.includes(v.suf)):VARIANTS;
+  const varianty=variantyAkce(a);
   document.getElementById('v2-kdo-zapas').value=zapasId;
   document.getElementById('v2-kdo-akce').value=key;
   document.getElementById('v2-kdo-title').textContent=`${a.icon} ${a.label} — ${set}. set`;
@@ -1712,7 +1712,7 @@ function tymSouhrnHtml(zapasId){
   return `<div class="v2-tym">
     <button class="v2-tym-prepinac" onclick="prepniSouhrn()" title="Přepnout mezi zapisovaným setem a celým zápasem">Tým · ${souhrnCelyZapas?'zápas':set+'. set'} ⇄</button>
     <div class="v2-tym-cisla">${ACTIONS.map(a=>{
-      const variants=a.varianty?VARIANTS.filter(v=>a.varianty.includes(v.suf)):VARIANTS;
+      const variants=variantyAkce(a);
       return `<span class="v2-chip" style="border-color:${a.color}">
         <span class="v2-chip-nazev" style="color:${a.color}">${a.icon}</span>
         ${variants.map(v=>`<span class="v2-chip-num ${v.cls}"><span class="v2-chip-sym">${v.sym}</span><span id="v2tym-${a.key}_${v.suf}">${tymSoucet(zapasId,hraci,`${a.key}_${v.suf}`)}</span></span>`).join('')}
@@ -2494,7 +2494,7 @@ function renderLive2(zapasId){
   const prepinac=`<div class="set-prepinac">
     <span class="set-label" title="Formát zápasu">Set${viteznychSetu(zapasId)===2?' <span class="set-format">na 2</span>':''}</span>
     ${Array.from({length:setuVZapase(zapasId)},(_,i)=>i+1).map(n=>{
-      const zapsano=hraci.some(h=>ACTIONS.some(a=>VARIANTS.some(v=>getStatVal(zapasId,h.id,`${a.key}_${v.suf}`,n))));
+      const zapsano=hraci.some(h=>ACTIONS.some(a=>variantyAkce(a).some(v=>getStatVal(zapasId,h.id,`${a.key}_${v.suf}`,n))));
       return `<button class="set-btn${n===set?' aktivni':''}${zapsano?' zapsany':''}" onclick="prepniSet(${n})">${n}</button>`;
     }).join('')}
   </div>`;
@@ -2562,7 +2562,7 @@ function prekresliV2Cisla(){
     if(p)p.textContent='+'+v2Soucet(zapasId,h.id,V2_VYBORNE);
     if(m)m.textContent='−'+v2Soucet(zapasId,h.id,V2_CHYBY);
   });
-  ACTIONS.forEach(a=>VARIANTS.forEach(v=>{
+  ACTIONS.forEach(a=>variantyAkce(a).forEach(v=>{
     const el=document.getElementById(`v2tym-${a.key}_${v.suf}`);
     if(el)el.textContent=tymSoucet(zapasId,hraci,`${a.key}_${v.suf}`);
   }));
@@ -2591,7 +2591,7 @@ function v2OtevriAkce(zapasId,hracId,zona=0){
   document.getElementById('v2-akce-title').textContent=
     `${h.jmeno}${h.cislo?' · #'+h.cislo:''} — ${state.liveSet}. set`;
   document.getElementById('v2-akce-obsah').innerHTML=ACTIONS.map(a=>{
-    const variants=a.varianty?VARIANTS.filter(v=>a.varianty.includes(v.suf)):VARIANTS;
+    const variants=variantyAkce(a);
     return `<div class="v2-akce-radek">
       <div class="v2-akce-nazev" style="color:${a.color}">${a.icon} ${a.label}</div>
       <div class="v2-akce-dlazdice">${variants.map(v=>
@@ -2784,7 +2784,7 @@ function pocetAkci(zapasId,hracId){
     const zdroj=dirtyStats[statKey(zapasId,hracId,set)]
       ||state.statistiky.find(s=>s.zapas_id===zapasId&&s.hrac_id===hracId&&(s.set_cislo||1)===set);
     if(!zdroj)continue;
-    ACTIONS.forEach(a=>VARIANTS.forEach(v=>{n+=zdroj[`${a.key}_${v.suf}`]||0;}));
+    ACTIONS.forEach(a=>variantyAkce(a).forEach(v=>{n+=zdroj[`${a.key}_${v.suf}`]||0;}));
   }
   return n;
 }
@@ -2841,7 +2841,7 @@ function ensureStat(zapasId,hracId,set){
 
 function makeEmptyStat(zapasId,hracId,set){
   const o={zapas_id:zapasId,hrac_id:hracId,set_cislo:set};
-  ACTIONS.forEach(a=>VARIANTS.forEach(v=>{o[`${a.key}_${v.suf}`]=0;}));
+  ACTIONS.forEach(a=>variantyAkce(a).forEach(v=>{o[`${a.key}_${v.suf}`]=0;}));
   return o;
 }
 
@@ -2995,7 +2995,7 @@ function prekresliSouhrn(){
   if(!zapasId||!document.querySelector('.live-tym-row'))return;
   const lineup=state.zapasHraci.filter(zh=>zh.zapas_id===zapasId).map(zh=>zh.hrac_id);
   const hraci=state.hraci.filter(h=>lineup.includes(h.id));
-  ACTIONS.forEach(a=>VARIANTS.forEach(v=>{
+  ACTIONS.forEach(a=>variantyAkce(a).forEach(v=>{
     const field=`${a.key}_${v.suf}`;
     const el=document.getElementById(`tym-${field}`);
     if(el)el.textContent=tymSoucet(zapasId,hraci,field);
@@ -3162,6 +3162,7 @@ const STATS_SLOUPCE={
   um:{hodnota:r=>r.um,vychozi:'desc'},
   utok_pok:{hodnota:r=>pokusy(r.up,r.um,r.un),vychozi:'desc'},
   utok_pct:{hodnota:r=>pctCislo(r.up,r.um,r.un),vychozi:'desc'},
+  uf:{hodnota:r=>r.uf,vychozi:'desc'},
   bp:{hodnota:r=>r.bp,vychozi:'desc'},
   cm:{hodnota:r=>r.cm,vychozi:'desc'},
   po:{hodnota:r=>r.po,vychozi:'desc'},
@@ -3232,12 +3233,14 @@ function spocitejStatistiky(prepis=null){
     const sp=sum('servis_plus'),sm=sum('servis_minus'),sn=sum('servis_neutral');
     const pp=sum('prijem_plus'),pm=sum('prijem_minus'),pn=sum('prijem_neutral');
     const up=sum('utok_plus'),um=sum('utok_minus'),un=sum('utok_neutral');
+    // volný míč je stranou: do pokusů ani do procenta útoku nepatří (#122)
+    const uf=sum('utok_free');
     const bp=sum('blok_plus');
     const cm=sum('chyba_minus');
     const po=sum('pole_neutral');          // vybrané balony, pokus bez vlivu na skóre
     // jeden řádek na set, takže počet zápasů je počet různých zapas_id
     const zapasy=new Set(stats.map(s=>s.zapas_id)).size;
-    return {h,sp,sm,sn,pp,pm,pn,up,um,un,bp,cm,po,total:sp+up+bp-sm-pm-um-cm,zapasy};
+    return {h,sp,sm,sn,pp,pm,pn,up,um,un,uf,bp,cm,po,total:sp+up+bp-sm-pm-um-cm,zapasy};
   }).filter(r=>r.zapasy>0);
   // Řadí se tady, ne až při vykreslení, ať CSV export stáhne tabulku v tom
   // pořadí, v jakém ji má člověk před očima.
@@ -3246,9 +3249,9 @@ function spocitejStatistiky(prepis=null){
   const tot=rows.reduce((acc,r)=>({
     zapasy:acc.zapasy+r.zapasy,sp:acc.sp+r.sp,sm:acc.sm+r.sm,sn:acc.sn+r.sn,
     pp:acc.pp+r.pp,pm:acc.pm+r.pm,pn:acc.pn+r.pn,
-    up:acc.up+r.up,um:acc.um+r.um,un:acc.un+r.un,
+    up:acc.up+r.up,um:acc.um+r.um,un:acc.un+r.un,uf:acc.uf+r.uf,
     bp:acc.bp+r.bp,cm:acc.cm+r.cm,po:acc.po+r.po,total:acc.total+r.total
-  }),{zapasy:0,sp:0,sm:0,sn:0,pp:0,pm:0,pn:0,up:0,um:0,un:0,bp:0,cm:0,po:0,total:0});
+  }),{zapasy:0,sp:0,sm:0,sn:0,pp:0,pm:0,pn:0,up:0,um:0,un:0,uf:0,bp:0,cm:0,po:0,total:0});
 
   return {stav:'ok',sid,vsechnyHraci,zapasyPoCsoutezi,seasonSouteze,rows,tot,zapasIds,
           selTym,selSoutez,selZapas,selHrac,selSet};
@@ -3282,7 +3285,7 @@ function sZnamenkem(v){
 const CSV_HLAVICKA=['Poř.','Hráčka','Číslo','Záp.',
   'Servis Es','Servis chyby','Servis pokusy','Servis % es',
   'Příjem výb.','Příjem chyby','Příjem pokusy','Příjem % výb.',
-  'Útok výb.','Útok chyby','Útok pokusy','Útok % výb.',
+  'Útok výb.','Útok chyby','Útok pokusy','Útok % výb.','Volné míče',
   'Bloky','Pole','Chyby','Celkem'];
 
 function csvBunka(v){
@@ -3297,12 +3300,12 @@ function statsCsv(d){
     i+1,r.h.jmeno,r.h.cislo??'',r.zapasy,
     r.sp,r.sm,pokusy(r.sp,r.sm,r.sn),pctCislo(r.sp,r.sm,r.sn),
     r.pp,r.pm,pokusy(r.pp,r.pm,r.pn),pctCislo(r.pp,r.pm,r.pn),
-    r.up,r.um,pokusy(r.up,r.um,r.un),pctCislo(r.up,r.um,r.un),
+    r.up,r.um,pokusy(r.up,r.um,r.un),pctCislo(r.up,r.um,r.un),r.uf,
     r.bp,r.po,r.cm,r.total])));
   radky.push(csvRadek(['','Σ Celkem','',d.tot.zapasy,
     d.tot.sp,d.tot.sm,pokusy(d.tot.sp,d.tot.sm,d.tot.sn),pctCislo(d.tot.sp,d.tot.sm,d.tot.sn),
     d.tot.pp,d.tot.pm,pokusy(d.tot.pp,d.tot.pm,d.tot.pn),pctCislo(d.tot.pp,d.tot.pm,d.tot.pn),
-    d.tot.up,d.tot.um,pokusy(d.tot.up,d.tot.um,d.tot.un),pctCislo(d.tot.up,d.tot.um,d.tot.un),
+    d.tot.up,d.tot.um,pokusy(d.tot.up,d.tot.um,d.tot.un),pctCislo(d.tot.up,d.tot.um,d.tot.un),d.tot.uf,
     d.tot.bp,d.tot.po,d.tot.cm,d.tot.total]));
   return radky.join('\r\n');                 // CRLF kvůli Excelu
 }
@@ -3416,6 +3419,7 @@ function renderStatistiky(){
         <th colspan="4" data-skupina="utok" title="Útok">💥</th>
         ${th('bp','🛡️','rowspan="2"','Bloky')}
         ${th('po','🖐️','rowspan="2"','Pole — vybrané balony')}
+        ${th('uf','~','rowspan="2"','Volné míče přehozené soupeři — není to útočný pokus')}
         ${th('cm','❌','rowspan="2"','Chyby')}
         ${th('total','±','rowspan="2"','Celkem — body mínus chyby')}
       </tr>
@@ -3435,6 +3439,7 @@ function renderStatistiky(){
         <td style="${g}">${row.up}</td><td style="${r}">${row.um}</td><td style="${muted}">${pokusy(row.up,row.um,row.un)}</td><td style="${b}">${pct(row.up,row.um,row.un)}</td>
         <td style="${g}">${row.bp}</td>
         <td style="${b}">${row.po}</td>
+        <td style="${muted}">${row.uf}</td>
         <td style="${r}">${row.cm}</td>
         <td style="${a}">${row.total}</td>
       </tr>`).join('')}
@@ -3448,6 +3453,7 @@ function renderStatistiky(){
         <td style="${g}">${tot.up}</td><td style="${r}">${tot.um}</td><td style="${muted}">${pokusy(tot.up,tot.um,tot.un)}</td><td style="${b}">${pct(tot.up,tot.um,tot.un)}</td>
         <td style="${g}">${tot.bp}</td>
         <td style="${b}">${tot.po}</td>
+        <td style="${muted}">${tot.uf}</td>
         <td style="${r}">${tot.cm}</td>
         <td style="${a}">${tot.total}</td>
       </tr>
@@ -3460,7 +3466,7 @@ function renderStatistiky(){
     ?souperHodnota(zid,selSet,pole)
     :souperZapas(zid,pole)),0);
   html+=`<div class="stats-legenda">🎯 servis · 🤲 příjem · 💥 útok · 🛡️ blok ·
-    🖐️ pole · ❌ chyby &nbsp;|&nbsp; <strong>+</strong> výborné ·
+    🖐️ pole · <strong>~</strong> volné míče · ❌ chyby &nbsp;|&nbsp; <strong>+</strong> výborné ·
     <strong>−</strong> chyby · <strong>Σ</strong> pokusy ·
     <strong>%</strong> výborné ze všech pokusů · <strong>±</strong> celkem (body − chyby)</div>`;
 

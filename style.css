@@ -857,3 +857,13 @@ button.prubeh-radek:active{filter:brightness(1.2)}
 /* Popisek a jeho číslo se nesmí rozejít na dva řádky — v pruhu u hřiště se
    láme kdeco a „Obrana" na konci řádku bez procenta nic neříká (#120). */
 .info-skupina{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+
+/* ─── VOLNÝ MÍČ (#122) ───
+   Šedá schválně: volný míč není bod ani chyba, je to „nic se nestalo, jen
+   jsme to vrátili". Barva ho odliší od zelené, červené i žluté, aby se při
+   zápisu nespletl s plusem, mínusem a neutrálem. */
+.live-act-btn.free{background:rgba(148,163,184,.14)}
+.live-act-sym.free{color:var(--muted)}
+.live-tym-num.free{color:var(--muted)}
+.v2-dlazdice.free .v2-dlazdice-sym{color:var(--muted)}
+.v2-chip-num.free{color:var(--muted)}
