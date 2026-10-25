@@ -119,6 +119,12 @@ ne zápas. Každý má práh a minimální vzorek, takže se neukáže věta
 postavená na třech výměnách. „Soupeř uhrál 45 bodů, z toho 31 z našich
 chyb (69 %)" je fakt; co s tím, ví trenér líp než appka.
 
+Nad spočítanými postřehy může být **psaný rozbor** — text od člověka
+(nebo od asistenta, který se podívá na čísla). To, co pravidla neumí:
+porovnat dva zápasy, odhadnout sílu soupeře, posoudit, jestli se riziko
+na servisu vyplatilo. Píše se tlačítkem „✏️ Napsat rozbor" a nese podpis,
+aby bylo na první pohled poznat, co je spočítané a co je něčí výklad.
+
 Poslední blok je **„Čemu nevěřit"**: co appka o svých vlastních číslech
 ví, že nesedí — smíchaná obrana s volnými míči, příjem zapsaný jen
 u části výměn, sety bez zadaného prvního podání, skóre rozcházející se

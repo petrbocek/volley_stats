@@ -887,3 +887,11 @@ button.prubeh-radek:active{filter:brightness(1.2)}
 .zapas-vyhrady{display:flex;flex-direction:column;gap:6px}
 .zapas-vyhrada{font-size:12px;line-height:1.5;color:var(--muted);padding:6px 10px;
   border-radius:8px;background:rgba(255,193,7,.08);border-left:3px solid rgba(255,193,7,.45)}
+/* Psaný rozbor: jiná typografie než spočítané postřehy, ať je na první
+   pohled poznat, co je číslo a co výklad (#129). */
+.zapas-rozbor{font-size:13px;line-height:1.65;color:var(--text);
+  border-left:3px solid var(--accent2);padding:2px 0 2px 12px}
+.zapas-rozbor p{margin:0 0 8px}
+.zapas-rozbor p:last-child{margin-bottom:0}
+.zapas-podpis{font-family:'Inter',sans-serif;font-size:11px;font-weight:400;
+  color:var(--muted);text-transform:none;letter-spacing:0}

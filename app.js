@@ -3753,8 +3753,22 @@ function otevriVyhodnoceni(zapasId){
     ${celek.volny?kostka(celek.volny.pct+'%','Volný míč → bod'):''}
   </div>`;
 
-  const postrehyHtml=postrehy.length?`<div class="zapas-postrehy">${postrehy.map(p=>
+  const postrehyHtml=postrehy.length?`<div class="zapas-nadpis">Postřehy z čísel</div>
+    <div class="zapas-postrehy">${postrehy.map(p=>
     `<div class="zapas-postreh ${p.typ}">${esc(p.text)}</div>`).join('')}</div>`:'';
+
+  /* Rozbor je text od člověka, postřehy jsou spočítané z dat. Drží se proto
+     oddělené a rozbor nese podpis — kdo si to splete, uvěří výkladu jako
+     číslu (#129). Text se escapuje a odstavce se dělají ze zalomení, žádné
+     HTML zevnitř. */
+  const rozborHtml=z.rozbor?`<div class="zapas-nadpis">Rozbor${
+      z.rozbor_kdo?` <span class="zapas-podpis">${esc(z.rozbor_kdo)}${
+        z.rozbor_kdy?', '+fmtDate(String(z.rozbor_kdy).slice(0,10)):''}</span>`:''}</div>
+    <div class="zapas-rozbor">${z.rozbor.split(/\n{2,}/).map(o=>
+      `<p>${o.split('\n').map(esc).join('<br>')}</p>`).join('')}</div>`:'';
+  const upravitHtml=isLoggedIn()
+    ?`<button class="btn btn-sm btn-secondary" style="margin-top:10px"
+        onclick="otevriRozbor(${z.id})">✏️ ${z.rozbor?'Upravit rozbor':'Napsat rozbor'}</button>`:'';
 
   const tabulkaSetu=`<div style="overflow-x:auto"><table class="profil-tabulka">
     <thead><tr><th>Set</th><th>Skóre</th><th title="Uhrané výměny při soupeřově podání">Side&nbsp;out</th>
@@ -3793,10 +3807,43 @@ function otevriVyhodnoceni(zapasId){
     <div class="zapas-vyhrady">${vyhrady.map(t=>`<div class="zapas-vyhrada">${esc(t)}</div>`).join('')}</div>`:'';
 
   document.getElementById('vyhodnoceni-obsah').innerHTML=
-    souhrn+postrehyHtml+
+    souhrn+rozborHtml+upravitHtml+postrehyHtml+
     `<div class="zapas-nadpis">Po setech</div>`+tabulkaSetu+
     `<div class="zapas-nadpis">Hráčky</div>`+tabulkaHracek+vyhradyHtml;
   openModal('modal-vyhodnoceni');
+}
+
+function otevriRozbor(zapasId){
+  if(!isLoggedIn()){toast('Na změny se přihlas (🔒 nahoře)','error');return;}
+  const z=state.zapasy.find(x=>x.id===zapasId);
+  if(!z)return;
+  document.getElementById('rozbor-zapas').value=zapasId;
+  document.getElementById('rozbor-text').value=z.rozbor||'';
+  document.getElementById('rozbor-kdo').value=z.rozbor_kdo||'';
+  openModal('modal-rozbor');
+}
+
+async function ulozRozbor(){
+  const zapasId=parseInt(document.getElementById('rozbor-zapas').value);
+  const z=state.zapasy.find(x=>x.id===zapasId);
+  if(!z)return;
+  const text=document.getElementById('rozbor-text').value.trim();
+  const kdo=document.getElementById('rozbor-kdo').value.trim();
+  // prázdný text rozbor smaže i s podpisem, ať po něm nezůstane hlavička
+  const telo={rozbor:text||null,rozbor_kdo:text?(kdo||null):null,
+              rozbor_kdy:text?new Date().toISOString():null};
+  const zaloha={rozbor:z.rozbor,rozbor_kdo:z.rozbor_kdo,rozbor_kdy:z.rozbor_kdy};
+  Object.assign(z,telo);
+  closeModal('modal-rozbor');
+  otevriVyhodnoceni(zapasId);
+  try{
+    await apiPatch('vb_zapasy',zapasId,telo);
+    toast(text?'Rozbor uložen':'Rozbor smazán','success');
+  }catch(e){
+    Object.assign(z,zaloha);
+    otevriVyhodnoceni(zapasId);
+    toast('Chyba: '+e.message,'error');
+  }
 }
 
 /* ─── PROFIL HRÁČKY ─── */
