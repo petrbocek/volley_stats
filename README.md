@@ -72,6 +72,13 @@ Tabulka ve Statistikách má u servisu, příjmu i útoku vedle výborných a ch
 i **počet pokusů** — jmenovatel toho procenta vedle. Bez něj se nepozná, že
 100 % jsou dvě podání a 60 % dvacet.
 
+Přehození balonu soupeři má u útoku vlastní kolonku **`~` (volný míč)**.
+Rozhoduje úmysl, ne rychlost: ulití přes blok je útok (chce to spadnout),
+volný míč je přiznání, že se zakončit nedá. Proto je stranou útočných
+pokusů, procenta i součtu „Celkem" — jinak by tým, který hodně přehazuje,
+měl uměle horší útok. Volný míč **od soupeře** se nezapisuje a pozor na
+záměnu s polem: `pole` je vybraný balon po útoku, ne příjem volného míče.
+
 U obrany se nepočítá kolik, ale co z toho: **konverze z obrany** je podíl
 rozeher s vybraným balonem, které skončily naším bodem. Je v pruhu u hřiště
 (za set) a v profilu hráčky (kostka a druhé číslo u sloupce Pole). Počet

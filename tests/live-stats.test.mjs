@@ -1685,7 +1685,7 @@ const dlazdice = await page.evaluate(() => {
 // počet se odvozuje z ACTIONS, ať nová akce znamená jen zápis navíc, ne
 // přepisování čísla v testu
 const variantCelkem = await page.evaluate(() =>
-  ACTIONS.reduce((n, a) => n + (a.varianty ? a.varianty.length : VARIANTS.length), 0));
+  ACTIONS.reduce((n, a) => n + variantyAkce(a).length, 0));
 pass &= ok('T32e dlaždice pokrývají všechny akce mřížky (#76)',
   variantCelkem >= 11 && dlazdice.pocet === variantCelkem);
 pass &= ok('T32f dlaždice je násobně větší cíl než buňka v mřížce (#76)',
@@ -1760,10 +1760,10 @@ pass &= ok('T32o V2 ukazuje týmový souhrn (#76)',
 pass &= ok('T32o2 každé číslo v souhrnu si nese svůj symbol, ne jen barvu (#76)',
   await page.evaluate(() => {
     const cisla = [...document.querySelectorAll('#live2-wrap .v2-chip-num')];
-    const celkem = ACTIONS.reduce((n, a) => n + (a.varianty ? a.varianty.length : VARIANTS.length), 0);
+    const celkem = ACTIONS.reduce((n, a) => n + variantyAkce(a).length, 0);
     return cisla.length === celkem && cisla.every(el => {
       const sym = el.querySelector('.v2-chip-sym');
-      return sym && ['+', '/', '−'].includes(sym.textContent.trim());
+      return sym && ['+', '/', '−', '~'].includes(sym.textContent.trim());
     });
   }));
 
@@ -4152,9 +4152,9 @@ pass &= ok('T53d na útok všichni kromě liber a nahrávaček (#84)',
 
 // varianta je rovnou u hráčky — žádné druhé okno (#107)
 const radekSm = `#v2-kdo-obsah .player-card:has-text("${sm}")`;
-pass &= ok('T53e u hráčky jsou rovnou plus, pokus i mínus (#84, #107)',
+pass &= ok('T53e u hráčky jsou rovnou plus, pokus, mínus i volný míč (#84, #107, #122)',
   JSON.stringify(await page.$$eval(`${radekSm} .v2-dlazdice-sym`,
-    els => els.map(e => e.textContent.trim()))) === JSON.stringify(['+', '/', '−']));
+    els => els.map(e => e.textContent.trim()))) === JSON.stringify(['+', '/', '−', '~']));
 const predUtokem53 = await page.evaluate(() => getStatVal(100, 11, 'utok_plus', 2));
 pass &= ok('T53e2 u tlačítka je dosavadní počet, ať se nemusí nikam odbočovat (#107)',
   (await page.textContent(`${radekSm} .v2-dlazdice.plus .v2-dlazdice-cnt`)).trim()
@@ -5157,6 +5157,84 @@ await page.evaluate(zaloha => {
   state.liveSet = 1;
   renderLive2(100);
 }, logZaloha);
+await klid();
+
+
+// ── #122: volný míč přehozený soupeři ──────────────────────────────────────
+// Útočný pokus je pokus ukončit výměnu; volný míč je přiznání, že to nejde.
+// Zapisuje se u útoku, ale do jeho čísel nepatří.
+pass &= ok('T63a volný míč má vlastní znak a nabízí ho jen útok (#122)',
+  await page.evaluate(() => {
+    const free = VARIANTS.find(v => v.suf === 'free');
+    const utok = ACTIONS.find(a => a.key === 'utok');
+    const servis = ACTIONS.find(a => a.key === 'servis');
+    return free.sym === '~' &&
+      variantyAkce(utok).some(v => v.suf === 'free') &&
+      !variantyAkce(servis).some(v => v.suf === 'free') &&
+      komuBod('utok_free') === null;          // výměna pokračuje, bod to není
+  }));
+
+await page.click('.nav-tab:nth-child(5)');                  // Live
+await page.waitForSelector('#cnt-10-servis_plus');
+await klikSet(1);
+await klid();
+pass &= ok('T63b v mřížce má útok čtvrté tlačítko, servis dál tři (#122)',
+  await page.$('#cnt-10-utok_free') !== null &&
+  await page.$('#cnt-10-servis_free') === null);
+
+const predFree = await page.evaluate(() => getStatVal(100, 10, 'utok_free', 1));
+const predUtokPlus = await page.evaluate(() => getStatVal(100, 10, 'utok_plus', 1));
+rpcCalls = [];
+await page.click('#cnt-10-utok_free');
+await klid();
+pass &= ok('T63c klik se zapíše jako utok_free (#122)',
+  rpcCalls.some(z => z.some(x => x.pole === 'utok_free' && x.delta === 1)) &&
+  await page.evaluate(() => getStatVal(100, 10, 'utok_free', 1)) === predFree + 1 &&
+  await page.evaluate(() => getStatVal(100, 10, 'utok_plus', 1)) === predUtokPlus);
+
+// a hlavně: útočné procento ani pokusy se tím nehnou
+const zapasZaloha63 = await page.evaluate(() => {
+  const z = state.zapasy.find(x => x.id === 100);
+  const puvodni = { sezona_id: z.sezona_id, stav: z.stav };
+  z.sezona_id = 1; z.stav = STAV.DOKONCENY;
+  return puvodni;
+});
+await page.selectOption('#season-select', '1');
+await klid();
+await page.click('.nav-tab:nth-child(7)');                  // Statistiky
+await page.waitForSelector('.stats-table');
+await page.evaluate(() => {
+  ['stats-tym-sel', 'stats-soutez-sel', 'stats-zapas-sel', 'stats-hrac-sel', 'stats-set-sel']
+    .forEach(id => { const e = document.getElementById(id); if (e) e.value = ''; });
+  renderStatistiky();
+});
+await klid();
+pass &= ok('T63d volný míč nepatří do útočných pokusů ani do procenta (#122)',
+  await page.evaluate(() => {
+    const r = spocitejStatistiky().rows.find(x => x.h.id === 10);
+    return r.uf > 0 &&
+      pokusy(r.up, r.um, r.un) === r.up + r.um + r.un &&     // bez uf
+      pctCislo(r.up, r.um, r.un) === (r.up + r.um + r.un
+        ? Math.round(r.up / (r.up + r.um + r.un) * 100) : null);
+  }));
+pass &= ok('T63e v tabulce i v exportu má volný míč svůj sloupec (#122)',
+  await csvIdx('Volné míče') > 0 &&
+  await page.evaluate(() => {
+    const th = [...document.querySelectorAll('.stats-table thead th')]
+      .find(e => /Volné míče/.test(e.getAttribute('aria-label') || ''));
+    return !!th && th.textContent.includes('~');
+  }));
+pass &= ok('T63f do celkem se volný míč nezapočítá (#122)',
+  await page.evaluate(() => {
+    const r = spocitejStatistiky().rows.find(x => x.h.id === 10);
+    return r.total === r.sp + r.up + r.bp - r.sm - r.pm - r.um - r.cm;
+  }));
+
+await page.evaluate(z => {
+  const zapas = state.zapasy.find(x => x.id === 100);
+  zapas.sezona_id = z.sezona_id; zapas.stav = z.stav;
+}, zapasZaloha63);
+await page.click('.nav-tab:nth-child(6)');                  // zpět na Live V2
 await klid();
 
 await page.evaluate(() => {

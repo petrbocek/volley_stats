@@ -29,7 +29,9 @@ const STRIDANI_NA_SET=8;         // nové pravidlo, dřív šest
 const ACTIONS=[
   {key:'servis',label:'Servis',icon:'🎯',color:'#4dabf7'},
   {key:'prijem',label:'Příjem',icon:'🤲',color:'#51cf66'},
-  {key:'utok',label:'Útok',icon:'💥',color:'#f97316'},
+  // Volný míč (freeball) se zapisuje u útoku, protože tam při zápisu sahá
+  // ruka — ale útočný pokus to není, viz komentář u VARIANTS (#122).
+  {key:'utok',label:'Útok',icon:'💥',varianty:['plus','neutral','minus','free'],color:'#f97316'},
   {key:'blok',label:'Blok',icon:'🛡️',varianty:['plus'],color:'#7950f2'},
   {key:'chyba',label:'Chyba',icon:'❌',varianty:['minus'],color:'#ff6b6b'},
   // Pole (dig) je vybraný balon. Zatím se vede jen počet, protože je to pokus,
@@ -37,11 +39,32 @@ const ACTIONS=[
   // pokračuje" a do skóre se nepropisuje (#84).
   {key:'pole',label:'Pole',icon:'🖐️',varianty:['neutral'],color:'#20c997'},
 ];
+/* Tři základní varianty má každá akce, pokud si neřekne jinak. Čtvrtá,
+   `free`, je volný míč přehozený soupeři — má ji jen útok a nesmí se sama
+   přidávat ostatním, jinak by servisu i příjmu přibyl sloupec, který pro ně
+   nic neznamená.
+
+   Útočný pokus je pokus ukončit výměnu; volný míč je přiznání, že se
+   zakončit nedá. Proto je stranou útočného procenta i pokusů — stejně jako
+   to mají profi nástroje (Data Volley ho kóduje jako `F`). Znak `~` čte
+   „jen to přehodila" a nepotká se s `+`, `/` ani `−` (#122). */
+const ZAKLADNI_VARIANTY=['plus','neutral','minus'];
 const VARIANTS=[
   {suf:'plus',sym:'+',cls:'plus'},
   {suf:'neutral',sym:'/',cls:'neutral'},
   {suf:'minus',sym:'−',cls:'minus'},
+  {suf:'free',sym:'~',cls:'free'},
 ];
+
+// Varianty jedné akce. Jediné místo, kde se rozhoduje, co se komu nabídne.
+function variantyAkce(a){
+  return VARIANTS.filter(v=>(a.varianty||ZAKLADNI_VARIANTY).includes(v.suf));
+}
+
+// Všechna pole statistik, která akce drží — pro součty a nulování řádků.
+function polaAkci(){
+  return ACTIONS.flatMap(a=>variantyAkce(a).map(v=>`${a.key}_${v.suf}`));
+}
 
 function popisAkce(field){
   const [klic,suf]=field.split('_');
