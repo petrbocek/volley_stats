@@ -4179,9 +4179,10 @@ const predPolem = await page.evaluate(() => ({
   pole: getStatVal(100, 10, 'pole_neutral', 2), skore: skoreSetu(100, 2),
   vymen: prubehSetu(100, 2).vymeny.length }));
 rpcCalls = [];
-pass &= ok('T53g2 pole má jedinou variantu, tak je u hráčky jedno tlačítko (#84, #107)',
-  await page.$$eval(`#v2-kdo-obsah .player-card:has-text("${nah}") .v2-dlazdice`,
-    els => els.length) === 1);
+pass &= ok('T53g2 pole nabízí zvednuto, spadlo i volný míč (#84, #107, #124)',
+  JSON.stringify(await page.$$eval(
+    `#v2-kdo-obsah .player-card:has-text("${nah}") .v2-dlazdice-sym`,
+    els => els.map(e => e.textContent.trim()))) === JSON.stringify(['/', '−', '~']));
 await page.click(`#v2-kdo-obsah .player-card:has-text("${nah}") .v2-dlazdice`);
 await klid();
 pass &= ok('T53h pole se zapíše rovnou, bez ptaní na variantu (#84)',
@@ -4206,11 +4207,15 @@ pass &= ok('T53l zpět vezme pole taky (#84)',
 // a je vidět ve statistikách
 await page.click('.nav-tab:nth-child(7)');
 await klid();
-pass &= ok('T53m ve statistikách má Pole svůj sloupec (#84)',
+pass &= ok('T53m ve statistikách má Pole svou skupinu (#84, #124)',
   await page.evaluate(() => {
-    const th = [...document.querySelectorAll('.stats-table thead th')]
-      .find(e => /Pole/.test(e.getAttribute('aria-label') || ''));
-    return !!th && /🖐/.test(th.textContent);
+    const th = document.querySelector('.stats-table th[data-skupina="pole"]');
+    const zvednuto = [...document.querySelectorAll('.stats-table th.sortable')]
+      .find(e => (e.getAttribute('onclick') || '').includes("'po'"));
+    const spadlo = [...document.querySelectorAll('.stats-table th.sortable')]
+      .find(e => (e.getAttribute('onclick') || '').includes("'pz'"));
+    return !!th && /🖐/.test(th.textContent) && th.getAttribute('colspan') === '2' &&
+      !!zvednuto && !!spadlo;
   }));
 await page.click('.nav-tab:nth-child(6)');
 await klid();
@@ -5234,6 +5239,81 @@ await page.evaluate(z => {
   const zapas = state.zapasy.find(x => x.id === 100);
   zapas.sezona_id = z.sezona_id; zapas.stav = z.stav;
 }, zapasZaloha63);
+await page.click('.nav-tab:nth-child(6)');                  // zpět na Live V2
+await klid();
+
+
+// ── #124: chyba v poli a zvednutý volný míč ────────────────────────────────
+// Pod „pole" se dřív klepalo všechno, co se v poli zvedlo — obrana po útoku
+// i volný míč. Tím vycházela obrana líp, než jaká byla.
+pass &= ok('T64a pole má tři varianty a každá znamená něco jiného (#124)',
+  await page.evaluate(() => {
+    const pole = ACTIONS.find(a => a.key === 'pole');
+    const znaky = variantyAkce(pole).map(v => v.sym);
+    return JSON.stringify(znaky) === JSON.stringify(['/', '−', '~']) &&
+      komuBod('pole_neutral') === null &&     // výměna pokračuje
+      komuBod('pole_free') === null &&        // taky jen pokračuje
+      komuBod('pole_minus') === 'oni' &&      // balon spadl = ztracený bod
+      SKORE_JEJICH.includes('pole_minus');
+  }));
+
+await page.click('.nav-tab:nth-child(5)');                  // Live
+await page.waitForSelector('#cnt-10-servis_plus');
+await klikSet(1);
+await klid();
+const predPole = await page.evaluate(() => ({
+  skore: skoreSetu(100, 1),
+  minus: getStatVal(100, 10, 'pole_minus', 1),
+  free: getStatVal(100, 10, 'pole_free', 1),
+}));
+rpcCalls = [];
+await page.click('#cnt-10-pole_minus');
+await klid();
+pass &= ok('T64b chyba v poli je ztracený bod, ne jen pokus (#124)',
+  rpcCalls.some(z => z.some(x => x.pole === 'pole_minus' && x.delta === 1)) &&
+  await page.evaluate(() => getStatVal(100, 10, 'pole_minus', 1)) === predPole.minus + 1 &&
+  await page.evaluate(() => skoreSetu(100, 1).jejich) === predPole.skore.jejich + 1 &&
+  await page.evaluate(() => skoreSetu(100, 1).nase) === predPole.skore.nase);
+
+await page.click('#cnt-10-pole_free');
+await klid();
+pass &= ok('T64c zvednutý volný míč skóre nehýbe (#124)',
+  await page.evaluate(() => getStatVal(100, 10, 'pole_free', 1)) === predPole.free + 1 &&
+  await page.evaluate(() => skoreSetu(100, 1).jejich) === predPole.skore.jejich + 1);
+
+// konverze: obrana a volný míč se nesmí míchat do jednoho čísla
+pass &= ok('T64d obrana a volný míč mají každý svou konverzi (#124)',
+  await page.evaluate(() => {
+    const v = [{ bod: 'my', obrany: [10], volne: [] },
+                { bod: 'oni', obrany: [10], volne: [] },
+                { bod: 'my', obrany: [], volne: [11] },
+                { bod: 'my', obrany: [], volne: [11] }];
+    const ob = konverzeZObrany(v), vm = konverzeZVolneho(v);
+    return ob.celkem === 2 && ob.pct === 50 &&
+      vm.celkem === 2 && vm.pct === 100 &&
+      konverzeZVolneho(v, 10) === null;      // 10 žádný volný míč nezvedla
+  }));
+pass &= ok('T64e log nese zvednutý volný míč zvlášť od obrany (#124)',
+  await page.evaluate(() => {
+    const log = [{ pole: 'pole_neutral', hrac_id: 10 },
+                 { pole: 'pole_free', hrac_id: 11 },
+                 { pole: 'utok_plus', hrac_id: 12 }];
+    const v = vymenyZLogu(log, 'my').vymeny[0];
+    return JSON.stringify(v.obrany) === JSON.stringify([10]) &&
+      JSON.stringify(v.volne) === JSON.stringify([11]);
+  }));
+
+await page.click('.nav-tab:nth-child(7)');                  // Statistiky
+await page.waitForSelector('.stats-table');
+pass &= ok('T64f v exportu mají chyby v poli i volné míče svůj sloupec (#124)',
+  await csvIdx('Pole chyby') > 0 && await csvIdx('Pole volné míče') > 0);
+pass &= ok('T64g chyba v poli ubírá z celkem, zvednutý volný míč ne (#124)',
+  await page.evaluate(() => {
+    const r = { sp: 2, sm: 0, pp: 0, pm: 0, up: 1, um: 0, bp: 0, cm: 0, pz: 1, pf: 3 };
+    // stejný vzorec jako v appce: body mínus chyby, volný míč mezi ně nepatří
+    return r.sp + r.up + r.bp - r.sm - r.pm - r.um - r.cm - r.pz === 2;
+  }));
+
 await page.click('.nav-tab:nth-child(6)');                  // zpět na Live V2
 await klid();
 

@@ -37,7 +37,12 @@ const ACTIONS=[
   // Pole (dig) je vybraný balon. Zatím se vede jen počet, protože je to pokus,
   // ne bodovaná akce — proto neutrální varianta, ta znamená „výměna
   // pokračuje" a do skóre se nepropisuje (#84).
-  {key:'pole',label:'Pole',icon:'🖐️',varianty:['neutral'],color:'#20c997'},
+  /* Pole drží tři věci, které se klepají na stejném místě, ale znamenají
+     každá něco jiného: `/` vybraný balon po útoku (obrana), `−` balon, který
+     spadl (ztracený bod jako každé jiné minus) a `~` zvednutý volný míč od
+     soupeře. Bez toho rozdělení byla obrana smíchaná s volnými míči a číslo
+     za obranu vycházelo líp, než jaká obrana opravdu byla (#124). */
+  {key:'pole',label:'Pole',icon:'🖐️',varianty:['neutral','minus','free'],color:'#20c997'},
 ];
 /* Tři základní varianty má každá akce, pokud si neřekne jinak. Čtvrtá,
    `free`, je volný míč přehozený soupeři — má ji jen útok a nesmí se sama
@@ -77,11 +82,11 @@ function popisAkce(field){
    ztracený bod, plus a neutral u příjmu je kvalita. Chyby a body soupeře
    doplňují to, co se na naší straně nezapíše. */
 const SKORE_NASE=['servis_plus','utok_plus','blok_plus'];
-const SKORE_JEJICH=['servis_minus','prijem_minus','utok_minus','chyba_minus'];
+const SKORE_JEJICH=['servis_minus','prijem_minus','utok_minus','chyba_minus','pole_minus'];
 
 // Komu výměna přinesla bod; null = neutrální akce, výměna pokračuje.
 const POLE_BOD_MY=['servis_plus','utok_plus','blok_plus'];
-const POLE_BOD_ONI=['servis_minus','prijem_minus','utok_minus','chyba_minus'];
+const POLE_BOD_ONI=['servis_minus','prijem_minus','utok_minus','chyba_minus','pole_minus'];
 
 function komuBod(pole){
   if(pole==='souper_chyba')return 'my';
@@ -133,15 +138,17 @@ function vymenyZLogu(udalosti,prvniPodani){
   let podava=prvniPodani||null;
   let serie={kdo:null,delka:0},nejdelsi={my:0,oni:0};
   const vymeny=[];
-  let obrany=[];                           // kdo v rozehrané výměně vybral balon
-  udalosti.forEach(u=>{
+  let obrany=[],volne=[];                  // kdo v rozehrané výměně vybral balon
+  udalosti.forEach(u=>{                    // a kdo zvedl volný míč
     const bod=komuBod(u.pole);
     if(!bod){                              // výměna pokračovala
       if(u.pole==='pole_neutral'&&u.hrac_id)obrany.push(u.hrac_id);
+      if(u.pole==='pole_free'&&u.hrac_id)volne.push(u.hrac_id);
       return;
     }
-    vymeny.push({podaval:podava,bod,zona1:u.zona1_hrac_id||null,pole:u.pole,hrac_id:u.hrac_id,obrany});
-    obrany=[];
+    vymeny.push({podaval:podava,bod,zona1:u.zona1_hrac_id||null,pole:u.pole,
+                 hrac_id:u.hrac_id,obrany,volne});
+    obrany=[];volne=[];
     if(serie.kdo===bod)serie.delka++;else serie={kdo:bod,delka:1};
     if(serie.delka>nejdelsi[bod])nejdelsi[bod]=serie.delka;
     if(podava&&bod!==podava)podava=bod;    // ztráta podání
@@ -216,13 +223,18 @@ function souperSestavaZeTed(m,kroku){
    Není to zásluha jedné hráčky: po obraně ještě někdo nahrává a zakončuje,
    takže je to vlastnost výměny. S hráčkou se počítají výměny, ve kterých
    vybírala ona — a když vybírala dvakrát, pořád je to jedna výměna. */
-function konverzeZObrany(vymeny,hracId){
-  const s=(vymeny||[]).filter(v=>v.obrany&&v.obrany.length&&
-    (hracId==null||v.obrany.includes(hracId)));
+function konverzeZVymen(vymeny,klic,hracId){
+  const s=(vymeny||[]).filter(v=>v[klic]&&v[klic].length&&
+    (hracId==null||v[klic].includes(hracId)));
   if(!s.length)return null;
   const nase=s.filter(v=>v.bod===STRANY.MY).length;
   return {pct:Math.round(nase/s.length*100),nase,celkem:s.length};
 }
+
+// Obrana po útoku a zvednutý volný míč jsou dvě různé věci: volný míč se
+// uhrává líp, tak ať se jeho procento nevydává za obranu (#124).
+function konverzeZObrany(vymeny,hracId){return konverzeZVymen(vymeny,'obrany',hracId);}
+function konverzeZVolneho(vymeny,hracId){return konverzeZVymen(vymeny,'volne',hracId);}
 
 /* ─── PŘERUŠENÍ ───
    Time-out a střídání nemají v logu výměn pořadí — vedou se zvlášť, každé se

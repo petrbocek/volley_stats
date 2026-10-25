@@ -867,3 +867,6 @@ button.prubeh-radek:active{filter:brightness(1.2)}
 .live-tym-num.free{color:var(--muted)}
 .v2-dlazdice.free .v2-dlazdice-sym{color:var(--muted)}
 .v2-chip-num.free{color:var(--muted)}
+/* Spadlý balon u počtu vybraných — menší a červeně, ať je vidět poměr,
+   ale nepřebije hlavní číslo (#124). */
+.profil-chyba{color:var(--red);font-size:11px}
