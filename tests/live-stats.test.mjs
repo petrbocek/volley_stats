@@ -5049,6 +5049,116 @@ await page.evaluate(() => {
 });
 await klid();
 
+
+// ── #120: konverze z obrany ────────────────────────────────────────────────
+// Počet vybraných balonů měří hlavně to, kolikrát do nás soupeř útočil.
+// Čte se až kolik rozeher s obranou skončilo naším bodem.
+pass &= ok('T62a konverze počítá výměny s obranou, ne obrany (#120)',
+  await page.evaluate(() => {
+    const v = [{ bod: 'my', obrany: [10] },        // vybrala 10, náš bod
+                { bod: 'oni', obrany: [11] },       // vybrala 11, bod soupeře
+                { bod: 'oni', obrany: [10, 10] },   // 10 vybírala dvakrát
+                { bod: 'my', obrany: [] }];         // bez obrany se nepočítá
+    const t = konverzeZObrany(v), a = konverzeZObrany(v, 10), b = konverzeZObrany(v, 11);
+    return t.celkem === 3 && t.nase === 1 && t.pct === 33 &&
+      a.celkem === 2 && a.nase === 1 && a.pct === 50 &&   // dvě obrany = jedna výměna
+      b.celkem === 1 && b.pct === 0 &&
+      konverzeZObrany([{ bod: 'my', obrany: [] }]) === null &&
+      konverzeZObrany([]) === null;
+  }));
+
+const logZaloha = await page.evaluate(() => JSON.stringify(state.udalosti));
+await page.evaluate(() => {
+  const set = 4;
+  state.udalosti = state.udalosti.filter(u => u.zapas_id !== 100);
+  // čtyři výměny: s obranou vyhraná, s obranou prohraná, se dvěma obranami
+  // prohraná a jedna bez obrany
+  [[10, 'pole_neutral'], [10, 'utok_plus'],
+   [11, 'pole_neutral'], [11, 'utok_minus'],
+   [10, 'pole_neutral'], [10, 'pole_neutral'], [null, 'souper_bod'],
+   [10, 'utok_plus']].forEach(([hrac, pole], i) => state.udalosti.push(
+     { id: 95000 + i, zapas_id: 100, set_cislo: set, hrac_id: hrac, pole }));
+  state.postaveni = state.postaveni.filter(p => !(p.zapas_id === 100 && (p.set_cislo || 1) === set));
+  [10, 11, 12, 13].forEach((id, i) => state.postaveni.push(
+    { zapas_id: 100, set_cislo: set, zona: i + 1, hrac_id: id }));
+  state.setInfo = state.setInfo.filter(x => !(x.zapas_id === 100 && (x.set_cislo || 1) === set));
+  state.setInfo.push({ zapas_id: 100, set_cislo: set, prvni_podani: 'my' });
+  state.statistiky = state.statistiky.filter(x =>
+    !(x.zapas_id === 100 && x.hrac_id === 10 && (x.set_cislo || 1) === set));
+  state.statistiky.push({ zapas_id: 100, hrac_id: 10, set_cislo: set, pole_neutral: 3 });
+  state.liveSet = set;
+  renderLive2(100);
+});
+await klid();
+
+pass &= ok('T62b u hřiště je konverze z obrany i s poměrem (#120)',
+  await page.evaluate(() => {
+    const radek = [...document.querySelectorAll('.hriste-info-radek')]
+      .find(e => /Obrana/.test(e.textContent));
+    return !!radek && /33%/.test(radek.textContent) && /1\/3/.test(radek.textContent);
+  }));
+pass &= ok('T62c počítá se z výměn, ne z počtu obran (#120)',
+  await page.evaluate(() => {
+    const k = konverzeZObrany(prubehSetu(100, 4).vymeny);
+    return k.celkem === 3 && k.nase === 1;      // čtyři obrany, tři výměny
+  }));
+
+// profil: konverze za hráčku, za zápas i v souhrnu
+await page.selectOption('#season-select', '1');
+await klid();
+const zapasZaloha = await page.evaluate(() => {
+  const z = state.zapasy.find(x => x.id === 100);
+  const puvodni = { sezona_id: z.sezona_id, stav: z.stav };
+  z.sezona_id = 1; z.stav = STAV.DOKONCENY;
+  return puvodni;
+});
+pass &= ok('T62d profil počítá konverzi po hráčkách (#120)',
+  await page.evaluate(() => {
+    const p = profilHracky(10, true);
+    const r = p.radky.find(x => x.z.id === 100);
+    return p.obranaCelkem.pct === 50 && p.obranaCelkem.celkem === 2 &&
+      !!r && r.obrana.pct === 50 && r.obrana.celkem === 2;
+  }));
+await page.evaluate(() => otevriProfil(10, true));
+await page.waitForSelector('#modal-profil:not(.hidden)');
+pass &= ok('T62e v profilu je kostka s konverzí i druhé číslo u pole (#120)',
+  await page.evaluate(() => {
+    const kostky = [...document.querySelectorAll('#modal-profil .profil-kostka')];
+    const obrana = kostky.find(e => /Obrana/.test(e.textContent));
+    const usp = [...document.querySelectorAll('#modal-profil .profil-tabulka tbody .profil-usp')]
+      .map(e => e.textContent.trim());
+    const pole = [...document.querySelectorAll('#modal-profil .profil-tabulka tbody tr')]
+      .map(tr => tr.children[6] && tr.children[6].textContent.trim());
+    return !!obrana && /50%/.test(obrana.textContent) && usp.includes('50%') &&
+      pole.some(t => /^3/.test(t || ''));        // tři vybrané balony, z toho 50 % bod
+  }));
+await page.click('#modal-profil .btn-secondary');
+await klid();
+
+// set bez jediné obrany konverzi nenabízí
+await page.evaluate(() => {
+  state.udalosti = state.udalosti.filter(u => u.pole !== 'pole_neutral');
+  state.liveSet = 4;                     // přepnutí sezóny mohlo set vrátit
+  renderLive2(100);
+});
+await klid();
+pass &= ok('T62f bez jediné obrany se konverze neukazuje (#120)',
+  await page.evaluate(() => ![...document.querySelectorAll('.hriste-info-radek')]
+    .some(e => /Obrana/.test(e.textContent))));
+
+await page.evaluate(z => {
+  const zapas = state.zapasy.find(x => x.id === 100);
+  zapas.sezona_id = z.sezona_id; zapas.stav = z.stav;
+}, zapasZaloha);
+await page.evaluate(zaloha => {
+  state.udalosti = JSON.parse(zaloha);
+  state.postaveni = state.postaveni.filter(p => !(p.zapas_id === 100 && (p.set_cislo || 1) === 4));
+  state.setInfo = state.setInfo.filter(x => !(x.zapas_id === 100 && (x.set_cislo || 1) === 4));
+  state.liveSet = 1;
+  renderLive2(100);
+}, logZaloha);
+await klid();
+
 await page.evaluate(() => {
   state.postaveni = state.postaveni.filter(p => !(p.zapas_id === 100 && (p.set_cislo || 1) === 5));
   state.setInfo = state.setInfo.filter(x => !(x.zapas_id === 100 && (x.set_cislo || 1) === 5));
