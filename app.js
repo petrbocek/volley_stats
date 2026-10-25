@@ -2133,6 +2133,13 @@ function bodyPoHrackach(zapasId,set){
   return {dela:nej('ziskane'),dava:nej('ztracene')};
 }
 
+/* Výměny celého zápasu. Skládají se po setech, protože rozehra nikdy
+   nepřeteče přes konec setu — a první podání se mezi sety mění (#120). */
+function vymenyZapasu(zapasId,set){
+  const sety=set?[set]:Array.from({length:setuVZapase(zapasId)},(_,i)=>i+1);
+  return sety.flatMap(s=>prubehSetu(zapasId,s).vymeny);
+}
+
 // Side-out %, série a rotace — všechno z logu výměn. Bez prvního podání se
 // nedá určit, kdo podával, takže se místo čísel nabídne ho zadat.
 // Jen pruh informací, ne celá tabulka: log se zapisuje při každé akci
@@ -2226,10 +2233,15 @@ function prubehRadekPrerus(p){
 }
 
 function prubehStavuHtml(zapasId,set){
-  const kroky=prubehStavu(zapasId,set);
+  const {vymeny}=prubehSetu(zapasId,set);
+  const kroky=prubehZVymen(vymeny);
   if(!kroky.length)return '';
   const naseBreaky=kroky.filter(k=>k.bod==='my'&&k.break).length;
   const naseZPodani=kroky.filter(k=>k.bod==='my'&&!k.break).length;
+  /* Konverze z obrany sedí tady, ne u side-outu: side-out se bez prvního
+     podání nepočítá a celý ten řádek se zahodí, kdežto tahle se počítá
+     z výměn samotných a má být vidět vždycky (#120). */
+  const ob=konverzeZObrany(vymeny);
   return `<div class="hriste-info-radek">
     <span class="hriste-info-nazev" title="Sytě = zisk podání, bledě = bod při vlastním podání">Průběh</span>
     <button class="prubeh-pas" onclick="v2OtevriPrubeh(${zapasId})"
@@ -2237,6 +2249,12 @@ function prubehStavuHtml(zapasId,set){
       `<span class="prubeh-tik ${k.bod}${k.break?' break':''}"
         title="${k.my}:${k.oni} — ${k.bod==='my'?'náš bod':'bod soupeře'}${k.break?' (zisk podání)':''}"></span>`).join('')}</button>
     <span class="info-proc" title="Naše body: ze side-outu a při vlastním podání">${naseBreaky} + ${naseZPodani}</span>
+    ${ob?`<span class="info-skupina"
+        title="Rozehry, ve kterých jsme vybrali balon, a skončily naším bodem">
+      <span class="hriste-info-nazev">Obrana</span>
+      <span class="info-hodnota${ob.pct<50?' slabe':''}">${ob.pct}%</span>
+      <span class="info-proc">${ob.nase}/${ob.celkem}</span>
+    </span>`:''}
   </div>`;
 }
 
@@ -3510,11 +3528,18 @@ function profilHracky(hracId,celaSezona=false){
       pp:v('prijem_plus'),pm:v('prijem_minus'),pn:v('prijem_neutral'),
       up:v('utok_plus'),um:v('utok_minus'),un:v('utok_neutral'),
       bp:v('blok_plus'),cm:v('chyba_minus'),po:v('pole_neutral'),
+      // kolik rozeher, ve kterých vybírala, skončilo naším bodem (#120)
+      obrana:konverzeZObrany(vymenyZapasu(z.id,d.selSet),hracId),
       total:v('servis_plus')+v('utok_plus')+v('blok_plus')
             -v('servis_minus')-v('prijem_minus')-v('utok_minus')-v('chyba_minus')};
   });
+  /* Souhrnná konverze se počítá ze všech výměn v rozsahu, ne jako průměr
+     zápasových procent — zápas se dvěma obranami nemá vážit jako zápas
+     s dvaceti. */
+  const obranaCelkem=konverzeZObrany(
+    zapasy.flatMap(z=>vymenyZapasu(z.id,d.selSet)),hracId);
   // d.rows už je spočítané ve zvoleném rozsahu, takže se nic nesčítá podruhé
-  return {h,radky,souhrn:d.rows.find(r=>r.h.id===hracId),rozsah:popisRozsahu(d)};
+  return {h,radky,obranaCelkem,souhrn:d.rows.find(r=>r.h.id===hracId),rozsah:popisRozsahu(d)};
 }
 
 // Malý spojnicový graf, jedna série. Tři veličiny jsou schválně tři grafy:
@@ -3565,14 +3590,15 @@ function sparkline(body,{barva,popisky,jednotka=''}){
 function otevriProfil(hracId,celaSezona=false){
   const p=profilHracky(hracId,celaSezona);
   if(!p){toast('Profil se nepodařilo sestavit','error');return;}
-  const {h,radky,souhrn,rozsah}=p;
+  const {h,radky,souhrn,obranaCelkem,rozsah}=p;
   document.getElementById('profil-title').textContent=
     `${h.jmeno}${h.cislo?' · #'+h.cislo:''}${h.pozice?' · '+h.pozice:''}`;
   // Bez tohohle se nedá poznat, jestli se dívám na sezónu nebo na jeden set —
   // a čísla vypadají stejně věrohodně v obou případech.
   document.getElementById('profil-rozsah').textContent='Počítáno z: '+rozsah;
 
-  const kostka=(val,lbl,barva)=>`<div class="profil-kostka">
+  const kostka=(val,lbl,barva,titulek='')=>`<div class="profil-kostka"${
+      titulek?` title="${titulek}"`:''}>
     <div class="profil-kostka-val"${barva?` style="color:${barva}"`:''}>${val}</div>
     <div class="profil-kostka-lbl">${lbl}</div></div>`;
   const souhrnHtml=souhrn?`<div class="profil-souhrn">
@@ -3586,6 +3612,8 @@ function otevriProfil(hracId,celaSezona=false){
     ${kostka(pctCislo(souhrn.pp,souhrn.pm,souhrn.pn)??'—','Příjem % výb.')}
     ${kostka(sZnamenkem(uspesnost(souhrn.pp,souhrn.pm,souhrn.pn)),'Příjem úsp.')}
     ${kostka(souhrn.po,'Pole','var(--accent2)')}
+    ${kostka(obranaCelkem?obranaCelkem.pct+'%':'—','Obrana → bod',null,
+      'Kolik rozeher, ve kterých vybrala balon, skončilo naším bodem. Není to zásluha jen její — po obraně ještě někdo nahrává a zakončuje.')}
     ${kostka(souhrn.cm,'Chyb','var(--red)')}
   </div>`:'';
 
@@ -3616,11 +3644,12 @@ function otevriProfil(hracId,celaSezona=false){
       <td>${pctCislo(r.pp,r.pm,r.pn)??'—'}<div class="profil-usp">${sZnamenkem(uspesnost(r.pp,r.pm,r.pn))}</div></td>
       <td>${pctCislo(r.up,r.um,r.un)??'—'}<div class="profil-usp">${sZnamenkem(uspesnost(r.up,r.um,r.un))}</div></td>
       <td>${r.bp}</td>
-      <td>${r.po}</td>
+      <td>${r.po}${r.po&&r.obrana?`<div class="profil-usp" title="Z toho skončilo naším bodem">${r.obrana.pct}%</div>`:''}</td>
       <td>${r.cm}</td>
       <td style="color:var(--accent);font-weight:700">${r.total}</td>
     </tr>`).join('')}</tbody></table>
-    <div class="profil-legenda">Druhé číslo je úspěšnost: (výborné − chyby) / pokusy.</div>
+    <div class="profil-legenda">Druhé číslo je úspěšnost: (výborné − chyby) / pokusy.
+      U pole je to konverze: kolik rozeher s vybraným balonem skončilo naším bodem.</div>
     </div>`:'';
 
   document.getElementById('profil-obsah').innerHTML=souhrnHtml+grafy+tabulka;

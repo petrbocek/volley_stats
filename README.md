@@ -72,6 +72,14 @@ Tabulka ve Statistikách má u servisu, příjmu i útoku vedle výborných a ch
 i **počet pokusů** — jmenovatel toho procenta vedle. Bez něj se nepozná, že
 100 % jsou dvě podání a 60 % dvacet.
 
+U obrany se nepočítá kolik, ale co z toho: **konverze z obrany** je podíl
+rozeher s vybraným balonem, které skončily naším bodem. Je v pruhu u hřiště
+(za set) a v profilu hráčky (kostka a druhé číslo u sloupce Pole). Počet
+obran sám o sobě měří hlavně to, kolikrát do nás soupeř útočil. Pozor na
+dvě věci: není to zásluha jen obránkyně (po obraně ještě někdo nahrává
+a zakončuje) a po hráčkách je vzorek malý — při dvaceti obranách je
+nepřesnost kolem ±20 procentních bodů.
+
 Ve Statistikách se sety sčítají. Filtrem „set" se dají rozpadnout zpátky.
 Pozor: zápasy z doby před zavedením setů (#32) mají všechno pod 1. setem,
 takže u nich rozpad nic neřekne.

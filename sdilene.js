@@ -110,10 +110,15 @@ function vymenyZLogu(udalosti,prvniPodani){
   let podava=prvniPodani||null;
   let serie={kdo:null,delka:0},nejdelsi={my:0,oni:0};
   const vymeny=[];
+  let obrany=[];                           // kdo v rozehrané výměně vybral balon
   udalosti.forEach(u=>{
     const bod=komuBod(u.pole);
-    if(!bod)return;                        // výměna pokračovala
-    vymeny.push({podaval:podava,bod,zona1:u.zona1_hrac_id||null,pole:u.pole,hrac_id:u.hrac_id});
+    if(!bod){                              // výměna pokračovala
+      if(u.pole==='pole_neutral'&&u.hrac_id)obrany.push(u.hrac_id);
+      return;
+    }
+    vymeny.push({podaval:podava,bod,zona1:u.zona1_hrac_id||null,pole:u.pole,hrac_id:u.hrac_id,obrany});
+    obrany=[];
     if(serie.kdo===bod)serie.delka++;else serie={kdo:bod,delka:1};
     if(serie.delka>nejdelsi[bod])nejdelsi[bod]=serie.delka;
     if(podava&&bod!==podava)podava=bod;    // ztráta podání
@@ -177,6 +182,23 @@ function souperSestavaZeTed(m,kroku){
   const out=[];
   for(let z=1;z<=6;z++)out.push(m.get(poRotaci(z,kroku||0))??null);
   return out;
+}
+
+/* ─── KONVERZE Z OBRANY ───
+   Počet vybraných balonů sám o sobě měří hlavně to, kolikrát do nás soupeř
+   útočil. Co se dá číst, je kolik rozeher s obranou skončilo naším bodem —
+   kvůli tomu se vybírá. Stejnou cestou jdou profi nástroje, jen tam se
+   obrana navíc známkuje; tohle se spočítá z logu bez jediného kliku (#120).
+
+   Není to zásluha jedné hráčky: po obraně ještě někdo nahrává a zakončuje,
+   takže je to vlastnost výměny. S hráčkou se počítají výměny, ve kterých
+   vybírala ona — a když vybírala dvakrát, pořád je to jedna výměna. */
+function konverzeZObrany(vymeny,hracId){
+  const s=(vymeny||[]).filter(v=>v.obrany&&v.obrany.length&&
+    (hracId==null||v.obrany.includes(hracId)));
+  if(!s.length)return null;
+  const nase=s.filter(v=>v.bod===STRANY.MY).length;
+  return {pct:Math.round(nase/s.length*100),nase,celkem:s.length};
 }
 
 /* ─── PŘERUŠENÍ ───
