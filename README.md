@@ -79,6 +79,11 @@ pokusů, procenta i součtu „Celkem" — jinak by tým, který hodně přehazu
 měl uměle horší útok. Volný míč **od soupeře** se nezapisuje a pozor na
 záměnu s polem: `pole` je vybraný balon po útoku, ne příjem volného míče.
 
+Pole má tři tlačítka a každé znamená něco jiného: **`/`** vybraný balon po
+útoku (obrana), **`−`** balon spadl (ztracený bod, počítá se do skóre jako
+každé minus) a **`~`** zvednutý volný míč od soupeře. Bez toho rozdělení
+byla obrana smíchaná s volnými míči a vycházela líp, než jaká byla.
+
 U obrany se nepočítá kolik, ale co z toho: **konverze z obrany** je podíl
 rozeher s vybraným balonem, které skončily naším bodem. Je v pruhu u hřiště
 (za set) a v profilu hráčky (kostka a druhé číslo u sloupce Pole). Počet
