@@ -119,6 +119,12 @@ ne zápas. Každý má práh a minimální vzorek, takže se neukáže věta
 postavená na třech výměnách. „Soupeř uhrál 45 bodů, z toho 31 z našich
 chyb (69 %)" je fakt; co s tím, ví trenér líp než appka.
 
+Poslední blok je **„Čemu nevěřit"**: co appka o svých vlastních číslech
+ví, že nesedí — smíchaná obrana s volnými míči, příjem zapsaný jen
+u části výměn, sety bez zadaného prvního podání, skóre rozcházející se
+s Výsledkem. A když se počítadla rozejdou s logem, radši se procento
+neřekne, než aby vyšlo „300 %".
+
 ## Týmy
 
 Tým patří sezóně, ve které vznikl, a v jiné se nenabízí. Členství hráček je

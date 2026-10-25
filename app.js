@@ -3503,6 +3503,25 @@ function renderStatistiky(){
 
    Postřehy jsou schválně jen konstatování, ne rady: appka vidí čísla, ne
    zápas. „Side-out 44 %" je fakt, „hrajte lepší příjem" by byla drzost. */
+/* 1 bod, 2 body, 5 bodů. Bez toho zní postřehy jako strojový překlad —
+   a věta, která drhne, se čte hůř než číslo v tabulce (#128). */
+function cesky(n,jeden,dva,pet){
+  const a=Math.abs(n);
+  return `${n} ${a===1?jeden:(a>=2&&a<=4?dva:pet)}`;
+}
+
+/* Kde se body braly: break je bod při soupeřově podání, zbytek je bod při
+   vlastním. Bez toho rozpadu se z „75 bodů" nepozná, jestli zápas vyhrál
+   servis, nebo příjem (#128). */
+function bilanceVymen(vymeny){
+  const znamo=(vymeny||[]).filter(v=>v.podaval);
+  const prijem=znamo.filter(v=>v.podaval===STRANY.ONI);
+  const podani=znamo.filter(v=>v.podaval===STRANY.MY);
+  return {celkem:(vymeny||[]).length,znamo:znamo.length,
+          prijem:prijem.length,breaky:prijem.filter(v=>v.bod===STRANY.MY).length,
+          podani:podani.length,zPodani:podani.filter(v=>v.bod===STRANY.MY).length};
+}
+
 function souhrnSetu(zapasId,set){
   const radky=state.statistiky.filter(s=>s.zapas_id===zapasId&&(s.set_cislo||1)===set);
   const v=f=>radky.reduce((n,s)=>n+(s[f]||0),0);
@@ -3561,9 +3580,11 @@ function vyhodnoceniZapasu(zapasId){
     bodySoupere:scti('bodySoupere'),chybySoupere:scti('chybySoupere'),
     breaky:scti('breaky'),
     sideOut:sideOutZVymen(vymeny,sety.some(s=>s.sideOut)),
-    obrana:konverzeZObrany(vymeny),volny:konverzeZVolneho(vymeny)};
-  const d={z,sety,celek,hracky:hrackyZapasu(zapasId),stav:stavUtkani(zapasId)};
+    obrana:konverzeZObrany(vymeny),volny:konverzeZVolneho(vymeny),
+    vymeny:bilanceVymen(vymeny)};
+  const d={z,sety,celek,hracky:hrackyZapasu(zapasId),stav:stavUtkani(zapasId),zapasId};
   d.postrehy=postrehyZeZapasu(d);
+  d.vyhrady=vyhradyKCislum(d);
   return d;
 }
 
@@ -3573,10 +3594,13 @@ function postrehyZeZapasu(d){
   const out=[],c=d.celek;
   const pridej=(typ,text)=>out.push({typ,text});
 
-  if(c.skore.jejich>=10){
+  /* Podíl dává smysl jen tehdy, když čísla sedí. Když je chyb víc než jejich
+     bodů, rozchází se počítadla s logem — a tvrdit „300 %" je horší než
+     neříct nic; na nesrovnalost upozorní „čemu nevěřit" (#128). */
+  if(c.skore.jejich>=10&&c.chybyNase<=c.skore.jejich){
     const pct=Math.round(c.chybyNase/c.skore.jejich*100);
     pridej(pct>=60?'spatne':pct<=40?'dobre':'fakt',
-      `Soupeř uhrál ${c.skore.jejich} bodů, z toho ${c.chybyNase} z našich chyb (${pct} %).`);
+      `Soupeř uhrál ${cesky(c.skore.jejich,'bod','body','bodů')}, z toho ${c.chybyNase} z našich chyb (${pct} %).`);
   }
   if(c.sideOut&&c.sideOut.celkem>=15){
     pridej(c.sideOut.pct>=65?'dobre':c.sideOut.pct<50?'spatne':'fakt',
@@ -3598,7 +3622,7 @@ function postrehyZeZapasu(d){
   }
   if(c.servis.p+c.servis.m>=5){
     pridej(c.servis.m>c.servis.p*2?'spatne':c.servis.p>=c.servis.m?'dobre':'fakt',
-      `Servis: ${c.servis.p} ${c.servis.p===1?'eso':'es'} proti ${c.servis.m} chybám.`);
+      `Servis: ${cesky(c.servis.p,'eso','esa','es')} proti ${cesky(c.servis.m,'chybě','chybám','chybám')}.`);
   }
   if(c.obrana&&c.obrana.celkem>=10){
     pridej(c.obrana.pct>=55?'dobre':c.obrana.pct<45?'spatne':'fakt',
@@ -3608,33 +3632,91 @@ function postrehyZeZapasu(d){
     pridej(c.volny.pct>=70?'dobre':'spatne',
       `Z volných míčů od soupeře jsme uhráli ${c.volny.pct} % (${c.volny.nase}/${c.volny.celkem}); za normu se bere 70 %.`);
   }
-  if(c.pole.p+c.pole.m>=10){
+  /* „100 % zvednutých" u zápasu, kde se spadlé balony nezapisovaly, není
+     pochvala, ale prázdná věta. Proto až od první zapsané chyby v poli. */
+  if(c.pole.m>0&&c.pole.p+c.pole.m>=10){
     const pct=Math.round(c.pole.p/(c.pole.p+c.pole.m)*100);
     pridej(pct>=70?'dobre':pct<50?'spatne':'fakt',
       `V poli jsme zvedli ${c.pole.p} balonů z ${c.pole.p+c.pole.m} (${pct} %).`);
   }
+  // Kolik si soupeř uhrál sám. Málo znamená, že zápas rozhodly naše chyby,
+  // ne jeho hra — a to platí i u výhry.
+  if(c.skore.jejich>=15&&c.bodySoupere<=c.skore.jejich*0.25&&c.chybyNase<=c.skore.jejich){
+    pridej('fakt',`Soupeř si z vlastního útoku uhrál jen ${c.bodySoupere} z ${c.skore.jejich} bodů; zbytek jsme mu dali sami.`);
+  }
+  const v=c.vymeny;
+  if(v&&v.znamo>=30){
+    // počítá se z výměn, ne ze skóre: ta dvě čísla se při neúplném zápisu
+    // rozcházejí a věta by si pak odporovala sama se sebou
+    pridej('fakt',`Z výměn jsme uhráli ${cesky(v.breaky,'break','breaky','breaků')} a ${cesky(v.zPodani,'bod','body','bodů')} při vlastním podání.`);
+  }
+  const podani=c.servis.p+c.servis.m+c.servis.n;
+  if(podani>=30){
+    const esaPct=Math.round(c.servis.p/podani*100);
+    if(esaPct>=15)pridej('dobre',`Eso padlo z ${esaPct} % podání (${c.servis.p} ze ${podani}) — tím se zápas lámal.`);
+    const chybPct=Math.round(c.servis.m/podani*100);
+    if(chybPct>=25)pridej('spatne',`Každé čtvrté podání bylo chybné (${c.servis.m} ze ${podani}).`);
+  }
+  // Set, který se vymykal útokem: někdy se vyhraje navzdory němu
+  const utokSety=d.sety.filter(s=>s.utok.p+s.utok.m+s.utok.n>=8);
+  if(utokSety.length>=2){
+    const pct=s=>pctCislo(s.utok.p,s.utok.m,s.utok.n);
+    const nej=utokSety.reduce((a,b)=>pct(b)>pct(a)?b:a);
+    const nic=utokSety.reduce((a,b)=>pct(b)<pct(a)?b:a);
+    if(pct(nej)-pct(nic)>=15)
+      pridej(nic.vysledek==='my'?'fakt':'spatne',
+        `Útok kolísal: ${pct(nej)} % ve ${nej.set}. setu proti ${pct(nic)} % ve ${nic.set}.${
+          nic.vysledek==='my'?' Ten slabší set jsme přesto vyhráli.':''}`);
+  }
+
   // Nejdelší šňůra: zajímavá je, až když je opravdu dlouhá
   const serie=d.sety.map(s=>({set:s.set,...s.nejdelsi})).filter(s=>s.my>=5||s.oni>=5);
   if(serie.length){
     const nase=serie.reduce((a,b)=>b.my>a.my?b:a);
     const jejich=serie.reduce((a,b)=>b.oni>a.oni?b:a);
-    if(nase.my>=5)pridej('dobre',`Nejdelší naše šňůra ${nase.my} bodů (${nase.set}. set).`);
-    if(jejich.oni>=5)pridej('spatne',`Soupeř nám utekl o ${jejich.oni} bodů v řadě (${jejich.set}. set).`);
+    if(nase.my>=5)pridej('dobre',`Nejdelší naše šňůra ${cesky(nase.my,'bod','body','bodů')} (${nase.set}. set).`);
+    if(jejich.oni>=5)pridej('spatne',`Soupeř nám utekl o ${cesky(jejich.oni,'bod','body','bodů')} v řadě (${jejich.set}. set).`);
   }
   const nej=d.hracky.filter(r=>r.body+r.chyby>=5);
   if(nej.length>=2){
     const prvni=nej[0],posledni=nej[nej.length-1];
-    pridej('dobre',`Nejlepší bilance: ${prvni.h.jmeno} ${sZnamenkem(prvni.bilance)} (${prvni.body} bodů, ${prvni.chyby} chyb).`);
+    pridej('dobre',`Nejlepší bilance: ${prvni.h.jmeno} ${sZnamenkem(prvni.bilance)} (${cesky(prvni.body,'bod','body','bodů')}, ${cesky(prvni.chyby,'chyba','chyby','chyb')}).`);
     if(posledni.bilance<0)
-      pridej('spatne',`Nejhorší bilance: ${posledni.h.jmeno} ${sZnamenkem(posledni.bilance)} (${posledni.body} bodů, ${posledni.chyby} chyb).`);
+      pridej('spatne',`Nejhorší bilance: ${posledni.h.jmeno} ${sZnamenkem(posledni.bilance)} (${cesky(posledni.body,'bod','body','bodů')}, ${cesky(posledni.chyby,'chyba','chyby','chyb')}).`);
   }
+  return out;
+}
+
+/* ─── ČEMU NEVĚŘIT ───
+   Čísla vypadají stejně důvěryhodně, ať stojí na stovce výměn nebo na pěti.
+   Tohle je druhá půlka poctivosti: co appka o svých vlastních číslech ví,
+   že nesedí. Vychází to z dat, ne z dojmu (#128). */
+function vyhradyKCislum(d){
+  const out=[],c=d.celek;
+  if(c.pole.p>0&&c.pole.m===0&&c.pole.f===0)
+    out.push('Obrana může být smíchaná s volnými míči: v tomhle zápase se klepalo jen „vybráno", bez rozlišení spadlých balonů a zvednutých volných míčů.');
+  if(c.vymeny&&c.vymeny.prijem>0){
+    const pokusu=c.prijem.p+c.prijem.m+c.prijem.n;
+    const pokryti=Math.round(pokusu/c.vymeny.prijem*100);
+    if(pokryti<70)
+      out.push(`Příjem je zapsaný jen u ${pokryti} % výměn, kde podával soupeř (${pokusu} z ${c.vymeny.prijem}) — příjmová procenta jsou proto orientační.`);
+  }
+  if(c.vymeny&&c.vymeny.celkem&&c.vymeny.znamo<c.vymeny.celkem)
+    out.push(`U ${c.vymeny.celkem-c.vymeny.znamo} výměn není zadané první podání v setu, takže se nepočítají do side-outu ani do breaků.`);
+  if(c.vymeny&&c.vymeny.celkem<30)
+    out.push('Málo výměn na to, aby procenta něco znamenala — ber to jako poznámku, ne jako číslo.');
+  d.sety.forEach(s=>{
+    const k=kontrolaSkore(d.zapasId,s.set);
+    if(k&&!k.sedi)
+      out.push(`${s.set}. set: z akcí vychází ${k.odvozene.nase}:${k.odvozene.jejich}, ve Výsledku je ${k.zapsane.nase}:${k.zapsane.jejich} — část zápisu chybí.`);
+  });
   return out;
 }
 
 function otevriVyhodnoceni(zapasId){
   const d=vyhodnoceniZapasu(zapasId);
   if(!d){toast('Vyhodnocení se nepodařilo sestavit','error');return;}
-  const {z,sety,celek,hracky,postrehy,stav}=d;
+  const {z,sety,celek,hracky,postrehy,vyhrady,stav}=d;
   document.getElementById('vyhodnoceni-title').textContent=
     `${esc(z.soupet)} · ${fmtDate(z.datum)}`;
   const pct=(p,m,n)=>{const v=pctCislo(p,m,n);return v==null?'—':v+' %';};
@@ -3659,8 +3741,14 @@ function otevriVyhodnoceni(zapasId){
     ${kostka(celek.sideOut&&celek.sideOut.pct!=null?celek.sideOut.pct+'%':'—','Side-out')}
     ${kostka(pct(celek.utok.p,celek.utok.m,celek.utok.n),'Útok % výb.')}
     ${kostka(pct(celek.prijem.p,celek.prijem.m,celek.prijem.n),'Příjem % výb.')}
-    ${kostka(celek.servis.p,'Esa','var(--green)')}
-    ${kostka(celek.chybyNase,'Naše chyby','var(--red)')}
+    ${kostka(`${celek.servis.p}/${celek.servis.m}`,'Esa / chyby podání',
+      celek.servis.p>celek.servis.m?'var(--green)':'var(--red)',
+      `Z ${celek.servis.p+celek.servis.m+celek.servis.n} podání`)}
+    ${kostka(celek.chybyNase,'Naše chyby','var(--red)',
+      celek.skore.jejich?`Soupeř uhrál ${celek.skore.jejich} bodů, z toho ${celek.chybyNase} z našich chyb`:'')}
+    ${celek.vymeny&&celek.vymeny.znamo>=10
+      ?kostka(`${celek.vymeny.breaky}/${celek.vymeny.zPodani}`,'Breaky / z podání',null,
+        'Body získané při soupeřově podání a při vlastním'):''}
     ${kostka(celek.obrana?celek.obrana.pct+'%':'—','Obrana → bod')}
     ${celek.volny?kostka(celek.volny.pct+'%','Volný míč → bod'):''}
   </div>`;
@@ -3670,7 +3758,8 @@ function otevriVyhodnoceni(zapasId){
 
   const tabulkaSetu=`<div style="overflow-x:auto"><table class="profil-tabulka">
     <thead><tr><th>Set</th><th>Skóre</th><th title="Uhrané výměny při soupeřově podání">Side&nbsp;out</th>
-      <th title="Body získané při soupeřově podání">Breaky</th><th>Útok&nbsp;%</th><th>Příjem&nbsp;%</th>
+      <th title="Body získané při soupeřově podání">Breaky</th>
+      <th title="Esa a chyby podání">Servis</th><th>Útok&nbsp;%</th><th>Příjem&nbsp;%</th>
       <th title="Rozehry s vybraným balonem, které skončily naším bodem">Obrana</th>
       <th title="Naše chyby">Chyby</th></tr></thead>
     <tbody>${sety.map(s=>`<tr>
@@ -3678,6 +3767,7 @@ function otevriVyhodnoceni(zapasId){
       <td class="${s.skore.nase>s.skore.jejich?'zapas-plus':s.skore.nase<s.skore.jejich?'zapas-minus':''}">${s.skore.nase}:${s.skore.jejich}</td>
       <td>${s.sideOut&&s.sideOut.pct!=null?s.sideOut.pct+'%':'—'}</td>
       <td>${s.breaky}</td>
+      <td><span class="zapas-plus">${s.servis.p}</span>/<span class="zapas-minus">${s.servis.m}</span></td>
       <td>${pct(s.utok.p,s.utok.m,s.utok.n)}</td>
       <td>${pct(s.prijem.p,s.prijem.m,s.prijem.n)}</td>
       <td>${s.obrana?s.obrana.pct+'%':'—'}</td>
@@ -3699,10 +3789,13 @@ function otevriVyhodnoceni(zapasId){
       příjem, útok, chyby v poli a ostatní chyby. Body soupeře z jeho útoku v tom nejsou —
       ty appka k nikomu nepřiřazuje.</div></div>`:'';
 
+  const vyhradyHtml=vyhrady.length?`<div class="zapas-nadpis">Čemu nevěřit</div>
+    <div class="zapas-vyhrady">${vyhrady.map(t=>`<div class="zapas-vyhrada">${esc(t)}</div>`).join('')}</div>`:'';
+
   document.getElementById('vyhodnoceni-obsah').innerHTML=
     souhrn+postrehyHtml+
     `<div class="zapas-nadpis">Po setech</div>`+tabulkaSetu+
-    `<div class="zapas-nadpis">Hráčky</div>`+tabulkaHracek;
+    `<div class="zapas-nadpis">Hráčky</div>`+tabulkaHracek+vyhradyHtml;
   openModal('modal-vyhodnoceni');
 }
 

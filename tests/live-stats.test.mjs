@@ -5372,6 +5372,62 @@ pass &= ok('T65d postřehy jsou konstatování a nesou čísla, na kterých stoj
       !/měli byste|zlepšit|doporuč/i.test(text);   // konstatování, ne rady
   }));
 
+pass &= ok('T65h postřehy řeknou, odkud se bral bod a kolik si soupeř uhrál sám (#128)',
+  await page.evaluate(() => {
+    const p = postrehyZeZapasu({
+      celek: { skore: { nase: 75, jejich: 43 }, chybyNase: 37, bodySoupere: 6,
+        sideOut: { pct: 64, uhrano: 28, celkem: 44 },
+        servis: { p: 17, m: 13, n: 43 }, prijem: { p: 18, m: 3, n: 18 },
+        utok: { p: 32, m: 14, n: 37, f: 0 }, pole: { p: 48, m: 0, f: 0 },
+        obrana: { pct: 73, nase: 27, celkem: 37 }, volny: null,
+        vymeny: { celkem: 118, znamo: 118, prijem: 44, breaky: 28, podani: 74, zPodani: 47 } },
+      sety: [], hracky: [] });
+    const text = p.map(x => x.text).join(' ');
+    return /jen 6 z 43/.test(text) &&                 // soupeř si sám uhrál skoro nic
+      /28 breaků a 47/.test(text) &&                  // odkud se bral bod
+      /23 % podání/.test(text);                       // eso z každého čtvrtého
+  }));
+
+pass &= ok('T65i appka řekne, čemu na vlastních číslech nevěřit (#128)',
+  await page.evaluate(() => {
+    const v = vyhradyKCislum({ zapasId: 100, sety: [],
+      celek: { skore: { nase: 75, jejich: 43 }, prijem: { p: 5, m: 1, n: 2 },
+        pole: { p: 20, m: 0, f: 0 },
+        vymeny: { celkem: 100, znamo: 80, prijem: 40, breaky: 20, podani: 40, zPodani: 25 } } });
+    const text = v.join(' ');
+    return v.length >= 3 &&
+      /smíchaná s volnými míči/.test(text) &&         // staré pole bez rozlišení
+      /20 % výměn/.test(text) &&                      // 8 příjmů ze 40 výměn
+      /20 výměn není zadané první podání/.test(text);
+  }));
+pass &= ok('T65j čistě zapsaný zápas žádné výhrady nemá (#128)',
+  await page.evaluate(() => vyhradyKCislum({ zapasId: 100, sety: [],
+    celek: { skore: { nase: 75, jejich: 43 }, prijem: { p: 30, m: 4, n: 6 },
+      pole: { p: 20, m: 5, f: 8 },
+      vymeny: { celkem: 100, znamo: 100, prijem: 44, breaky: 20, podani: 56, zPodani: 35 } } }).length === 0));
+
+/* Když se počítadla rozejdou s logem (neúplný zápis), nesmí z toho vypadnout
+   nesmysl typu „300 % bodů z našich chyb" — to by appku shodilo z důvěry
+   rychleji než chybějící číslo. Odhaleno kontrolou proti ostrým datům. */
+pass &= ok('T65k z nesedících čísel se nedělají procenta (#128)',
+  await page.evaluate(() => {
+    const p = postrehyZeZapasu({
+      celek: { skore: { nase: 23, jejich: 10 }, chybyNase: 30, bodySoupere: 10,
+        sideOut: null, servis: { p: 1, m: 1, n: 1 }, prijem: { p: 0, m: 0, n: 0 },
+        utok: { p: 0, m: 0, n: 0, f: 0 }, pole: { p: 35, m: 0, f: 0 },
+        obrana: null, volny: null, vymeny: { celkem: 5, znamo: 5, prijem: 2, breaky: 1, podani: 3, zPodani: 2 } },
+      sety: [], hracky: [] });
+    const text = p.map(x => x.text).join(' ');
+    return !/\d{3,} %/.test(text) &&            // žádné 300 %
+      !/z našich chyb/.test(text) &&            // podíl se radši neřekne
+      !/V poli jsme zvedli/.test(text);         // 100 % bez zapsaných chyb nic neříká
+  }));
+pass &= ok('T65l věty mluví česky: 1 bod, 2 body, 5 bodů (#128)',
+  await page.evaluate(() => cesky(1, 'bod', 'body', 'bodů') === '1 bod' &&
+    cesky(3, 'bod', 'body', 'bodů') === '3 body' &&
+    cesky(11, 'bod', 'body', 'bodů') === '11 bodů' &&
+    cesky(1, 'chyba', 'chyby', 'chyb') === '1 chyba'));
+
 await page.evaluate(() => otevriVyhodnoceni(100));
 await page.waitForSelector('#modal-vyhodnoceni:not(.hidden)');
 pass &= ok('T65e okno ukáže kostky, sety i hráčky (#126)',
