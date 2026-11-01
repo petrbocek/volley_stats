@@ -137,6 +137,29 @@ Tým patří sezóně, ve které vznikl, a v jiné se nenabízí. Členství hr�
 tím pádem vázané na sezónu taky — ve správě týmu se nabízejí jen hráčky ze
 soupisky té sezóny. Do nové sezóny se tým nepřenáší, založí se znovu.
 
+### Číslo dresu
+
+Číslo patří **týmu, ne hráčce**. Jedna hráčka hraje ve víc týmech a ne všude
+má stejné číslo; dokud bylo číslo jen na hráčce, nesla si ho všude s sebou
+a ve třech týmech tím vznikly dvojice se stejným číslem.
+
+V kartotéce se vede **obvyklé číslo** a ve správě týmu ho jde přebít. Prázdné
+políčko znamená „platí obvyklé", takže se vyplňují jen výjimky:
+
+```
+číslo v týmu = vb_hraci_tymy.cislo, když je zadané
+             = vb_hraci.cislo jinak
+```
+
+Bez týmu — profil hráčky přes sezóny, kartotéka, statistiky bez filtru na tým
+— platí obvyklé číslo. Žádné jedno správné tam totiž není, protože se míchají
+hráčky z více týmů.
+
+Dvě stejná čísla v jednom týmu se **nezakazují**, jen se na ně ve správě týmu
+upozorní: při přepisování čísel kolize na chvíli vznikne vždycky. Zakázat ji
+by znamenalo nutit zapisovatele hledat, kdo číslo drží, než ho může dát někomu
+jinému.
+
 ## Soupiska
 
 Hráčku jde smazat jen dokud nemá zaznamenané akce — cizí klíč ve

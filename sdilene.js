@@ -129,6 +129,35 @@ function postZony(zona,zonaNahravacky){
   return POSTY_ZON[(zona-zonaNahravacky+6)%6];
 }
 
+/* ─── ČÍSLO DRESU ───
+   Číslo patří k týmu, ne k hráčce. Jedna holka hraje ve víc týmech a ne všude
+   má stejné číslo; dokud bylo číslo jen na hráčce, nesla si ho všude s sebou
+   a ve třech týmech tím vznikly dvojice se stejným číslem (#130).
+
+   Na hráčce zůstává obvyklé číslo jako výchozí a tým ho jen přebíjí, takže se
+   vyplňují jen výjimky. Bez týmu — profil přes sezóny, kartotéka — platí to
+   obvyklé; tam žádné jedno správné číslo není. */
+function dresVTymu(h,vazby,tymId){
+  if(!h)return null;
+  if(tymId){
+    const v=(vazby||[]).find(x=>x.hrac_id===h.id&&x.tym_id===tymId);
+    if(v&&v.cislo!=null)return v.cislo;
+  }
+  return h.cislo??null;
+}
+
+/* Hráčka s číslem toho týmu. Když se číslo nemění, vrací se původní objekt —
+   kopie navíc by jen zamlžila, kdo kreslí z čeho. */
+function sDresem(h,vazby,tymId){
+  if(!h)return h;
+  const c=dresVTymu(h,vazby,tymId);
+  return c===(h.cislo??null)?h:{...h,cislo:c};
+}
+
+function sDresy(hraci,vazby,tymId){
+  return (hraci||[]).map(h=>sDresem(h,vazby,tymId));
+}
+
 /* ─── VÝMĚNY Z LOGU ───
    Podání přechází, když bod získá ten, kdo nepodával. Z toho a z prvního
    podání plyne u každé výměny, kdo podával — a tedy co byl side-out.
@@ -248,10 +277,13 @@ const STRANY={MY:'my',ONI:'oni'};
 
 function prerusenaZRadku(oddechove,stridani){
   const prerusy=[];
+  // zapas_id jde dál, i když se seznam skládá vždy za jeden set: střídání se
+  // vypisuje jmény s číslem dresu a to je týmové, takže řádek musí vědět,
+  // ke kterému zápasu patří (#130).
   (oddechove||[]).forEach(o=>prerusy.push({typ:'timeout',strana:o.strana||STRANY.MY,
-    my:o.skore_my,oni:o.skore_oni,id:o.id}));
+    my:o.skore_my,oni:o.skore_oni,id:o.id,zapas_id:o.zapas_id??null}));
   (stridani||[]).forEach(x=>prerusy.push({typ:'stridani',strana:x.strana||STRANY.MY,
-    my:x.skore_my,oni:x.skore_oni,id:x.id,
+    my:x.skore_my,oni:x.skore_oni,id:x.id,zapas_id:x.zapas_id??null,
     hrac_ven:x.hrac_ven||null,hrac_dovnitr:x.hrac_dovnitr||null,
     cislo_ven:x.cislo_ven??null,cislo_dovnitr:x.cislo_dovnitr??null}));
   return prerusy;

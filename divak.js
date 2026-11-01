@@ -92,7 +92,14 @@ async function nactiDetail(id){
   const ids=[...new Set([...sestava.map(s=>s.hrac_id),
     ...statistiky.map(x=>x.hrac_id),
     ...stridani.flatMap(x=>[x.hrac_ven,x.hrac_dovnitr])].filter(Boolean))];
-  d.hraci=ids.length?await ziskej(`vb_hraci?id=in.(${ids.join(',')})`):[];
+  const hraci=ids.length?await ziskej(`vb_hraci?id=in.(${ids.join(',')})`):[];
+  /* Číslo dresu platí v rámci týmu, ne u hráčky. Divácká stránka je vždycky
+     jeden zápas, a ten patří jednomu týmu — čísla se proto přeloží jednou tady
+     a všechno dál kreslí z hotového (#130). */
+  const vazby=(zapas.tym_id&&ids.length)
+    ? await ziskej(`vb_hraci_tymy?tym_id=eq.${zapas.tym_id}&hrac_id=in.(${ids.join(',')})`)
+    : [];
+  d.hraci=sDresy(hraci,vazby,zapas.tym_id||null);
   // Set z adresy platí, jen když v něm něco je — jinak by odkaz na pátý set
   // u třísetového zápasu ukázal prázdno.
   const zAdresy=setZAdresy();
