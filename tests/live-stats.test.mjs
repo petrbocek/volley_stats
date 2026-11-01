@@ -31,10 +31,12 @@ const FIX = {
                     { hrac_id: 10, sezona_id: 2 }],
   vb_zapasy: [{ id: 100, sezona_id: 1, soutez_id: 7, datum: '2026-09-10', soupet: 'Soupeř A', misto: 'doma', stav: 'probihajici' },
               { id: 102, sezona_id: 1, datum: '2026-10-05', soupet: 'Soupeř D', misto: 'doma', stav: 'planovany' },
-              { id: 200, sezona_id: 2, datum: '2025-03-01', soupet: 'Soupeř B', misto: 'venku', stav: 'dokonceny', sety_my: 3, sety_oni: 1 }],
+              { id: 200, sezona_id: 2, datum: '2025-03-01', soupet: 'Soupeř B', misto: 'venku', stav: 'dokonceny', sety_my: 3, sety_oni: 1, tym_id: 6 }],
   vb_tymy: [{ id: 5, nazev: TYM_S_XSS, sezona_id: 1 },
             { id: 6, nazev: 'Loňský tým', sezona_id: 2 }],
-  vb_hraci_tymy: [{ hrac_id: 12, tym_id: 5 }, { hrac_id: 10, tym_id: 6 }],
+  // Číslo dresu platí v týmu, ne v kartotéce: Alfa má v kartotéce 1,
+  // v loňském týmu nosila 9 (#130).
+  vb_hraci_tymy: [{ hrac_id: 12, tym_id: 5 }, { hrac_id: 10, tym_id: 6, cislo: 9 }],
   vb_souteze: [{ id: 7, sezona_id: 1, nazev: SOUTEZ_S_XSS }],
   vb_chyby_souperu: [{ zapas_id: 100, set_cislo: 1, pocet: 2, body: 0 }],
   vb_postaveni: [],
@@ -5498,6 +5500,133 @@ await page.evaluate(() => {
   state.liveSet = 1;
   renderLive2(100);
 });
+await klid();
+
+/* ── číslo dresu patří k týmu (#130) ─────────────────────────────────────
+   Hráčka hraje ve víc týmech a ne všude má stejné číslo. Na hráčce zůstává
+   obvyklé číslo jako výchozí, tým ho jen přebíjí. */
+pass &= ok('T66a bez týmu platí obvyklé číslo, s týmem jeho (#130)',
+  await page.evaluate(() => {
+    const h = { id: 10, cislo: 1 };
+    const vazby = [{ hrac_id: 10, tym_id: 6, cislo: 9 }, { hrac_id: 10, tym_id: 5 }];
+    return dresVTymu(h, vazby, 6) === 9 &&       // tým přebíjí
+           dresVTymu(h, vazby, 5) === 1 &&       // vazba bez čísla → obvyklé
+           dresVTymu(h, vazby, 0) === 1 &&       // bez týmu → obvyklé
+           dresVTymu(h, vazby, 99) === 1 &&      // cizí tým → obvyklé
+           dresVTymu(null, vazby, 6) === null;
+  }));
+pass &= ok('T66b hráčka bez čísla v kartotéce zůstane bez čísla (#130)',
+  await page.evaluate(() => dresVTymu({ id: 1 }, [], 6) === null &&
+    dresVTymu({ id: 1, cislo: null }, [{ hrac_id: 1, tym_id: 6, cislo: 0 }], 6) === 0));
+pass &= ok('T66c sDresem nevyrábí kopii, když se číslo nemění (#130)',
+  await page.evaluate(() => {
+    const h = { id: 10, cislo: 1 };
+    const vazby = [{ hrac_id: 10, tym_id: 6, cislo: 9 }];
+    return sDresem(h, vazby, 5) === h && sDresem(h, vazby, 6) !== h &&
+           sDresem(h, vazby, 6).cislo === 9 && h.cislo === 1;
+  }));
+pass &= ok('T66d zápas si číslo bere z týmu, ke kterému patří (#130)',
+  await page.evaluate(() => hracVZapase(200, 10).cislo === 9 &&
+    hracVZapase(100, 10).cislo === 1 &&        // zápas 100 nemá tým
+    state.hraci.find(h => h.id === 10).cislo === 1));   // kartotéka se nemění
+pass &= ok('T66e sestava zápasu nese týmová čísla (#130)',
+  await page.evaluate(() =>
+    serazenaSestava(200, state.hraci).find(h => h.id === 10)?.cislo === 9 &&
+    serazenaSestava(100, state.hraci).find(h => h.id === 10)?.cislo === 1));
+
+// Statistiky: s vybraným týmem jeho čísla, bez něj se míchají hráčky z více
+// týmů a tam žádné jedno správné číslo není.
+pass &= ok('T66f statistiky ukážou číslo vybraného týmu (#130)',
+  await page.evaluate(() => {
+    const sel = document.getElementById('season-select');
+    const puvodniStat = state.statistiky, puvodniSezona = sel.value;
+    // loňský zápas 200 nemá zapsané akce, takže by řádek vypadl na zapasy>0
+    state.statistiky = [...puvodniStat,
+      { zapas_id: 200, hrac_id: 10, set_cislo: 1, utok_plus: 3 }];
+    sel.value = '2';
+    try {
+      const sTymem = spocitejStatistiky({ zapasIds: [200], tymId: 6 });
+      const bez = spocitejStatistiky({ zapasIds: [200] });
+      const c = d => d.rows.find(r => r.h.id === 10)?.h.cislo;
+      return sTymem.stav === 'ok' && c(sTymem) === 9 && c(bez) === 1;
+    } finally {
+      state.statistiky = puvodniStat;
+      sel.value = puvodniSezona;
+    }
+  }));
+
+// ── zadávání čísla ve správě týmu ──
+await page.selectOption('#season-select', '2');
+await klid();
+await page.click('.nav-tab:nth-child(4)');                  // Týmy
+await klid();
+await page.evaluate(() => openTymManage(6));
+await klid();
+pass &= ok('T66g políčko drží číslo v týmu a obvyklé nabízí jako placeholder (#130)',
+  await page.evaluate(() => {
+    const i = document.querySelector('#tym-manage-content .tym-cislo');
+    return !!i && i.value === '9' && i.placeholder === '1';
+  }));
+pass &= ok('T66h karta ve správě týmu ukazuje týmové číslo (#130)',
+  await page.evaluate(() =>
+    document.querySelector('#tym-manage-content .player-num')?.textContent === '9'));
+
+otherWrites = [];
+await page.evaluate(() => ulozCisloVTymu(10, 6, '21'));
+await klid();
+const dresUpsert = otherWrites.find(w => w.table === 'vb_hraci_tymy' && w.method === 'POST');
+pass &= ok('T66i uložení pošle číslo do vazby na tým, ne na hráčku (#130)',
+  !!dresUpsert && dresUpsert.body && dresUpsert.body.cislo === 21 &&
+  dresUpsert.body.hrac_id === 10 && dresUpsert.body.tym_id === 6 &&
+  !otherWrites.some(w => w.table === 'vb_hraci'));
+pass &= ok('T66j po uložení platí nové číslo i v zápase toho týmu (#130)',
+  await page.evaluate(() => hracVZapase(200, 10).cislo === 21 &&
+    state.hraci.find(h => h.id === 10).cislo === 1));
+
+otherWrites = [];
+await page.evaluate(() => ulozCisloVTymu(10, 6, ''));
+await klid();
+pass &= ok('T66k prázdné políčko vrátí obvyklé číslo (#130)',
+  otherWrites.some(w => w.table === 'vb_hraci_tymy' && w.body && w.body.cislo === null) &&
+  await page.evaluate(() => hracVZapase(200, 10).cislo === 1 &&
+    document.querySelector('#tym-manage-content .tym-cislo')?.value === ''));
+
+otherWrites = [];
+await page.evaluate(() => ulozCisloVTymu(10, 6, '123'));
+await klid();
+pass &= ok('T66l číslo mimo 0–99 se neuloží (#130)',
+  !otherWrites.some(w => w.table === 'vb_hraci_tymy' && w.method === 'POST'));
+
+/* Dvě stejná čísla v jednom týmu se nezakazují — při přepisování vzniknou vždy
+   na chvíli — ale musí být vidět, protože přesně tohle appka dřív nepoznala. */
+pass &= ok('T66m dvě stejná čísla v týmu appka pojmenuje (#130)',
+  await page.evaluate(() => {
+    state.hraciTymy.push({ hrac_id: 11, tym_id: 6, cislo: 1 });   // Beta taky 1
+    renderTymManage(6);
+    const v = document.querySelector('#tym-manage-content .tym-kolize')?.textContent || '';
+    const dvojice = dvojiceDresu(6);
+    return /Číslo 1 nosí/.test(v) && /Alfa/.test(v) && /Beta/.test(v) &&
+           dvojice.length === 1 && dvojice[0][0] === 1;
+  }));
+pass &= ok('T66n bez kolize se nevaruje (#130)',
+  await page.evaluate(() => {
+    state.hraciTymy = state.hraciTymy.filter(x => !(x.hrac_id === 11 && x.tym_id === 6));
+    renderTymManage(6);
+    return dvojiceDresu(6).length === 0 &&
+           !document.querySelector('#tym-manage-content .tym-kolize');
+  }));
+
+await page.evaluate(() => closeModal('modal-tym-manage'));
+await klid();
+
+// Editace hráčky sahá na obvyklé číslo; kdyby brala přeložené, týmové číslo
+// by se jí zapsalo do kartotéky a rozlilo do všech ostatních týmů.
+await page.evaluate(() => editHrac(10));
+await klid();
+pass &= ok('T66o editace hráčky nabídne obvyklé číslo, ne týmové (#130)',
+  await page.$eval('#in-hrac-cislo', e => e.value) === '1');
+await page.evaluate(() => closeModal('modal-hrac'));
+await page.selectOption('#season-select', '1');
 await klid();
 
 await b.close();

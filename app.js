@@ -386,6 +386,21 @@ function jeArchivovana(h){return h.aktivni===false;}
 function zivehraci(){return state.hraci.filter(h=>!jeArchivovana(h));}
 function maStatistiky(hracId){return state.statistiky.some(s=>s.hrac_id===hracId);}
 
+/* Číslo dresu je týmové (viz dresVTymu v sdilene.js), takže hráčka se v zápise
+   nikdy nebere ze state.hraci přímo — tyhle dvě cesty k ní jsou jediné dvě,
+   kde se číslo přeloží. Zápas ví, ke kterému týmu patří, a sestava do živého
+   zápisu teče jen přes serazenaSestava, takže všechna místa, co z ní kreslí,
+   mají správné číslo samy (#130). */
+function tymZapasu(zapasId){
+  return state.zapasy.find(z=>z.id===zapasId)?.tym_id||null;
+}
+function hracVZapase(zapasId,hracId){
+  return sDresem(state.hraci.find(h=>h.id===hracId),state.hraciTymy,tymZapasu(zapasId));
+}
+function dresVZapase(zapasId,hracId){
+  return dresVTymu(state.hraci.find(h=>h.id===hracId),state.hraciTymy,tymZapasu(zapasId));
+}
+
 // Tým patří jedné sezóně (#62). Členství hráček je tím pádem vázané na
 // sezónu taky, protože tým sám v jiné sezóně neexistuje.
 function tymySezony(sid){
@@ -1615,7 +1630,7 @@ function hristeHtml(zapasId){
 
   const karta=zona=>{
     const hracId=m.get(zona);
-    const h=hracId?state.hraci.find(x=>x.id===hracId):null;
+    const h=hracId?hracVZapase(zapasId,hracId):null;
     if(!h)return `<button class="hriste-zona prazdna${zona===1?' podava':''}" onclick="v2OtevriZonu(${zapasId},${zona})"
       title="Obsadit zónu ${zona}"><span class="hriste-cislo-zony">${zona}${zona===1?' • podání':''}</span>
       <span class="hriste-prazdno">+</span></button>`;
@@ -1914,7 +1929,7 @@ function v2OtevriPreruseni(typ,id){
                placeholder="#" value="${r.cislo_ven??''}" /></label>
     </div>${stav}`;
   }else if(typ==='stridani'){
-    const jmeno=hid=>{const h=state.hraci.find(x=>x.id===hid);
+    const jmeno=hid=>{const h=hracVZapase(r.zapas_id,hid);
                       return h?esc(h.jmeno)+(h.cislo?` #${h.cislo}`:''):'—';};
     const zona=zonaHracky(r.zapas_id,r.set_cislo||1,r.hrac_dovnitr);
     obsah.innerHTML=`<div class="prerus-popis">${jmeno(r.hrac_dovnitr)} za ${jmeno(r.hrac_ven)}</div>
@@ -2114,7 +2129,7 @@ async function nastavPrvniPodani(kdo){
 function podavajici(zapasId,set){
   const m=postaveniSetu(zapasId,set);
   const jmeno=zona=>{
-    const h=state.hraci.find(x=>x.id===m.get(zona));
+    const h=hracVZapase(zapasId,m.get(zona));
     return h?h:null;
   };
   return {ted:jmeno(1),pristi:jmeno(2)};
@@ -2194,10 +2209,10 @@ function prubehStavu(zapasId,set){
 }
 
 // Čím výměna skončila: akce a kdo ji udělal, nebo že to byla soupeřova strana.
-function popisVymeny(krok){
+function popisVymeny(krok,zapasId){
   const sp=SOUPER_POLE.find(x=>(x.pole==='pocet'?'souper_chyba':'souper_bod')===krok.pole);
   if(sp)return {kdo:'Soupeř',akce:sp.label};
-  const h=state.hraci.find(x=>x.id===krok.hrac_id);
+  const h=hracVZapase(zapasId,krok.hrac_id);
   return {kdo:h?h.jmeno+(h.cislo?` #${h.cislo}`:''):'—',akce:popisAkce(krok.pole)};
 }
 
@@ -2215,7 +2230,7 @@ function popisStridaniPrerus(p){
     const c=n=>n==null?'—':`#${n}`;
     return `${c(p.cislo_dovnitr)} za ${c(p.cislo_ven)}`;
   }
-  const jmeno=id=>{const h=state.hraci.find(x=>x.id===id);
+  const jmeno=id=>{const h=hracVZapase(p.zapas_id,id);
                    return h?h.jmeno+(h.cislo?` #${h.cislo}`:''):'—';};
   return `${jmeno(p.hrac_dovnitr)} za ${jmeno(p.hrac_ven)}`;
 }
@@ -2291,7 +2306,7 @@ function v2OtevriPrubeh(zapasId){
     // nejnovější nahoře: během zápasu se kouká na to, co se právě stalo
     el.innerHTML=`<div class="prubeh-seznam">${[...vse].reverse().map(k=>{
       if(k.typ!=='vymena')return prubehRadekPrerus(k);
-      const p=popisVymeny(k);
+      const p=popisVymeny(k,zapasId);
       return `<div class="prubeh-radek ${k.bod}">
         <span class="prubeh-poradi">${k.poradi}.</span>
         <span class="prubeh-skore"><b class="${k.bod==='my'?'plus':'minus'}">${k.my}</b>:<b class="${k.bod==='my'?'minus':'plus'}">${k.oni}</b></span>
@@ -2582,7 +2597,7 @@ function prekresliV2Cisla(){
 // jenAkce: modal ukáže jen jednu akci — z dlaždice u sítě už je jasné, která
 // to je, a přebírat zbytek nabídky by znamenalo hledat ji znovu očima.
 function v2OtevriAkce(zapasId,hracId,zona=0){
-  const h=state.hraci.find(h=>h.id===hracId);if(!h)return;
+  const h=hracVZapase(zapasId,hracId);if(!h)return;
   document.getElementById('v2-akce-zapas').value=zapasId;
   document.getElementById('v2-akce-hrac').value=hracId;
   document.getElementById('v2-akce-zona').value=zona;
@@ -2673,13 +2688,16 @@ function serazenaSestava(zapasId,vsichniHraci){
     .filter(zh=>zh.zapas_id===zapasId).map(zh=>[zh.hrac_id,zh.poradi]));
   // vsichniHraci přicházejí abecedně a Array#sort je stabilní, takže hráčky
   // bez pořadí si abecedu mezi sebou udrží samy
-  return vsichniHraci.filter(h=>poradi.has(h.id)).sort((a,b)=>{
+  const serazene=vsichniHraci.filter(h=>poradi.has(h.id)).sort((a,b)=>{
     const pa=poradi.get(a.id),pb=poradi.get(b.id);
     if(pa==null&&pb==null)return 0;
     if(pa==null)return -1;
     if(pb==null)return 1;
     return pa-pb;
   });
+  // Číslo dresu se přeloží na týmové tady, protože tudy jde do živého zápisu
+  // každá sestava — hřiště, seznam, karty i souhrn pak kreslí z hotového.
+  return sDresy(serazene,state.hraciTymy,tymZapasu(zapasId));
 }
 
 // Další volné pořadí. Bere maximum, ne počet řádků — po odebrání hráčky
@@ -2757,7 +2775,9 @@ function openHracPicker(zapasId){
   const lineup=state.zapasHraci.filter(zh=>zh.zapas_id===zapasId).map(zh=>zh.hrac_id);
   const available=vsichni.filter(h=>!lineup.includes(h.id));
   pickerVyber.clear();
-  pickerDostupni=available;
+  // Do sestavy se vybírá v zápase, takže čísla na kartách musí být týmová —
+  // jinak by se do sestavy klikalo podle jiných čísel, než budou na hřišti.
+  pickerDostupni=sDresy(available,state.hraciTymy,z?.tym_id||null);
   const el=document.getElementById('hrac-picker-list');
   const ovladani=document.getElementById('picker-ovladani');
   if(!available.length){
@@ -3229,6 +3249,11 @@ function spocitejStatistiky(prepis=null){
   let hraci=vsechnyHraci;
   if(selTym){const ids=state.hraciTymy.filter(ht=>ht.tym_id===selTym).map(ht=>ht.hrac_id);hraci=hraci.filter(h=>ids.includes(h.id));}
   if(selHrac)hraci=hraci.filter(h=>h.id===selHrac);
+  /* Čísla dresů platí v rámci týmu. Když je tým vybraný (nebo počítá detail
+     týmu), ukážou se jeho čísla; bez týmu se míchají hráčky z více týmů
+     a tam platí to obvyklé z kartotéky (#130). */
+  const tymCisel=prepis?(prepis.tymId||0):selTym;
+  if(tymCisel)hraci=sDresy(hraci,state.hraciTymy,tymCisel);
 
   const zapasyPoCsoutezi=selSoutez?vsechnyZapasy.filter(z=>z.soutez_id===selSoutez):vsechnyZapasy;
   // Vlastní výběr zápasů schválně nefiltruje hráčky podle členství v týmu:
@@ -3556,7 +3581,7 @@ function hrackyZapasu(zapasId){
   return [...podle.values()].map(r=>{
     const body=r.servis_plus+r.utok_plus+r.blok_plus;
     const chyby=r.servis_minus+r.prijem_minus+r.utok_minus+r.chyba_minus+r.pole_minus;
-    return {...r,h:state.hraci.find(h=>h.id===r.hrac_id)||{jmeno:'Neznámá hráčka'},
+    return {...r,h:hracVZapase(zapasId,r.hrac_id)||{jmeno:'Neznámá hráčka'},
             body,chyby,bilance:body-chyby};
   }).filter(r=>r.body||r.chyby||r.pole_neutral||r.prijem_plus||r.prijem_neutral
                ||r.servis_neutral||r.utok_neutral||r.utok_free||r.pole_free)
@@ -4083,7 +4108,7 @@ function detailTymu(tymId){
   const setyOni=done.reduce((n,z)=>n+z.sety_oni,0);
   // Statistiky přes tutéž funkci jako tabulka i CSV — vlastní sčítání by byla
   // druhá cesta k týmž číslům a ta dřív nebo později uteče.
-  const d=spocitejStatistiky({zapasIds:zapasy.map(z=>z.id)});
+  const d=spocitejStatistiky({zapasIds:zapasy.map(z=>z.id),tymId});
   const rows=d.stav==='ok'
     ? [...d.rows].sort((a,b)=>b.total-a.total||(a.h.jmeno||'').localeCompare(b.h.jmeno||'','cs'))
     : [];
@@ -4177,13 +4202,65 @@ function renderTymManage(tymId){
     el.innerHTML='<div class="empty"><span class="empty-icon">👥</span><div class="empty-text">V soupisce té sezóny nejsou žádné hráčky</div></div>';
     return;
   }
-  el.innerHTML=nabidka.map(h=>{
+  /* Číslo dresu se zadává tady, protože platí jen v tomhle týmu. Prázdné
+     políčko znamená „obvyklé číslo z kartotéky" — vyplňují se tak jen
+     výjimky, ne celé soupisky znovu (#130). */
+  const karty=nabidka.map(h=>{
     const isIn=inTym.includes(h.id);
-    return playerCard(h,{
+    const vazba=state.hraciTymy.find(ht=>ht.hrac_id===h.id&&ht.tym_id===tymId);
+    const cisloInput=isIn?`<input type="number" class="tym-cislo" min="0" max="99"
+        inputmode="numeric" value="${vazba&&vazba.cislo!=null?vazba.cislo:''}"
+        placeholder="${h.cislo??'#'}"
+        title="Číslo v tomhle týmu. Prázdné = ${h.cislo!=null?'obvyklé '+h.cislo:'bez čísla'}"
+        onchange="ulozCisloVTymu(${h.id},${tymId},this.value)" />`:'';
+    return playerCard(sDresem(h,state.hraciTymy,tymId),{
       tridy:isIn?'':'inactive',
-      ovladani:`<button class="btn btn-sm ${isIn?'btn-red':'btn-green'}" style="flex-shrink:0" onclick="toggleHracTym(${h.id},${tymId},${isIn})">${isIn?'Odebrat':'+ Přidat'}</button>`
+      ovladani:`${cisloInput}<button class="btn btn-sm ${isIn?'btn-red':'btn-green'}" style="flex-shrink:0" onclick="toggleHracTym(${h.id},${tymId},${isIn})">${isIn?'Odebrat':'+ Přidat'}</button>`
     });
   }).join('');
+  el.innerHTML=varovaniDresu(tymId)+karty;
+}
+
+/* Dvě stejná čísla v jednom týmu jsou to, co appka dřív nepoznala vůbec.
+   Nezakazuje se to — při přepisování čísel kolize na chvíli vznikne vždycky —
+   ale musí být vidět (#130). */
+function dvojiceDresu(tymId){
+  const podle=new Map();
+  state.hraciTymy.filter(x=>x.tym_id===tymId).forEach(x=>{
+    const h=state.hraci.find(y=>y.id===x.hrac_id);
+    if(!h||jeArchivovana(h))return;
+    const c=dresVTymu(h,state.hraciTymy,tymId);
+    if(c==null)return;
+    if(!podle.has(c))podle.set(c,[]);
+    podle.get(c).push(h.jmeno);
+  });
+  return [...podle.entries()].filter(([,jmena])=>jmena.length>1)
+    .sort((a,b)=>a[0]-b[0]);
+}
+
+function varovaniDresu(tymId){
+  const dvojice=dvojiceDresu(tymId);
+  if(!dvojice.length)return '';
+  return `<div class="tym-kolize">⚠ ${dvojice.map(([c,jmena])=>
+    `Číslo ${c} nosí ${esc(jmena.join(' a '))}`).join('; ')}. Na hřišti ani u diváků se nerozliší.</div>`;
+}
+
+async function ulozCisloVTymu(hracId,tymId,hodnota){
+  if(!isLoggedIn()){toast('Na změny se přihlas (🔒 nahoře)','error');renderTymManage(tymId);return;}
+  const txt=String(hodnota??'').trim();
+  const cislo=txt===''?null:parseInt(txt,10);
+  if(cislo!=null&&(!Number.isInteger(cislo)||cislo<0||cislo>99)){
+    toast('Číslo dresu musí být 0–99','error');renderTymManage(tymId);return;
+  }
+  try{
+    await apiUpsert('vb_hraci_tymy',{hrac_id:hracId,tym_id:tymId,cislo},'hrac_id,tym_id');
+    const ht=state.hraciTymy.find(x=>x.hrac_id===hracId&&x.tym_id===tymId);
+    if(ht)ht.cislo=cislo;
+    else state.hraciTymy.push({hrac_id:hracId,tym_id:tymId,cislo});
+    renderTymManage(tymId);
+    renderTymy();
+    toast(cislo==null?'Číslo v týmu zrušeno, platí obvyklé':'Číslo v týmu uloženo','success');
+  }catch(e){toast('Chyba: '+e.message,'error');renderTymManage(tymId);}
 }
 
 async function toggleHracTym(hracId,tymId,inTym){

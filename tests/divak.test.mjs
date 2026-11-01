@@ -21,7 +21,7 @@ const STAV = new Function(await (await fetch(`${ADRESA}/sdilene.js`)).text() +
 const FIX = {
   vb_zapasy: [
     { id: 7, datum: '2026-10-04', cas: '10:00:00', soupet: 'VK Ostrava', stav: STAV.PROBIHA,
-      vitezne_sety: 3, sezona_id: 1, set1_my: null, set1_oni: null },
+      vitezne_sety: 3, sezona_id: 1, tym_id: 3, set1_my: null, set1_oni: null },
     { id: 8, datum: '2026-09-20', cas: null, soupet: 'Starý zápas', stav: STAV.DOKONCENY,
       vitezne_sety: 3, sezona_id: 1 },
     // dva dohrané s výsledkem: jeden vyhraný, jeden prohraný
@@ -79,6 +79,10 @@ const FIX = {
     { id: 27, zapas_id: 9, hrac_id: 12, set_cislo: 4, utok_plus: 1, servis_plus: 0, blok_plus: 0,
       utok_minus: 0, prijem_minus: 0, servis_minus: 0, chyba_minus: 0, pole_neutral: 0 },
   ],
+  // Číslo dresu platí v týmu: Beta nosí v tomhle týmu 21, i když v kartotéce
+  // má 2. Alfa přebití nemá, takže jí zůstává 1 (#130).
+  vb_hraci_tymy: [{ hrac_id: 1, tym_id: 3 }, { hrac_id: 2, tym_id: 3, cislo: 21 },
+                  { hrac_id: 2, tym_id: 4, cislo: 77 }],
   vb_chyby_souperu: [{ zapas_id: 7, set_cislo: 2, pocet: 1, body: 1 }],
   vb_postaveni: [
     { zapas_id: 7, set_cislo: 2, zona: 1, hrac_id: 1 },
@@ -252,6 +256,17 @@ pass &= ok('D6b míč je u podávající, protože podání v téhle chvíli má
 pass &= ok('D6c karty hřiště nesou id hráčky kvůli animaci rotace (#107)',
   await page.$$eval('.hriste .hriste-zona[data-hrac]', els => els.length) > 0);
 
+/* Číslo dresu platí v týmu zápasu, ne v kartotéce. Beta má v kartotéce 2
+   a v tomhle týmu 21; Alfa přebití nemá, takže jí zůstává její 1 (#130). */
+pass &= ok('D6l na hřišti je číslo z týmu, ne z kartotéky (#130)', await page.evaluate(() => {
+  const dres = jmeno => [...document.querySelectorAll('.divak-plocha .hriste .hriste-zona')]
+    .find(z => z.querySelector('.hriste-jmeno')?.textContent === jmeno)
+    ?.querySelector('.hriste-dres')?.textContent;
+  return dres('Beta') === '#21' && dres('Alfa') === '#1';
+}));
+pass &= ok('D6m číslo z jiného týmu se do tohohle zápasu nepropíše (#130)',
+  await page.evaluate(() => !document.body.textContent.includes('#77')));
+
 // ── šestka soupeře za sítí (#107) ─────────────────────────────────────────
 pass &= ok('D6d za sítí stojí šestka soupeře, jen čísla z dresů (#107)',
   await page.$$eval('.hriste-souper .hriste-zona', els => els.length) === 6 &&
@@ -370,8 +385,13 @@ pass &= ok('D13f u soupeře se ukážou čísla na dresech, ne jména', await pa
 pass &= ok('D14 stránka nikam nezapisuje', zapisy.length === 0);
 pass &= ok('D15 tahá jen tenhle zápas, ne celou databázi',
   dotazy.every(q => q.tabulka === 'vb_zapasy' || q.tabulka === 'vb_hraci' ||
-    /zapas_id=eq\.7/.test(q.query)) &&
-  !dotazy.some(q => ['vb_sezony', 'vb_tymy', 'vb_souteze', 'vb_hraci_tymy'].includes(q.tabulka)));
+    q.tabulka === 'vb_hraci_tymy' || /zapas_id=eq\.7/.test(q.query)) &&
+  !dotazy.some(q => ['vb_sezony', 'vb_tymy', 'vb_souteze'].includes(q.tabulka)));
+// Čísla dresů jsou týmová, takže stránka vazby potřebuje — ale jen pro tým
+// toho zápasu a jen pro hráčky, co v něm hrály, ne celou tabulku (#130).
+pass &= ok('D15c vazby na tým si bere jen pro tenhle zápas (#130)',
+  dotazy.filter(q => q.tabulka === 'vb_hraci_tymy').every(q =>
+    /tym_id=eq\.3/.test(q.query) && /hrac_id=in\./.test(q.query)));
 pass &= ok('D15b ptá se na stavy, které appka opravdu zapisuje',
   STAV.PROBIHA === 'probihajici' && STAV.DOKONCENY === 'dokonceny' &&
   dotazySeznamu.some(q => q.tabulka === 'vb_zapasy' &&
