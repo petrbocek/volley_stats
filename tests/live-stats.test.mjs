@@ -5567,9 +5567,20 @@ pass &= ok('T66g políčko drží číslo v týmu a obvyklé nabízí jako place
     const i = document.querySelector('#tym-manage-content .tym-cislo');
     return !!i && i.value === '9' && i.placeholder === '1';
   }));
-pass &= ok('T66h karta ve správě týmu ukazuje týmové číslo (#130)',
-  await page.evaluate(() =>
-    document.querySelector('#tym-manage-content .player-num')?.textContent === '9'));
+/* Políčko nahrazuje kolečko s číslem. Když stálo vedle něj, bylo číslo na
+   kartě dvakrát a jméno se vytlačilo na nulovou šířku. */
+pass &= ok('T66h číslo je na kartě jen jednou, v políčku (#130)',
+  await page.evaluate(() => {
+    const karta = document.querySelector('#tym-manage-content .player-card');
+    return !!karta && !karta.querySelector('.player-num') &&
+           karta.querySelector('.tym-cislo')?.value === '9';
+  }));
+pass &= ok('T66h2 jméno hráčky políčko nevytlačí (#130)',
+  await page.evaluate(() => {
+    const jmeno = document.querySelector('#tym-manage-content .player-card .player-name');
+    return !!jmeno && jmeno.textContent.trim().length > 0 &&
+           jmeno.getBoundingClientRect().width > 40;
+  }));
 
 otherWrites = [];
 await page.evaluate(() => ulozCisloVTymu(10, 6, '21'));
@@ -5605,7 +5616,8 @@ pass &= ok('T66m dvě stejná čísla v týmu appka pojmenuje (#130)',
     renderTymManage(6);
     const v = document.querySelector('#tym-manage-content .tym-kolize')?.textContent || '';
     const dvojice = dvojiceDresu(6);
-    return /Číslo 1 nosí/.test(v) && /Alfa/.test(v) && /Beta/.test(v) &&
+    return /číslo 1 nosí/.test(v) && /Alfa/.test(v) && /Beta/.test(v) &&
+           !/\.\./.test(v) &&
            dvojice.length === 1 && dvojice[0][0] === 1;
   }));
 pass &= ok('T66n bez kolize se nevaruje (#130)',

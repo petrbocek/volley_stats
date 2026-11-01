@@ -450,10 +450,13 @@ const POZICE_TRIDA={'nahrávač':'nahravac','libero':'libero','universál':'univ
                     'blokař':'blokar','smečař':'smec'};
 function poziceTrida(pozice){return 'pos-'+(POZICE_TRIDA[pozice]||'smec');}
 
-function playerCard(h,{tridy='',atributy='',ovladani=''}={}){
-  const cislo=h.cislo
+/* `cisloHtml` nahradí kolečko s číslem — ve správě týmu je na jeho místě
+   políčko, protože číslo se tam zadává. Vedle kolečka to být nemůže: stejné
+   číslo by na kartě stálo dvakrát a políčko by ukrojilo šířku jménu (#130). */
+function playerCard(h,{tridy='',atributy='',ovladani='',cisloHtml=''}={}){
+  const cislo=cisloHtml||(h.cislo
     ?`<div class="player-num">${h.cislo}</div>`
-    :`<div class="player-num no-num">?</div>`;
+    :`<div class="player-num no-num">?</div>`);
   return `<div class="player-card ${tridy}" ${atributy}>
     ${cislo}
     <div class="player-info">
@@ -4208,14 +4211,16 @@ function renderTymManage(tymId){
   const karty=nabidka.map(h=>{
     const isIn=inTym.includes(h.id);
     const vazba=state.hraciTymy.find(ht=>ht.hrac_id===h.id&&ht.tym_id===tymId);
-    const cisloInput=isIn?`<input type="number" class="tym-cislo" min="0" max="99"
+    const cisloHtml=isIn?`<input type="number" class="tym-cislo" min="0" max="99"
         inputmode="numeric" value="${vazba&&vazba.cislo!=null?vazba.cislo:''}"
         placeholder="${h.cislo??'#'}"
         title="Číslo v tomhle týmu. Prázdné = ${h.cislo!=null?'obvyklé '+h.cislo:'bez čísla'}"
+        aria-label="Číslo dresu v týmu"
         onchange="ulozCisloVTymu(${h.id},${tymId},this.value)" />`:'';
     return playerCard(sDresem(h,state.hraciTymy,tymId),{
       tridy:isIn?'':'inactive',
-      ovladani:`${cisloInput}<button class="btn btn-sm ${isIn?'btn-red':'btn-green'}" style="flex-shrink:0" onclick="toggleHracTym(${h.id},${tymId},${isIn})">${isIn?'Odebrat':'+ Přidat'}</button>`
+      cisloHtml,
+      ovladani:`<button class="btn btn-sm ${isIn?'btn-red':'btn-green'}" style="flex-shrink:0" onclick="toggleHracTym(${h.id},${tymId},${isIn})">${isIn?'Odebrat':'+ Přidat'}</button>`
     });
   }).join('');
   el.innerHTML=varovaniDresu(tymId)+karty;
@@ -4241,8 +4246,11 @@ function dvojiceDresu(tymId){
 function varovaniDresu(tymId){
   const dvojice=dvojiceDresu(tymId);
   if(!dvojice.length)return '';
-  return `<div class="tym-kolize">⚠ ${dvojice.map(([c,jmena])=>
-    `Číslo ${c} nosí ${esc(jmena.join(' a '))}`).join('; ')}. Na hřišti ani u diváků se nerozliší.</div>`;
+  // Jména končí tečkou („Eliška Š."), takže za ně žádná nepatří — jinak z toho
+  // je „Eliška Š.. Na hřišti".
+  return `<div class="tym-kolize">⚠ Na hřišti ani u diváků se nerozliší: ${
+    dvojice.map(([c,jmena])=>
+      `číslo ${c} nosí ${esc(jmena.join(' a '))}`).join('; ')}</div>`;
 }
 
 async function ulozCisloVTymu(hracId,tymId,hodnota){
