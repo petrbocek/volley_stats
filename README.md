@@ -119,6 +119,11 @@ ne zápas. Každý má práh a minimální vzorek, takže se neukáže věta
 postavená na třech výměnách. „Soupeř uhrál 45 bodů, z toho 31 z našich
 chyb (69 %)" je fakt; co s tím, ví trenér líp než appka.
 
+Mezi kostkami je i **„Nedohrané útoky"** — volné míče přehozené soupeři
+plus nehratelné nahrávky. Útočné procento totiž mluví jen o útocích, které
+se konaly; bez tohohle čísla vypadá útok líp, než jaký byl, a nepozná se,
+že problém byl o doteky dřív než u smeče.
+
 Nad spočítanými postřehy může být **psaný rozbor** — text od člověka
 (nebo od asistenta, který se podívá na čísla). To, co pravidla neumí:
 porovnat dva zápasy, odhadnout sílu soupeře, posoudit, jestli se riziko
@@ -130,6 +135,24 @@ ví, že nesedí — smíchaná obrana s volnými míči, příjem zapsaný jen
 u části výměn, sety bez zadaného prvního podání, skóre rozcházející se
 s Výsledkem. A když se počítadla rozejdou s logem, radši se procento
 neřekne, než aby vyšlo „300 %".
+
+## Nehratelná nahrávka
+
+Když nahrávka nejde uhrát — nesmečovatelná, nebo se vůbec nesmečovalo —
+ztracený bod dřív padal na `chyba_minus`, tedy do pytle „ostatní chyby".
+Na útok ho dát nejde: zkazil by procento hráčce, která k zakončení neměla
+podmínky. Cena byla, že se o nahrávce nedalo zjistit nic.
+
+Má proto vlastní akci 🙌 s jedinou variantou `−`. Zapisuje se jen tam, kde
+se tím bod opravdu ztratil, takže je to **bodovaná akce** a patří do skóre
+jako každé jiné minus.
+
+Žádné `+` schválně: nahrávačka se dotkne balonu skoro v každé výměně, takže
+by se klikalo nesystematicky a vzniklo by procento bez jmenovatele — číslo,
+které vypadá jako úspěšnost a není. Je to počet, ne úspěšnost.
+
+Starší zápasy se zpětně nerozplétají: co bylo pod `chyba_minus` nahrávka
+a co jiná chyba, z dat nepoznáme.
 
 ## Týmy
 

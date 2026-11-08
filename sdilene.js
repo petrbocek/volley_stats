@@ -32,6 +32,18 @@ const ACTIONS=[
   // Volný míč (freeball) se zapisuje u útoku, protože tam při zápisu sahá
   // ruka — ale útočný pokus to není, viz komentář u VARIANTS (#122).
   {key:'utok',label:'Útok',icon:'💥',varianty:['plus','neutral','minus','free'],color:'#f97316'},
+  /* Nehratelná nahrávka: nedala se uhrát, nebo se vůbec nesmečovalo. Zapisuje
+     se jen tam, kde se tím bod opravdu ztratil — proto je to bodovaná akce
+     a ne pouhá známka kvality.
+
+     Bez ní padal ten bod na `chyba_minus`, tedy do pytle „ostatní chyby",
+     a o nahrávce se z čísel nedalo zjistit nic. Na útok ho dát nejde: zkazil
+     by procento hráčce, která k zakončení neměla podmínky (#133).
+
+     Jen `−`. Nahrávačka se dotkne balonu skoro v každé výměně, takže `+` by
+     se klikalo nesystematicky a vzniklo by procento bez jmenovatele — číslo,
+     které vypadá jako úspěšnost a není. */
+  {key:'nahravka',label:'Nahrávka',icon:'🙌',varianty:['minus'],color:'#e8590c'},
   {key:'blok',label:'Blok',icon:'🛡️',varianty:['plus'],color:'#7950f2'},
   {key:'chyba',label:'Chyba',icon:'❌',varianty:['minus'],color:'#ff6b6b'},
   // Pole (dig) je vybraný balon. Zatím se vede jen počet, protože je to pokus,
@@ -82,11 +94,11 @@ function popisAkce(field){
    ztracený bod, plus a neutral u příjmu je kvalita. Chyby a body soupeře
    doplňují to, co se na naší straně nezapíše. */
 const SKORE_NASE=['servis_plus','utok_plus','blok_plus'];
-const SKORE_JEJICH=['servis_minus','prijem_minus','utok_minus','chyba_minus','pole_minus'];
+const SKORE_JEJICH=['servis_minus','prijem_minus','utok_minus','nahravka_minus','chyba_minus','pole_minus'];
 
 // Komu výměna přinesla bod; null = neutrální akce, výměna pokračuje.
 const POLE_BOD_MY=['servis_plus','utok_plus','blok_plus'];
-const POLE_BOD_ONI=['servis_minus','prijem_minus','utok_minus','chyba_minus','pole_minus'];
+const POLE_BOD_ONI=['servis_minus','prijem_minus','utok_minus','nahravka_minus','chyba_minus','pole_minus'];
 
 function komuBod(pole){
   if(pole==='souper_chyba')return 'my';
