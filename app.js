@@ -609,7 +609,11 @@ function renderLiveTable(zapasId){
   let thead=`<tr><th class="live-col-hrac"></th>`;
   ACTIONS.forEach(a=>{
     const variants=variantyAkce(a);
-    thead+=`<th colspan="${variants.length}" class="col-action" style="border-left:3px solid ${a.color};color:${a.color}">${a.icon} ${a.label}</th>`;
+    /* Jednosloupcová akce dostane jen ikonu. Na šířku jednoho tlačítka se
+       název nevejde a ořízne se na „NA" nebo „CH", což je horší než nic —
+       jméno nese title. Širší skupiny si text nechají (#116, #133). */
+    const popis=variants.length>1?`${a.icon} ${a.label}`:a.icon;
+    thead+=`<th colspan="${variants.length}" class="col-action" title="${a.label}" style="border-left:3px solid ${a.color};color:${a.color}">${popis}</th>`;
   });
   thead+=`</tr>`;
 
@@ -2503,7 +2507,7 @@ function v2SkoreZmen(pole,delta){
 // Co se během zápasu hodí vidět u jména: kolik výborných a kolik chyb.
 // Celý rozpad na jedenáct čísel je od toho stará mřížka.
 const V2_VYBORNE=['servis_plus','prijem_plus','utok_plus','blok_plus'];
-const V2_CHYBY=['servis_minus','prijem_minus','utok_minus','chyba_minus'];
+const V2_CHYBY=['servis_minus','prijem_minus','utok_minus','nahravka_minus','chyba_minus'];
 
 function v2Soucet(zapasId,hracId,pole){
   return pole.reduce((n,f)=>n+(souhrnCelyZapas
@@ -3198,6 +3202,7 @@ const STATS_SLOUPCE={
   utok_pct:{hodnota:r=>pctCislo(r.up,r.um,r.un),vychozi:'desc'},
   uf:{hodnota:r=>r.uf,vychozi:'desc'},
   bp:{hodnota:r=>r.bp,vychozi:'desc'},
+  nm:{hodnota:r=>r.nm,vychozi:'desc'},
   cm:{hodnota:r=>r.cm,vychozi:'desc'},
   po:{hodnota:r=>r.po,vychozi:'desc'},
   pz:{hodnota:r=>r.pz,vychozi:'desc'},
@@ -3276,14 +3281,15 @@ function spocitejStatistiky(prepis=null){
     // volný míč je stranou: do pokusů ani do procenta útoku nepatří (#122)
     const uf=sum('utok_free');
     const bp=sum('blok_plus');
+    const nm=sum('nahravka_minus');   // nehratelná nahrávka: ztracený bod (#133)
     const cm=sum('chyba_minus');
     const po=sum('pole_neutral');          // vybrané balony po útoku — obrana
     const pz=sum('pole_minus');            // balon spadl: ztracený bod jako každé minus
     const pf=sum('pole_free');             // zvednutý volný míč od soupeře
     // jeden řádek na set, takže počet zápasů je počet různých zapas_id
     const zapasy=new Set(stats.map(s=>s.zapas_id)).size;
-    return {h,sp,sm,sn,pp,pm,pn,up,um,un,uf,bp,cm,po,pz,pf,
-            total:sp+up+bp-sm-pm-um-cm-pz,zapasy};
+    return {h,sp,sm,sn,pp,pm,pn,up,um,un,uf,bp,nm,cm,po,pz,pf,
+            total:sp+up+bp-sm-pm-um-nm-cm-pz,zapasy};
   }).filter(r=>r.zapasy>0);
   // Řadí se tady, ne až při vykreslení, ať CSV export stáhne tabulku v tom
   // pořadí, v jakém ji má člověk před očima.
@@ -3293,9 +3299,10 @@ function spocitejStatistiky(prepis=null){
     zapasy:acc.zapasy+r.zapasy,sp:acc.sp+r.sp,sm:acc.sm+r.sm,sn:acc.sn+r.sn,
     pp:acc.pp+r.pp,pm:acc.pm+r.pm,pn:acc.pn+r.pn,
     up:acc.up+r.up,um:acc.um+r.um,un:acc.un+r.un,uf:acc.uf+r.uf,
-    bp:acc.bp+r.bp,cm:acc.cm+r.cm,po:acc.po+r.po,pz:acc.pz+r.pz,pf:acc.pf+r.pf,
+    bp:acc.bp+r.bp,nm:acc.nm+r.nm,cm:acc.cm+r.cm,po:acc.po+r.po,pz:acc.pz+r.pz,
+    pf:acc.pf+r.pf,
     total:acc.total+r.total
-  }),{zapasy:0,sp:0,sm:0,sn:0,pp:0,pm:0,pn:0,up:0,um:0,un:0,uf:0,bp:0,cm:0,
+  }),{zapasy:0,sp:0,sm:0,sn:0,pp:0,pm:0,pn:0,up:0,um:0,un:0,uf:0,bp:0,nm:0,cm:0,
       po:0,pz:0,pf:0,total:0});
 
   return {stav:'ok',sid,vsechnyHraci,zapasyPoCsoutezi,seasonSouteze,rows,tot,zapasIds,
@@ -3331,7 +3338,7 @@ const CSV_HLAVICKA=['Poř.','Hráčka','Číslo','Záp.',
   'Servis Es','Servis chyby','Servis pokusy','Servis % es',
   'Příjem výb.','Příjem chyby','Příjem pokusy','Příjem % výb.',
   'Útok výb.','Útok chyby','Útok pokusy','Útok % výb.','Volné míče',
-  'Bloky','Pole','Pole chyby','Pole volné míče','Chyby','Celkem'];
+  'Bloky','Pole','Pole chyby','Pole volné míče','Nehratelné nahrávky','Ostatní chyby','Celkem'];
 
 function csvBunka(v){
   const t=(v===null||v===undefined)?'':String(v);
@@ -3346,12 +3353,12 @@ function statsCsv(d){
     r.sp,r.sm,pokusy(r.sp,r.sm,r.sn),pctCislo(r.sp,r.sm,r.sn),
     r.pp,r.pm,pokusy(r.pp,r.pm,r.pn),pctCislo(r.pp,r.pm,r.pn),
     r.up,r.um,pokusy(r.up,r.um,r.un),pctCislo(r.up,r.um,r.un),r.uf,
-    r.bp,r.po,r.pz,r.pf,r.cm,r.total])));
+    r.bp,r.po,r.pz,r.pf,r.nm,r.cm,r.total])));
   radky.push(csvRadek(['','Σ Celkem','',d.tot.zapasy,
     d.tot.sp,d.tot.sm,pokusy(d.tot.sp,d.tot.sm,d.tot.sn),pctCislo(d.tot.sp,d.tot.sm,d.tot.sn),
     d.tot.pp,d.tot.pm,pokusy(d.tot.pp,d.tot.pm,d.tot.pn),pctCislo(d.tot.pp,d.tot.pm,d.tot.pn),
     d.tot.up,d.tot.um,pokusy(d.tot.up,d.tot.um,d.tot.un),pctCislo(d.tot.up,d.tot.um,d.tot.un),d.tot.uf,
-    d.tot.bp,d.tot.po,d.tot.pz,d.tot.pf,d.tot.cm,d.tot.total]));
+    d.tot.bp,d.tot.po,d.tot.pz,d.tot.pf,d.tot.nm,d.tot.cm,d.tot.total]));
   return radky.join('\r\n');                 // CRLF kvůli Excelu
 }
 
@@ -3465,7 +3472,8 @@ function renderStatistiky(){
         ${th('bp','🛡️','rowspan="2"','Bloky')}
         <th colspan="2" data-skupina="pole" title="Pole">🖐️</th>
         ${th('uf','~','rowspan="2"','Volné míče přehozené soupeři — není to útočný pokus')}
-        ${th('cm','❌','rowspan="2"','Chyby')}
+        ${th('nm','🙌','rowspan="2"','Nehratelné nahrávky — ztracený bod, který nejde na útok')}
+        ${th('cm','❌','rowspan="2"','Ostatní chyby')}
         ${th('total','±','rowspan="2"','Celkem — body mínus chyby')}
       </tr>
       <tr>
@@ -3486,6 +3494,7 @@ function renderStatistiky(){
         <td style="${g}">${row.bp}</td>
         <td style="${b}">${row.po}</td><td style="${r}">${row.pz}</td>
         <td style="${muted}">${row.uf}</td>
+        <td style="${r}">${row.nm}</td>
         <td style="${r}">${row.cm}</td>
         <td style="${a}">${row.total}</td>
       </tr>`).join('')}
@@ -3500,6 +3509,7 @@ function renderStatistiky(){
         <td style="${g}">${tot.bp}</td>
         <td style="${b}">${tot.po}</td><td style="${r}">${tot.pz}</td>
         <td style="${muted}">${tot.uf}</td>
+        <td style="${r}">${tot.nm}</td>
         <td style="${r}">${tot.cm}</td>
         <td style="${a}">${tot.total}</td>
       </tr>
@@ -3513,7 +3523,7 @@ function renderStatistiky(){
     :souperZapas(zid,pole)),0);
   html+=`<div class="stats-legenda">🎯 servis · 🤲 příjem · 💥 útok · 🛡️ blok ·
     🖐️ pole (<strong>/</strong> zvednuto po útoku, <strong>−</strong> spadlo) ·
-    <strong>~</strong> volné míče přehozené soupeři · ❌ chyby &nbsp;|&nbsp; <strong>+</strong> výborné ·
+    <strong>~</strong> volné míče přehozené soupeři · 🙌 nehratelné nahrávky · ❌ ostatní chyby &nbsp;|&nbsp; <strong>+</strong> výborné ·
     <strong>−</strong> chyby · <strong>Σ</strong> pokusy ·
     <strong>%</strong> výborné ze všech pokusů · <strong>±</strong> celkem (body − chyby)</div>`;
 
@@ -3566,8 +3576,10 @@ function souhrnSetu(zapasId,set){
     servis:{p:v('servis_plus'),m:v('servis_minus'),n:v('servis_neutral')},
     prijem:{p:v('prijem_plus'),m:v('prijem_minus'),n:v('prijem_neutral')},
     utok:{p:v('utok_plus'),m:v('utok_minus'),n:v('utok_neutral'),f:v('utok_free')},
+    nahravka:v('nahravka_minus'),
     blok:v('blok_plus'),pole:{p:v('pole_neutral'),m:v('pole_minus'),f:v('pole_free')},
-    chybyNase:v('servis_minus')+v('prijem_minus')+v('utok_minus')+v('chyba_minus')+v('pole_minus'),
+    chybyNase:v('servis_minus')+v('prijem_minus')+v('utok_minus')+v('nahravka_minus')
+             +v('chyba_minus')+v('pole_minus'),
     bodySoupere:souperHodnota(zapasId,set,'body'),
     chybySoupere:souperHodnota(zapasId,set,'pocet')};
 }
@@ -3583,7 +3595,8 @@ function hrackyZapasu(zapasId){
   });
   return [...podle.values()].map(r=>{
     const body=r.servis_plus+r.utok_plus+r.blok_plus;
-    const chyby=r.servis_minus+r.prijem_minus+r.utok_minus+r.chyba_minus+r.pole_minus;
+    const chyby=r.servis_minus+r.prijem_minus+r.utok_minus+r.nahravka_minus
+                +r.chyba_minus+r.pole_minus;
     return {...r,h:hracVZapase(zapasId,r.hrac_id)||{jmeno:'Neznámá hráčka'},
             body,chyby,bilance:body-chyby};
   }).filter(r=>r.body||r.chyby||r.pole_neutral||r.prijem_plus||r.prijem_neutral
@@ -3604,7 +3617,7 @@ function vyhodnoceniZapasu(zapasId){
     prijem:{p:scti('prijem','p'),m:scti('prijem','m'),n:scti('prijem','n')},
     utok:{p:scti('utok','p'),m:scti('utok','m'),n:scti('utok','n'),f:scti('utok','f')},
     pole:{p:scti('pole','p'),m:scti('pole','m'),f:scti('pole','f')},
-    blok:scti('blok'),chybyNase:scti('chybyNase'),
+    blok:scti('blok'),nahravka:scti('nahravka'),chybyNase:scti('chybyNase'),
     bodySoupere:scti('bodySoupere'),chybySoupere:scti('chybySoupere'),
     breaky:scti('breaky'),
     sideOut:sideOutZVymen(vymeny,sety.some(s=>s.sideOut)),
@@ -3647,6 +3660,16 @@ function postrehyZeZapasu(d){
     const pct=pctCislo(c.utok.p,c.utok.m,c.utok.n);
     pridej(pct>=45?'dobre':pct<30?'spatne':'fakt',
       `Útok ${pct} % — ${c.utok.p} z ${utokPokusu} pokusů bodových, ${c.utok.m} zkažených.`);
+  }
+  /* Útočné procento mlčí o situacích, kdy se zakončit nedalo. Bez téhle věty
+     se dá přečíst „útok nešel", i když problém byl o doteky dřív (#133). */
+  const nedohrane=c.utok.f+(c.nahravka||0);
+  if(utokPokusu>=20&&nedohrane>=5){
+    const pct=Math.round(nedohrane/(utokPokusu+nedohrane)*100);
+    pridej(pct>=20?'spatne':'fakt',
+      `Zakončit nešlo v ${cesky(nedohrane,'případu','případech','případech')} z ${utokPokusu+nedohrane} `
+      +`(${pct} %) — ${cesky(c.utok.f,'volný míč','volné míče','volných míčů')}`
+      +(c.nahravka?` a ${cesky(c.nahravka,'nehratelná nahrávka','nehratelné nahrávky','nehratelných nahrávek')}`:'')+'.');
   }
   if(c.servis.p+c.servis.m>=5){
     pridej(c.servis.m>c.servis.p*2?'spatne':c.servis.p>=c.servis.m?'dobre':'fakt',
@@ -3768,6 +3791,20 @@ function otevriVyhodnoceni(zapasId){
     ${kostka(`${celek.skore.nase}:${celek.skore.jejich}`,'Míče celkem')}
     ${kostka(celek.sideOut&&celek.sideOut.pct!=null?celek.sideOut.pct+'%':'—','Side-out')}
     ${kostka(pct(celek.utok.p,celek.utok.m,celek.utok.n),'Útok % výb.')}
+    ${(()=>{
+      /* Útočné procento mluví jen o útocích, které se konaly. Volný míč
+         a nehratelná nahrávka jsou situace, kdy se zakončit nedalo — bez nich
+         vypadá útok líp, než jaký byl, a nepozná se, že problém byl dřív
+         než u smeče (#133). */
+      const nedohrane=celek.utok.f+(celek.nahravka||0);
+      const prilezitosti=celek.utok.p+celek.utok.m+celek.utok.n+nedohrane;
+      if(!prilezitosti)return '';
+      return kostka(nedohrane,'Nedohrané útoky',nedohrane?'var(--red)':null,
+        `${cesky(celek.utok.f,'volný míč','volné míče','volných míčů')} a `
+        +`${cesky(celek.nahravka||0,'nehratelná nahrávka','nehratelné nahrávky','nehratelných nahrávek')} `
+        +`z ${cesky(prilezitosti,'příležitosti','příležitostí','příležitostí')} zakončit `
+        +`(${Math.round(nedohrane/prilezitosti*100)} %)`);
+    })()}
     ${kostka(pct(celek.prijem.p,celek.prijem.m,celek.prijem.n),'Příjem % výb.')}
     ${kostka(`${celek.servis.p}/${celek.servis.m}`,'Esa / chyby podání',
       celek.servis.p>celek.servis.m?'var(--green)':'var(--red)',
@@ -3931,13 +3968,13 @@ function profilHracky(hracId,celaSezona=false){
       sp:v('servis_plus'),sm:v('servis_minus'),sn:v('servis_neutral'),
       pp:v('prijem_plus'),pm:v('prijem_minus'),pn:v('prijem_neutral'),
       up:v('utok_plus'),um:v('utok_minus'),un:v('utok_neutral'),
-      bp:v('blok_plus'),cm:v('chyba_minus'),po:v('pole_neutral'),
+      bp:v('blok_plus'),nm:v('nahravka_minus'),cm:v('chyba_minus'),po:v('pole_neutral'),
       pz:v('pole_minus'),pf:v('pole_free'),
       // kolik rozeher, ve kterých vybírala, skončilo naším bodem (#120)
       obrana:konverzeZObrany(vymenyZapasu(z.id,d.selSet),hracId),
       total:v('servis_plus')+v('utok_plus')+v('blok_plus')
-            -v('servis_minus')-v('prijem_minus')-v('utok_minus')-v('chyba_minus')
-            -v('pole_minus')};
+            -v('servis_minus')-v('prijem_minus')-v('utok_minus')-v('nahravka_minus')
+            -v('chyba_minus')-v('pole_minus')};
   });
   /* Souhrnná konverze se počítá ze všech výměn v rozsahu, ne jako průměr
      zápasových procent — zápas se dvěma obranami nemá vážit jako zápas

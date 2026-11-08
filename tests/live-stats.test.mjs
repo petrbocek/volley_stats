@@ -5641,6 +5641,116 @@ await page.evaluate(() => closeModal('modal-hrac'));
 await page.selectOption('#season-select', '1');
 await klid();
 
+/* ── nehratelná nahrávka (#133) ──────────────────────────────────────────
+   Ztracený bod, který nesmí jít na útok: zkazil by procento hráčce, která
+   k zakončení neměla podmínky. */
+pass &= ok('T67a nahrávka má jen minus a je to bod pro soupeře (#133)',
+  await page.evaluate(() => {
+    const n = ACTIONS.find(a => a.key === 'nahravka');
+    const v = variantyAkce(n);
+    return !!n && v.length === 1 && v[0].suf === 'minus' &&
+      komuBod('nahravka_minus') === 'oni' &&
+      SKORE_JEJICH.includes('nahravka_minus') &&
+      POLE_BOD_ONI.includes('nahravka_minus') &&
+      polaAkci().includes('nahravka_minus');
+  }));
+
+await page.click('.nav-tab:nth-child(5)');                  // Live
+// předchozí blok přepínal sezóny, takže se živý zápas musí vybrat znovu
+await page.evaluate(() => {
+  const sel = document.getElementById('live-zapas-select');
+  if (sel) { sel.value = '100'; sel.dispatchEvent(new Event('change')); }
+  else { state.liveZapasId = 100; prekresliLive(100); }
+});
+await page.waitForSelector('#cnt-10-servis_plus');
+await klikSet(1);
+await klid();
+pass &= ok('T67b v mřížce má nahrávka jedno tlačítko, žádné plus (#133)',
+  await page.$('#cnt-10-nahravka_minus') !== null &&
+  await page.$('#cnt-10-nahravka_plus') === null &&
+  await page.$('#cnt-10-nahravka_neutral') === null);
+
+const pred67 = await page.evaluate(() => ({
+  nm: getStatVal(100, 10, 'nahravka_minus', 1),
+  um: getStatVal(100, 10, 'utok_minus', 1),
+  utokPct: pctCislo(getStatVal(100, 10, 'utok_plus', 1),
+                    getStatVal(100, 10, 'utok_minus', 1),
+                    getStatVal(100, 10, 'utok_neutral', 1)),
+  skore: skoreSetu(100, 1),
+}));
+rpcCalls = [];
+await page.click('#cnt-10-nahravka_minus');
+await klid();
+pass &= ok('T67c klik se zapíše jako nahravka_minus a vezme bod (#133)',
+  rpcCalls.some(z => z.some(x => x.pole === 'nahravka_minus' && x.delta === 1)) &&
+  await page.evaluate(() => getStatVal(100, 10, 'nahravka_minus', 1)) === pred67.nm + 1 &&
+  await page.evaluate(() => skoreSetu(100, 1).jejich) === pred67.skore.jejich + 1 &&
+  await page.evaluate(() => skoreSetu(100, 1).nase) === pred67.skore.nase);
+
+// to hlavní: útok se tím nesmí pohnout, jinak nemá celá akce smysl
+pass &= ok('T67d útočné procento ani pokusy se tím nehnou (#133)',
+  await page.evaluate(() => getStatVal(100, 10, 'utok_minus', 1)) === pred67.um &&
+  await page.evaluate(() => pctCislo(getStatVal(100, 10, 'utok_plus', 1),
+                                     getStatVal(100, 10, 'utok_minus', 1),
+                                     getStatVal(100, 10, 'utok_neutral', 1))) === pred67.utokPct);
+
+pass &= ok('T67e počítá se mezi naše chyby, ne stranou (#133)',
+  await page.evaluate(() => {
+    const radky = state.statistiky.filter(s => s.zapas_id === 100 && (s.set_cislo || 1) === 1);
+    const v = f => radky.reduce((n, s) => n + (s[f] || 0), 0);
+    return souhrnSetu(100, 1).chybyNase ===
+      v('servis_minus') + v('prijem_minus') + v('utok_minus') +
+      v('nahravka_minus') + v('chyba_minus') + v('pole_minus');
+  }));
+
+/* „Nedohrané útoky": volné míče a nehratelné nahrávky dohromady. Útočné
+   procento o nich mlčí, takže bez nich vypadá útok líp, než jaký byl. */
+pass &= ok('T67f nedohrané útoky sčítají volné míče a nehratelné nahrávky (#133)',
+  await page.evaluate(() => {
+    const s = souhrnSetu(100, 1);
+    return s.nahravka === getStatVal(100, 10, 'nahravka_minus', 1) +
+      state.statistiky.filter(x => x.zapas_id === 100 && (x.set_cislo || 1) === 1 &&
+        x.hrac_id !== 10).reduce((n, x) => n + (x.nahravka_minus || 0), 0) &&
+      typeof s.utok.f === 'number';
+  }));
+pass &= ok('T67g postřeh o nedohraných útocích má práh a nevzniká z ničeho (#133)',
+  await page.evaluate(() => {
+    const vet = d => postrehyZeZapasu(d).map(p => p.text).join(' ');
+    const zaklad = { utok: { p: 10, m: 5, n: 10, f: 0 }, nahravka: 0,
+      skore: { nase: 25, jejich: 20 }, chybyNase: 10, servis: { p: 2, m: 2, n: 10 },
+      prijem: { p: 5, m: 5, n: 10 }, pole: { p: 0, m: 0, f: 0 }, blok: 0 };
+    const bez = vet({ celek: zaklad, sety: [], hracky: [] });
+    const hodne = vet({ celek: { ...zaklad, utok: { ...zaklad.utok, f: 6 }, nahravka: 4 },
+      sety: [], hracky: [] });
+    return !/Zakončit nešlo/.test(bez) && /Zakončit nešlo v 10 případech/.test(hodne) &&
+      /6 volných míčů/.test(hodne) && /4 nehratelné nahrávky/.test(hodne);
+  }));
+
+// Dlaždice i postřeh mluví česky: 1 nahrávka, 2 nahrávky, 5 nahrávek
+pass &= ok('T67i nedohrané útoky skloňují obě části věty (#35, #133)',
+  await page.evaluate(() => {
+    const t = (f, n) => cesky(f, 'volný míč', 'volné míče', 'volných míčů') + ' a ' +
+      cesky(n, 'nehratelná nahrávka', 'nehratelné nahrávky', 'nehratelných nahrávek');
+    return t(1, 1) === '1 volný míč a 1 nehratelná nahrávka' &&
+      t(2, 4) === '2 volné míče a 4 nehratelné nahrávky' &&
+      t(6, 5) === '6 volných míčů a 5 nehratelných nahrávek';
+  }));
+
+await page.click('.nav-tab:nth-child(7)');                  // Statistiky
+await klid();
+pass &= ok('T67h tabulka má vlastní sloupec a součet sedí (#133)',
+  await page.evaluate(() => {
+    const hlavicky = [...document.querySelectorAll('.stats-table thead th')]
+      .map(e => e.textContent.trim());
+    const i = hlavicky.indexOf('🙌');
+    if (i < 0) return false;
+    const d = spocitejStatistiky();
+    if (d.stav !== 'ok') return false;
+    return d.tot.nm === d.rows.reduce((n, r) => n + r.nm, 0);
+  }));
+await page.click('.nav-tab:nth-child(6)');                  // zpět na Live V2
+await klid();
+
 await b.close();
 console.log(pass ? '\nVŠE PROŠLO' : '\nNĚCO SELHALO');
 process.exit(pass ? 0 : 1);
